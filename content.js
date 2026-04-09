@@ -45,9 +45,13 @@
     return brightness > 128 ? "light" : "dark";
   }
 
+  let currentTheme = "light";
   function applyTheme() {
-    const theme = detectTheme();
-    document.documentElement.setAttribute("data-fbs-theme", theme);
+    currentTheme = detectTheme();
+    // Only set theme on our own elements, never on <html> or <body>
+    document.querySelectorAll(".fbs-wrap, .fbs-panel, .fbs-backdrop").forEach(el => {
+      el.setAttribute("data-fbs-theme", currentTheme);
+    });
   }
 
   // Apply on load and watch for changes
@@ -300,11 +304,11 @@
 
   function debouncedScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 1500);
+    scanTimer = setTimeout(scan, 300);
   }
 
-  setTimeout(scan, 2000);
-  setTimeout(scan, 5000);
+  setTimeout(scan, 500);
+  setTimeout(scan, 1500);
   new MutationObserver(() => debouncedScan()).observe(document.body, { childList: true, subtree: true });
-  setInterval(scan, 8000);
+  setInterval(scan, 3000);
 })();
