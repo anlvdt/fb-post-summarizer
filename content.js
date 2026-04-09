@@ -18,13 +18,11 @@
     return h.toString(36);
   }
 
-  // Detect current site
   const SITE = location.hostname.includes("facebook") ? "facebook"
     : location.hostname.includes("x.com") || location.hostname.includes("twitter") ? "x"
     : location.hostname.includes("linkedin") ? "linkedin"
     : location.hostname.includes("reddit") ? "reddit" : "other";
 
-  // "See more" keywords per site
   const SEE_MORE_KEYWORDS = {
     facebook: ["xem thêm","see more","voir plus","mehr anzeigen","もっと見る","더 보기","ver más","ver mais"],
     x: ["show more"],
@@ -32,29 +30,23 @@
     reddit: [],
     other: ["see more","xem thêm"],
   };
-
   const SEE_MORE = SEE_MORE_KEYWORDS[SITE] || SEE_MORE_KEYWORDS.other;
 
-  // === DARK/LIGHT MODE DETECTION ===
+  // === THEME ===
+  let currentTheme = "light";
   function detectTheme() {
     const bg = getComputedStyle(document.body).backgroundColor;
     if (!bg || bg === "rgba(0, 0, 0, 0)") return "dark";
-    const match = bg.match(/\d+/g);
-    if (!match) return "dark";
-    const brightness = (parseInt(match[0]) + parseInt(match[1]) + parseInt(match[2])) / 3;
-    return brightness > 128 ? "light" : "dark";
+    const m = bg.match(/\d+/g);
+    if (!m) return "dark";
+    return ((+m[0] + +m[1] + +m[2]) / 3) > 128 ? "light" : "dark";
   }
-
-  let currentTheme = "light";
   function applyTheme() {
     currentTheme = detectTheme();
-    // Only set theme on our own elements, never on <html> or <body>
     document.querySelectorAll(".fbs-wrap, .fbs-panel, .fbs-backdrop").forEach(el => {
       el.setAttribute("data-fbs-theme", currentTheme);
     });
   }
-
-  // Apply on load and watch for changes
   setTimeout(applyTheme, 1000);
   new MutationObserver(applyTheme).observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
 
@@ -63,8 +55,7 @@
     const results = [];
     const root = document.querySelector('div[role="main"]')
       || document.querySelector('div[id^="mount_0_0"]')
-      || document.querySelector("main")
-      || document.body;
+      || document.querySelector("main") || document.body;
     const els = root.querySelectorAll("div, span, button");
     for (const el of els) {
       if (el.dataset.fbsScanned) continue;
@@ -128,14 +119,15 @@
     const patterns = [...SEE_MORE, "show less", "ẩn bớt", "see less"];
     let t = text;
     for (const p of patterns) {
-      const re = new RegExp("\\s*" + p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$", "i");
-      t = t.replace(re, "");
+      const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      t = t.replace(new RegExp("\\s*" + escaped + "\\s*$", "i"), "");
     }
     return t.trim();
   }
 
-  // === SINGLE REUSABLE OVERLAY ===
+  // === OVERLAY (panel, backdrop, streaming) ===
   let backdrop = null, panel = null, panelBody = null;
+  let isSummarizing = false, currentPort = null;
 
   function ensureOverlay() {
     if (panel && panel.isConnected) return;
@@ -150,47 +142,86 @@
       '<div class="fbs-panel-head"><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> Tóm tắt AI</span>' +
       '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
       '<div class="fbs-panel-body"></div>' +
-      '<div class="fbs-panel-footer"><button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button></div>';
+      '<div class="fbs-panel-footer">' +
+      '<button class="fbs-tts-btn" title="Đọc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>' +
+      '<button class="fbs-stop-btn">Dừng</button>' +
+      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
+      '</div>';
     document.body.appendChild(panel);
     panelBody = panel.querySelector(".fbs-panel-body");
     panel.querySelector(".fbs-close").addEventListener("click", closeOverlay);
     panel.querySelector(".fbs-copy-btn").addEventListener("click", copyResult);
+    panel.querySelector(".fbs-stop-btn").addEventListener("click", stopSummarize);
+    panel.querySelector(".fbs-tts-btn").addEventListener("click", toggleTTS);
   }
 
-  function copyResult() {
-    const text = panelBody.innerText || "";
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = panel.querySelector(".fbs-copy-btn");
-      const orig = btn.innerHTML;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied';
-      setTimeout(() => { btn.innerHTML = orig; }, 1500);
-    });
-  }
-
-  function openOverlay(html) {
+  function openOverlay(html, streaming) {
     ensureOverlay();
     panelBody.innerHTML = html;
     backdrop.classList.add("fbs-visible");
     panel.classList.add("fbs-visible");
-    panel.querySelector(".fbs-panel-footer").style.display = html.includes("fbs-result") ? "flex" : "none";
+    const footer = panel.querySelector(".fbs-panel-footer");
+    const hasContent = html.includes("fbs-result") || html.includes("fbs-loading") || streaming;
+    footer.style.display = hasContent ? "flex" : "none";
+    panel.querySelector(".fbs-stop-btn").style.display = (isSummarizing || streaming) ? "inline-flex" : "none";
+    panel.querySelector(".fbs-copy-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
+    panel.querySelector(".fbs-tts-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
+    if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
   }
 
   function closeOverlay() {
+    stopSummarize();
+    if (speechSynthesis.speaking) speechSynthesis.cancel();
     if (panel) panel.classList.remove("fbs-visible");
     if (backdrop) backdrop.classList.remove("fbs-visible");
+    const tts = panel?.querySelector(".fbs-tts-btn");
+    if (tts) tts.classList.remove("fbs-playing");
+  }
+
+  function stopSummarize() {
+    if (!isSummarizing) return;
+    isSummarizing = false;
+    if (currentPort) { try { currentPort.disconnect(); } catch (_) {} currentPort = null; }
+    if (panelBody) {
+      openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, "") +
+        '<div class="fbs-error">Đã dừng.</div>', false);
+    }
+  }
+
+  function copyResult() {
+    const text = panelBody?.innerText || "";
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = panel.querySelector(".fbs-copy-btn");
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied';
+      setTimeout(() => { btn.innerHTML = orig; }, 1500);
+    });
+  }
+
+  function toggleTTS() {
+    const btn = panel.querySelector(".fbs-tts-btn");
+    if (speechSynthesis.speaking) { speechSynthesis.cancel(); btn.classList.remove("fbs-playing"); return; }
+    const text = panelBody?.innerText || "";
+    if (!text) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "vi-VN"; u.rate = 1.1;
+    u.onend = () => btn.classList.remove("fbs-playing");
+    speechSynthesis.speak(u);
+    btn.classList.add("fbs-playing");
   }
 
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
 
   // === HELPERS ===
+  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
   function fmt(t) {
-    return t.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    return esc(t)
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
       .replace(/^[-•]\s*/gm, "• ").replace(/\n/g, "<br>");
   }
 
-  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
-
+  // === BUTTONS ===
   function createBtn() {
     const d = document.createElement("div");
     d.className = "fbs-btn";
@@ -217,39 +248,60 @@
     return d;
   }
 
-  async function safeSendMessage(msg) {
-    if (!isContextValid()) return { error: "Extension đã được cập nhật. Vui lòng reload trang (F5)." };
-    try {
-      return await chrome.runtime.sendMessage(msg);
-    } catch (e) {
-      if (e.message?.includes("invalidated") || e.message?.includes("does not exist"))
-        return { error: "Extension đã được cập nhật. Vui lòng reload trang (F5)." };
-      return { error: "Lỗi: " + e.message };
-    }
-  }
-
+  // === STREAMING SUMMARIZE ===
   async function summarizeText(text) {
     if (!text || text.length < 50) {
-      openOverlay('<div class="fbs-error">Text quá ngắn để tóm tắt.</div>');
+      openOverlay('<div class="fbs-error">Text quá ngắn để tóm tắt.</div>', false);
       return;
     }
     const key = hashText(text);
     if (summaryCache.has(key)) {
-      openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(key)) + '</div>');
+      openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(key)) + '</div>', false);
       return;
     }
-    openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang tóm tắt...</span></div>');
-    const r = await safeSendMessage({ action: "summarize", text });
-    if (r && r.error) openOverlay('<div class="fbs-error">' + esc(r.error) + '</div>');
-    else if (r && r.summary) { summaryCache.set(key, r.summary); openOverlay('<div class="fbs-result">' + fmt(r.summary) + '</div>'); }
-    else openOverlay('<div class="fbs-error">Không nhận được phản hồi.</div>');
+    if (!isContextValid()) {
+      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false);
+      return;
+    }
+
+    isSummarizing = true;
+    openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang kết nối AI...</span></div>', false);
+
+    currentPort = chrome.runtime.connect({ name: "summarize-stream" });
+    currentPort.postMessage({ action: "summarize", text, site: SITE });
+
+    let first = true;
+    currentPort.onMessage.addListener((msg) => {
+      if (msg.action === "chunk") {
+        if (first) { first = false; }
+        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '<span class="fbs-cursor"></span></div>', true);
+      } else if (msg.action === "done") {
+        isSummarizing = false;
+        summaryCache.set(key, msg.full);
+        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '</div>', false);
+        try { currentPort.disconnect(); } catch (_) {} currentPort = null;
+      } else if (msg.action === "error") {
+        isSummarizing = false;
+        openOverlay('<div class="fbs-error">' + esc(msg.error) + '</div>', false);
+        try { currentPort.disconnect(); } catch (_) {} currentPort = null;
+      }
+    });
+
+    currentPort.onDisconnect.addListener(() => {
+      if (isSummarizing) {
+        isSummarizing = false;
+        if (panelBody && !panelBody.innerHTML.includes("fbs-result")) {
+          openOverlay('<div class="fbs-error">Kết nối bị ngắt.</div>', false);
+        } else if (panelBody) {
+          openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, ""), false);
+        }
+      }
+    });
   }
 
-  // === CONTEXT MENU HANDLER (right-click summarize) ===
+  // === CONTEXT MENU ===
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === "summarize-selection" && msg.text) {
-      summarizeText(msg.text);
-    }
+    if (msg.action === "summarize-selection" && msg.text) summarizeText(msg.text);
   });
 
   // === INJECT BUTTON ===
@@ -266,10 +318,9 @@
     }
     wrap.appendChild(isInline ? createInlineBtn() : createBtn());
 
-    // Try multiple insertion points, in order of preference:
     let inserted = false;
 
-    // 1) Wrap "Xem thêm" + button together so they never split across lines
+    // 1) Wrap "Xem thêm" + button together (nowrap)
     if (!inserted && seeMoreOriginal && seeMoreOriginal.parentElement) {
       try {
         const container = document.createElement("span");
@@ -278,11 +329,10 @@
         container.appendChild(seeMoreOriginal);
         container.appendChild(wrap);
         inserted = true;
-        console.log("[FBS] Button wrapped with See More text element");
-      } catch (e) { console.log("[FBS] Failed wrap seeMoreOriginal:", e); }
+      } catch (e) {}
     }
 
-    // 2) Same but with the clickable [role="button"] wrapping "Xem thêm"
+    // 2) After clickable
     if (!inserted && seeMoreClickable && seeMoreClickable.parentElement) {
       try {
         const container = document.createElement("span");
@@ -291,42 +341,46 @@
         container.appendChild(seeMoreClickable);
         container.appendChild(wrap);
         inserted = true;
-        console.log("[FBS] Button wrapped with See More clickable");
-      } catch (e) { console.log("[FBS] Failed wrap seeMoreClickable:", e); }
-    }
-
-    // 3) Append inside the text container
-    if (!inserted && textContainer) {
-      try {
-        textContainer.appendChild(wrap);
-        inserted = true;
-        console.log("[FBS] Button appended to textContainer");
       } catch (e) {}
     }
 
-    // 4) Fallback: absolute position in top-right of target
+    // 3) Append to text container
+    if (!inserted && textContainer) {
+      try { textContainer.appendChild(wrap); inserted = true; } catch (e) {}
+    }
+
+    // 4) Fallback absolute
     if (!inserted) {
       wrap.className = "fbs-wrap";
       const pos = getComputedStyle(target).position;
       if (pos === "static" || pos === "") target.style.position = "relative";
       target.appendChild(wrap);
-      console.log("[FBS] Button fallback: absolute in target");
     }
 
     const btnEl = wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
-    btnEl.addEventListener("click", async () => {
-      openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang tóm tắt...</span></div>');
+    btnEl.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang tóm tắt...</span></div>', false);
 
+      // Expand "See more" to get full text
       let savedHTML = null;
       if (seeMoreClickable && textContainer) {
         savedHTML = textContainer.innerHTML;
-        try { seeMoreClickable.click(); } catch (e) {}
+        try { seeMoreClickable.click(); } catch (_) {}
         await new Promise(r => setTimeout(r, 800));
       }
 
       const text = cleanText((textContainer || target).innerText || "");
 
-      if (savedHTML && textContainer) textContainer.innerHTML = savedHTML;
+      // Restore collapsed state
+      if (savedHTML && textContainer) {
+        textContainer.innerHTML = savedHTML;
+        // Re-inject button since innerHTML wipe removed it
+        setTimeout(() => {
+          injected.delete(target);
+          scan();
+        }, 100);
+      }
 
       await summarizeText(text);
     });
@@ -337,11 +391,11 @@
     if (!textContainer) return;
     if ((textContainer.innerText || "").trim().length < MIN_LEN / 2) return;
     const target = findInjectTarget(textContainer);
-    if (injected.has(target) || target.querySelector(".fbs-wrap")) return;
+    if (injected.has(target) || target.querySelector(".fbs-wrap") || target.querySelector(".fbs-btn-inline")) return;
     inject(target, findClickable(sm), textContainer, sm);
   }
 
-  // === REDDIT: detect long posts by text length (no "see more") ===
+  // === REDDIT ===
   function scanRedditPosts() {
     const posts = document.querySelectorAll('shreddit-post, div[data-testid="post-container"]');
     for (const post of posts) {
@@ -349,8 +403,7 @@
       post.dataset.fbsScanned = "1";
       const textEl = post.querySelector('[data-testid="post-content"], .md, [slot="text-body"]');
       if (!textEl) continue;
-      const text = (textEl.innerText || "").trim();
-      if (text.length < MIN_LEN) continue;
+      if ((textEl.innerText || "").trim().length < MIN_LEN) continue;
       inject(post, null, textEl);
     }
   }
@@ -359,8 +412,7 @@
   function scan() {
     if (!isContextValid()) return;
     if (SITE === "reddit") scanRedditPosts();
-    const seeMoreEls = findNewSeeMoreElements();
-    seeMoreEls.forEach(processSeeMore);
+    findNewSeeMoreElements().forEach(processSeeMore);
   }
 
   function debouncedScan() {
@@ -368,7 +420,6 @@
     scanTimer = setTimeout(scan, 150);
   }
 
-  // Aggressive early scanning — Facebook loads feed content progressively
   scan();
   setTimeout(scan, 300);
   setTimeout(scan, 700);
@@ -376,5 +427,4 @@
   setTimeout(scan, 2000);
   new MutationObserver(() => debouncedScan()).observe(document.body, { childList: true, subtree: true });
   setInterval(scan, 2500);
-  console.log("[FBS] v1.3-inline loaded ✅");
 })();

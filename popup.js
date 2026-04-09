@@ -31,6 +31,13 @@ chrome.storage.sync.get(KEYS, (d) => {
   if (d.outputLang) outputLangSel.value = d.outputLang;
   if (d.customPrompt) customPromptEl.value = d.customPrompt;
   updateLinks();
+
+  // Onboarding: highlight API key if empty
+  if (!d.apiKey) {
+    showStatus("👋 Nhập API Key để bắt đầu sử dụng!", "success");
+    apiKeyInput.style.borderColor = "#a855f7";
+    apiKeyInput.focus();
+  }
 });
 
 providerSel.addEventListener("change", updateLinks);
@@ -48,24 +55,24 @@ function updateLinks() {
 saveBtn.addEventListener("click", () => {
   const apiKey = apiKeyInput.value.trim();
   if (!apiKey) { showStatus("Nhập API Key", "error"); return; }
+  apiKeyInput.style.borderColor = "";
   chrome.storage.sync.set({
     apiKey,
     minLength: parseInt(minLengthInput.value) || 400,
     provider: providerSel.value,
     outputLang: outputLangSel.value,
     customPrompt: customPromptEl.value.trim(),
-  }, () => showStatus("Đã lưu", "success"));
+  }, () => showStatus("Đã lưu ✓", "success"));
 });
 
 testBtn.addEventListener("click", async () => {
   const apiKey = apiKeyInput.value.trim();
   if (!apiKey) { showStatus("Nhập API Key trước", "error"); return; }
-  // Save first so background can use it
   await chrome.storage.sync.set({ apiKey, provider: providerSel.value });
   showStatus("Đang test...", "success");
   try {
-    const r = await chrome.runtime.sendMessage({ action: "summarize", text: "Test. Reply: OK" });
-    showStatus(r?.summary ? "Kết nối OK" : (r?.error || "Lỗi"), r?.summary ? "success" : "error");
+    const r = await chrome.runtime.sendMessage({ action: "summarize", text: "Test connection. Reply: OK" });
+    showStatus(r?.summary ? "Kết nối OK ✓" : (r?.error || "Lỗi"), r?.summary ? "success" : "error");
   } catch (e) { showStatus("Lỗi: " + e.message, "error"); }
 });
 
@@ -73,23 +80,65 @@ function showStatus(msg, type) {
   status.textContent = msg;
   status.className = "status " + type;
   status.style.display = "block";
-  setTimeout(() => { status.style.display = "none"; }, 3000);
+  if (!msg.includes("👋")) setTimeout(() => { status.style.display = "none"; }, 3000);
 }
 
 // === HISTORY ===
+function esc(s) { const d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
+let historyData = [];
+
 async function loadHistory() {
   const data = await chrome.storage.local.get("history");
+  historyData = data.history || [];
   const list = document.getElementById("historyList");
-  const history = data.history || [];
-  if (history.length === 0) { list.innerHTML = '<p class="empty">Chưa có lịch sử</p>'; return; }
-  list.innerHTML = history.map((h, i) =>
-    '<div class="history-item">' +
-    '<div class="history-date">' + new Date(h.date).toLocaleString("vi") + '</div>' +
-    '<div class="history-text">' + (h.text || "").substring(0, 80) + '...</div>' +
-    '<div class="history-summary">' + (h.summary || "").substring(0, 120) + '...</div>' +
+  const detail = document.getElementById("historyDetail");
+  const actions = document.getElementById("historyActions");
+  detail.style.display = "none";
+  list.style.display = "block";
+  actions.style.display = "block";
+
+  if (historyData.length === 0) {
+    list.innerHTML = '<p class="empty">Chưa có lịch sử</p>';
+    return;
+  }
+  list.innerHTML = historyData.map((h, i) =>
+    '<div class="history-item" data-idx="' + i + '">' +
+    '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") + '</div>' +
+    '<div class="history-text">' + esc((h.text || "").substring(0, 80)) + '...</div>' +
+    '<div class="history-summary">' + esc((h.summary || "").substring(0, 120)) + '...</div>' +
     '</div>'
   ).join("");
+
+  list.querySelectorAll(".history-item").forEach(item => {
+    item.addEventListener("click", () => showHistoryDetail(+item.dataset.idx));
+  });
 }
+
+function showHistoryDetail(idx) {
+  const h = historyData[idx];
+  if (!h) return;
+  document.getElementById("historyList").style.display = "none";
+  document.getElementById("historyActions").style.display = "none";
+  const detail = document.getElementById("historyDetail");
+  detail.style.display = "block";
+  document.getElementById("historyDetailDate").textContent = new Date(h.date).toLocaleString("vi") + " · " + (h.site || "");
+  document.getElementById("historyDetailBody").textContent = h.summary || "";
+}
+
+document.getElementById("historyBack").addEventListener("click", () => {
+  document.getElementById("historyDetail").style.display = "none";
+  document.getElementById("historyList").style.display = "block";
+  document.getElementById("historyActions").style.display = "block";
+});
+
+document.getElementById("historyDetailCopy").addEventListener("click", () => {
+  const text = document.getElementById("historyDetailBody").textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById("historyDetailCopy");
+    btn.textContent = "Copied ✓";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+  });
+});
 
 document.getElementById("exportBtn").addEventListener("click", async () => {
   const data = await chrome.storage.local.get("history");

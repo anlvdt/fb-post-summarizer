@@ -77,8 +77,16 @@
     <!-- History Tab -->
     <div class="tab-content" id="tab-history">
       <div id="historyList" class="history-list"></div>
-      <button id="exportBtn" class="test-btn">Export JSON</button>
-      <button id="clearBtn" class="test-btn" style="margin-top:4px;color:#ff6b6b">Xóa lịch sử</button>
+      <div id="historyDetail" class="history-detail" style="display:none">
+        <button id="historyBack" class="test-btn" style="margin-bottom:6px">← Quay lại</button>
+        <div class="history-detail-date" id="historyDetailDate"></div>
+        <div class="history-detail-body" id="historyDetailBody"></div>
+        <button id="historyDetailCopy" class="test-btn" style="margin-top:6px">Copy</button>
+      </div>
+      <div id="historyActions">
+        <button id="exportBtn" class="test-btn">Export JSON</button>
+        <button id="clearBtn" class="test-btn" style="margin-top:4px;color:#ff6b6b">Xóa lịch sử</button>
+      </div>
     </div>
   </div>
   <script src="popup.js"></script>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Social Post Summarizer",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Tóm tắt bài viết dài trên Facebook, X, LinkedIn, Reddit bằng AI",
   "author": "Lê Ẩn",
   "permissions": ["storage", "contextMenus"],
