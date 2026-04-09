@@ -200,7 +200,20 @@
       '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
       '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>' +
-      '<line x1="16" y1="17" x2="8" y2="17"/></svg><span>Tóm tắt</span>';
+      '<line x1="16" y1="17" x2="8" y2="17"/></svg><span> Tóm tắt</span>';
+    return d;
+  }
+
+  function createInlineBtn() {
+    const d = document.createElement("span");
+    d.className = "fbs-btn-inline";
+    d.setAttribute("role", "button");
+    d.setAttribute("tabindex", "0");
+    d.style.cssText = "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
+    d.innerHTML = ' · <span style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><svg style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0;stroke:#4fc3f7" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Tóm tắt</span>';
+    const pill = d.querySelector("span");
+    d.addEventListener("mouseenter", () => { pill.style.background = "rgba(79,195,247,0.28)"; });
+    d.addEventListener("mouseleave", () => { pill.style.background = "rgba(79,195,247,0.13)"; });
     return d;
   }
 
@@ -240,20 +253,68 @@
   });
 
   // === INJECT BUTTON ===
-  function inject(target, seeMoreClickable, textContainer) {
+  function inject(target, seeMoreClickable, textContainer, seeMoreOriginal) {
     if (injected.has(target)) return;
-    if (target.querySelector(".fbs-wrap")) return;
     injected.add(target);
 
-    const wrap = document.createElement("div");
-    wrap.className = "fbs-wrap";
-    wrap.appendChild(createBtn());
+    const isInline = !!(seeMoreOriginal && seeMoreOriginal.parentElement);
+    const wrap = document.createElement("span");
+    if (isInline) {
+      wrap.style.cssText = "display:inline;position:relative;vertical-align:baseline;";
+    } else {
+      wrap.className = "fbs-wrap";
+    }
+    wrap.appendChild(isInline ? createInlineBtn() : createBtn());
 
-    const pos = getComputedStyle(target).position;
-    if (pos === "static" || pos === "") target.style.position = "relative";
-    target.appendChild(wrap);
+    // Try multiple insertion points, in order of preference:
+    let inserted = false;
 
-    wrap.querySelector(".fbs-btn").addEventListener("click", async () => {
+    // 1) Wrap "Xem thêm" + button together so they never split across lines
+    if (!inserted && seeMoreOriginal && seeMoreOriginal.parentElement) {
+      try {
+        const container = document.createElement("span");
+        container.style.cssText = "display:inline-flex;align-items:baseline;white-space:nowrap;";
+        seeMoreOriginal.parentElement.insertBefore(container, seeMoreOriginal);
+        container.appendChild(seeMoreOriginal);
+        container.appendChild(wrap);
+        inserted = true;
+        console.log("[FBS] Button wrapped with See More text element");
+      } catch (e) { console.log("[FBS] Failed wrap seeMoreOriginal:", e); }
+    }
+
+    // 2) Same but with the clickable [role="button"] wrapping "Xem thêm"
+    if (!inserted && seeMoreClickable && seeMoreClickable.parentElement) {
+      try {
+        const container = document.createElement("span");
+        container.style.cssText = "display:inline-flex;align-items:baseline;white-space:nowrap;";
+        seeMoreClickable.parentElement.insertBefore(container, seeMoreClickable);
+        container.appendChild(seeMoreClickable);
+        container.appendChild(wrap);
+        inserted = true;
+        console.log("[FBS] Button wrapped with See More clickable");
+      } catch (e) { console.log("[FBS] Failed wrap seeMoreClickable:", e); }
+    }
+
+    // 3) Append inside the text container
+    if (!inserted && textContainer) {
+      try {
+        textContainer.appendChild(wrap);
+        inserted = true;
+        console.log("[FBS] Button appended to textContainer");
+      } catch (e) {}
+    }
+
+    // 4) Fallback: absolute position in top-right of target
+    if (!inserted) {
+      wrap.className = "fbs-wrap";
+      const pos = getComputedStyle(target).position;
+      if (pos === "static" || pos === "") target.style.position = "relative";
+      target.appendChild(wrap);
+      console.log("[FBS] Button fallback: absolute in target");
+    }
+
+    const btnEl = wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
+    btnEl.addEventListener("click", async () => {
       openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang tóm tắt...</span></div>');
 
       let savedHTML = null;
@@ -277,7 +338,7 @@
     if ((textContainer.innerText || "").trim().length < MIN_LEN / 2) return;
     const target = findInjectTarget(textContainer);
     if (injected.has(target) || target.querySelector(".fbs-wrap")) return;
-    inject(target, findClickable(sm), textContainer);
+    inject(target, findClickable(sm), textContainer, sm);
   }
 
   // === REDDIT: detect long posts by text length (no "see more") ===
@@ -304,11 +365,16 @@
 
   function debouncedScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 300);
+    scanTimer = setTimeout(scan, 150);
   }
 
-  setTimeout(scan, 500);
-  setTimeout(scan, 1500);
+  // Aggressive early scanning — Facebook loads feed content progressively
+  scan();
+  setTimeout(scan, 300);
+  setTimeout(scan, 700);
+  setTimeout(scan, 1200);
+  setTimeout(scan, 2000);
   new MutationObserver(() => debouncedScan()).observe(document.body, { childList: true, subtree: true });
-  setInterval(scan, 3000);
+  setInterval(scan, 2500);
+  console.log("[FBS] v1.3-inline loaded ✅");
 })();

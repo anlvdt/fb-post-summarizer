@@ -5,6 +5,16 @@
   z-index: 999;
 }
 
+/* Inline variant: placed after "Xem thêm" */
+.fbs-wrap.fbs-wrap-inline {
+  position: relative;
+  top: auto;
+  right: auto;
+  display: inline;
+  margin-left: 2px;
+  vertical-align: baseline;
+}
+
 .fbs-btn {
   display: inline-flex;
   align-items: center;
@@ -29,6 +39,28 @@
 .fbs-btn:hover { opacity: 1; box-shadow: 0 4px 16px rgba(108, 92, 231, 0.6); transform: scale(1.05); }
 .fbs-btn:active { transform: scale(1); }
 .fbs-btn svg { flex-shrink: 0; width: 12px; height: 12px; }
+
+/* Inline button: looks like Facebook's "Xem thêm" text link */
+.fbs-wrap-inline .fbs-btn {
+  background: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  line-height: inherit !important;
+  opacity: 1 !important;
+  vertical-align: baseline;
+  gap: 3px;
+}
+.fbs-wrap-inline .fbs-btn:hover { opacity: 0.7 !important; transform: none !important; }
+.fbs-wrap-inline .fbs-btn:active { transform: none !important; }
+.fbs-wrap-inline .fbs-btn svg { width: 13px; height: 13px; stroke: currentColor; }
+.fbs-wrap-inline .fbs-btn span { font-weight: 600 !important; }
 
 .fbs-panel {
   display: none;

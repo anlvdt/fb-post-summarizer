@@ -11,6 +11,7 @@ body {
 .header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .logo { display: flex; }
 h1 { font-size: 14px; font-weight: 700; color: #fff; }
+.author { font-size: 11px; color: #b0b3b8; margin-bottom: 12px; }
 
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
