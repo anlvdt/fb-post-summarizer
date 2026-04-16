@@ -11,6 +11,24 @@ body {
   color: #e0e0e0;
 }
 
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3a5a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a6a;
+}
+
 .popup {
   padding: 16px;
 }
