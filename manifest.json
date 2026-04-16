@@ -24,6 +24,7 @@
       "matches": [
         "https://www.facebook.com/*",
         "https://m.facebook.com/*",
+        "https://*.threads.net/*",
         "https://x.com/*",
         "https://twitter.com/*",
         "https://www.linkedin.com/*",
@@ -50,5 +51,21 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "commands": {
+    "summarize-shortcut": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Viết Status MXH từ văn bản bôi đen"
+    },
+    "affiliate-shortcut": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "Chế bài Affiliate từ văn bản bôi đen"
+    }
   }
 }

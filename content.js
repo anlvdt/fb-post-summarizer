@@ -19,12 +19,14 @@
   }
 
   const SITE = location.hostname.includes("facebook") ? "facebook"
-    : location.hostname.includes("x.com") || location.hostname.includes("twitter") ? "x"
-      : location.hostname.includes("linkedin") ? "linkedin"
-        : location.hostname.includes("reddit") ? "reddit" : "other";
+    : location.hostname.includes("threads") ? "threads"
+      : location.hostname.includes("x.com") || location.hostname.includes("twitter") ? "x"
+        : location.hostname.includes("linkedin") ? "linkedin"
+          : location.hostname.includes("reddit") ? "reddit" : "other";
 
   const SEE_MORE_KEYWORDS = {
     facebook: ["xem thêm", "see more", "voir plus", "mehr anzeigen", "もっと見る", "더 보기", "ver más", "ver mais"],
+    threads: ["more", "xem thêm"],
     x: ["show more"],
     linkedin: ["see more", "xem thêm", "...more"],
     reddit: [],
@@ -145,12 +147,13 @@
     panel = document.createElement("div");
     panel.className = "fbs-panel";
     panel.innerHTML =
-      '<div class="fbs-panel-head"><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> Tóm tắt AI</span>' +
+      '<div class="fbs-panel-head"><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> <span class="fbs-title-text">Tóm tắt AI</span></span>' +
       '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
       '<div class="fbs-panel-body"></div>' +
       '<div class="fbs-panel-footer">' +
       '<button class="fbs-tts-btn" title="Đọc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>' +
       '<button class="fbs-stop-btn">Dừng</button>' +
+      '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
       '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
       '</div>';
     document.body.appendChild(panel);
@@ -159,10 +162,22 @@
     panel.querySelector(".fbs-copy-btn").addEventListener("click", copyResult);
     panel.querySelector(".fbs-stop-btn").addEventListener("click", stopSummarize);
     panel.querySelector(".fbs-tts-btn").addEventListener("click", toggleTTS);
+    panel.querySelector(".fbs-regen-btn").addEventListener("click", regenerate);
   }
 
-  function openOverlay(html, streaming) {
+  let lastSummarizeParams = null;
+  function regenerate() {
+    if (!lastSummarizeParams) return;
+    const { text, type } = lastSummarizeParams;
+    const key = hashText(text) + "_" + type;
+    summaryCache.delete(key);
+    summarizeText(text, type);
+  }
+
+  function openOverlay(html, streaming, type = "summary") {
     ensureOverlay();
+    const titleText = panel.querySelector(".fbs-title-text");
+    if (titleText) titleText.textContent = type === "affiliate" ? "Chế bài Affiliate" : "Viết Status MXH";
     panelBody.innerHTML = html;
     backdrop.classList.add("fbs-visible");
     panel.classList.add("fbs-visible");
@@ -171,6 +186,7 @@
     footer.style.display = hasContent ? "flex" : "none";
     panel.querySelector(".fbs-stop-btn").style.display = (isSummarizing || streaming) ? "inline-flex" : "none";
     panel.querySelector(".fbs-copy-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
+    panel.querySelector(".fbs-regen-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
     panel.querySelector(".fbs-tts-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
     if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
   }
@@ -237,7 +253,7 @@
       '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
       '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>' +
-      '<line x1="16" y1="17" x2="8" y2="17"/></svg><span> Tóm tắt</span>';
+      '<line x1="16" y1="17" x2="8" y2="17"/></svg><span title="Click: Viết Status | Shift+Click: Affiliate"> Tóm tắt</span>';
     return d;
   }
 
@@ -247,7 +263,7 @@
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
     d.style.cssText = "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
-    d.innerHTML = ' · <span style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><svg style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0;stroke:#4fc3f7" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Tóm tắt</span>';
+    d.innerHTML = ' · <span title="Click: Viết Status | Shift+Click: Affiliate" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><svg style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0;stroke:#4fc3f7" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Tóm tắt</span>';
     const pill = d.querySelector("span");
     d.addEventListener("mouseenter", () => { pill.style.background = "rgba(79,195,247,0.28)"; });
     d.addEventListener("mouseleave", () => { pill.style.background = "rgba(79,195,247,0.13)"; });
@@ -274,17 +290,18 @@
     }
     const key = hashText(text) + "_" + type;
     if (summaryCache.has(key)) {
-      openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(key)) + '</div>', false);
+      openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(key)) + '</div>', false, type);
       return;
     }
     if (!isContextValid()) {
-      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false);
+      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
       return;
     }
 
+    lastSummarizeParams = { text, type };
     isSummarizing = true;
-    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : "Đang kết nối AI...";
-    openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false);
+    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : "Đang viết Status...";
+    openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
 
     // Wake SW before connecting port (MV3 SW dies after ~30s idle)
     await wakeServiceWorker();
@@ -312,17 +329,25 @@
       if (isSummarizing) {
         isSummarizing = false;
         if (panelBody && !panelBody.innerHTML.includes("fbs-result")) {
-          openOverlay('<div class="fbs-error">Kết nối bị ngắt.</div>', false);
+          openOverlay('<div class="fbs-error">Kết nối bị ngắt.</div>', false, type);
         } else if (panelBody) {
-          openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, ""), false);
+          openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, ""), false, type);
         }
       }
     });
   }
 
-  // === CONTEXT MENU & UNSHORTEN ===
+  // === MESSAGES (CONTEXT MENU, SHORTCUTS & UNSHORTEN) ===
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === "summarize-selection" && msg.text) summarizeText(msg.text, msg.type);
+    if (msg.action === "shortcut-summarize-shortcut") {
+      const text = window.getSelection().toString();
+      if (text) summarizeText(text, "summary");
+    }
+    if (msg.action === "shortcut-affiliate-shortcut") {
+      const text = window.getSelection().toString();
+      if (text) summarizeText(text, "affiliate");
+    }
     if (msg.action === "unshorten-result") {
       if (msg.error) {
         alert(msg.error);
@@ -381,7 +406,9 @@
     const btnEl = wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
     btnEl.addEventListener("click", async (e) => {
       e.stopPropagation();
-      openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>Đang tóm tắt...</span></div>', false);
+      const type = e.shiftKey ? "affiliate" : "summary";
+      const title = type === "affiliate" ? "Đang viết bài Affiliate..." : "Đang viết Status...";
+      openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
 
       // Expand to get full text
       if (seeMoreClickable) {
@@ -401,7 +428,7 @@
         if (collapseBtn) try { collapseBtn.click(); } catch (_) { }
       }
 
-      await summarizeText(text);
+      await summarizeText(text, type);
     });
   }
 
@@ -428,10 +455,26 @@
   }
 
   // === MAIN SCAN ===
+  function scanShopeeLinks() {
+    const links = document.querySelectorAll('a[href*="shope.ee/"]');
+    for (const a of links) {
+      if (a.dataset.fbsUnshorten) continue;
+      a.dataset.fbsUnshorten = "1";
+      const btn = document.createElement("span");
+      btn.innerHTML = ' <span title="Bóc Link Không Cookie" style="cursor:pointer;display:inline-flex;align-items:center;padding:0px 6px 1px;border-radius:6px;background:rgba(255,107,107,0.15);color:#ff6b6b;font-size:0.85em;font-weight:bold;margin-left:4px;">🛒 Bóc Link</span>';
+      btn.querySelector("span").addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        chrome.runtime.sendMessage({ action: "unshorten-shopee-inline", url: a.href });
+      });
+      a.insertAdjacentElement("afterend", btn);
+    }
+  }
+
   function scan() {
     if (!isContextValid()) return;
     if (SITE === "reddit") scanRedditPosts();
     findNewSeeMoreElements().forEach(processSeeMore);
+    scanShopeeLinks();
   }
 
   function debouncedScan() {

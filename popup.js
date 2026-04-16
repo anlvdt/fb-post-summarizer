@@ -15,6 +15,7 @@ const apiKeyInput = document.getElementById("apiKey");
 const minLengthInput = document.getElementById("minLength");
 const outputLangSel = document.getElementById("outputLang");
 const customPromptEl = document.getElementById("customPrompt");
+const customAffPromptEl = document.getElementById("customAffPrompt");
 const toggleKeyBtn = document.getElementById("toggleKey");
 const saveBtn = document.getElementById("saveBtn");
 const testBtn = document.getElementById("testBtn");
@@ -22,7 +23,7 @@ const status = document.getElementById("status");
 const linkGroq = document.getElementById("linkGroq");
 const linkGemini = document.getElementById("linkGemini");
 
-const KEYS = ["apiKey","minLength","provider","outputLang","customPrompt"];
+const KEYS = ["apiKey", "minLength", "provider", "outputLang", "customPrompt", "customAffPrompt"];
 
 chrome.storage.sync.get(KEYS, (d) => {
   if (d.apiKey) apiKeyInput.value = d.apiKey;
@@ -30,6 +31,7 @@ chrome.storage.sync.get(KEYS, (d) => {
   if (d.provider) providerSel.value = d.provider;
   if (d.outputLang) outputLangSel.value = d.outputLang;
   if (d.customPrompt) customPromptEl.value = d.customPrompt;
+  if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
   updateLinks();
 
   // Onboarding: highlight API key if empty
@@ -62,6 +64,7 @@ saveBtn.addEventListener("click", () => {
     provider: providerSel.value,
     outputLang: outputLangSel.value,
     customPrompt: customPromptEl.value.trim(),
+    customAffPrompt: customAffPromptEl.value.trim(),
   }, () => showStatus("Đã lưu ✓", "success"));
 });
 
@@ -101,13 +104,16 @@ async function loadHistory() {
     list.innerHTML = '<p class="empty">Chưa có lịch sử</p>';
     return;
   }
-  list.innerHTML = historyData.map((h, i) =>
-    '<div class="history-item" data-idx="' + i + '">' +
-    '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") + '</div>' +
-    '<div class="history-text">' + esc((h.text || "").substring(0, 80)) + '...</div>' +
-    '<div class="history-summary">' + esc((h.summary || "").substring(0, 120)) + '...</div>' +
-    '</div>'
-  ).join("");
+  list.innerHTML = historyData.map((h, i) => {
+    const badgeType = h.type || "summary";
+    const badgeText = badgeType === "affiliate" ? "🛒 Affiliate" : "📝 Status";
+    return '<div class="history-item" data-idx="' + i + '">' +
+      '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") +
+      '<span class="history-badge ' + badgeType + '">' + badgeText + '</span></div>' +
+      '<div class="history-text">' + esc((h.text || "").substring(0, 80)) + '...</div>' +
+      '<div class="history-summary">' + esc((h.summary || "").substring(0, 120)) + '...</div>' +
+      '</div>'
+  }).join("");
 
   list.querySelectorAll(".history-item").forEach(item => {
     item.addEventListener("click", () => showHistoryDetail(+item.dataset.idx));
@@ -146,6 +152,22 @@ document.getElementById("exportBtn").addEventListener("click", async () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = "summarizer-history.json"; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("exportMdBtn").addEventListener("click", async () => {
+  const data = await chrome.storage.local.get("history");
+  const hist = data.history || [];
+  let mdStr = "# Lịch sử Social Content Repurposer\n\n";
+  hist.forEach(h => {
+    mdStr += `## ${new Date(h.date).toLocaleString("vi")} - ${h.site || ""} [${(h.type || "summary").toUpperCase()}]\n\n`;
+    mdStr += `**Bài gốc:**\n> ${h.text.replace(/\n/g, "\n> ")}...\n\n`;
+    mdStr += `**Output:**\n${h.summary}\n\n---\n\n`;
+  });
+  const blob = new Blob([mdStr], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "summarizer-history.md"; a.click();
   URL.revokeObjectURL(url);
 });
 

@@ -1,18 +1,21 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8">
   <link rel="stylesheet" href="popup.css">
 </head>
+
 <body>
   <div class="popup">
     <div class="header">
       <span class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
       </span>
       <h1>Social Content Repurposer</h1>
@@ -40,7 +43,10 @@
         <div class="input-group">
           <input type="password" id="apiKey" placeholder="Nhập API key">
           <button type="button" id="toggleKey" class="icon-btn" title="Hiện/ẩn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
           </button>
         </div>
       </div>
@@ -60,8 +66,13 @@
       </div>
 
       <div class="field">
-        <label for="customPrompt">Tùy chỉnh prompt (để trống = mặc định)</label>
-        <textarea id="customPrompt" rows="3" placeholder="VD: Tóm tắt trong 1 câu ngắn gọn..."></textarea>
+        <label for="customPrompt">Tùy chỉnh Prompt cho Status (để trống = mặc định)</label>
+        <textarea id="customPrompt" rows="2" placeholder="VD: Đóng vai chuyên gia..."></textarea>
+      </div>
+
+      <div class="field">
+        <label for="customAffPrompt">Tùy chỉnh Prompt cho Affiliate</label>
+        <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
       </div>
 
       <button id="saveBtn">Lưu cài đặt</button>
@@ -70,7 +81,8 @@
 
       <div class="links">
         <a href="https://console.groq.com/keys" target="_blank" id="linkGroq">Lấy Groq API Key miễn phí</a>
-        <a href="https://aistudio.google.com/apikey" target="_blank" id="linkGemini" style="display:none">Lấy Gemini API Key miễn phí</a>
+        <a href="https://aistudio.google.com/apikey" target="_blank" id="linkGemini" style="display:none">Lấy Gemini API
+          Key miễn phí</a>
       </div>
     </div>
 
@@ -85,10 +97,12 @@
       </div>
       <div id="historyActions">
         <button id="exportBtn" class="test-btn">Export JSON</button>
+        <button id="exportMdBtn" class="test-btn" style="margin-top:4px">Export Markdown</button>
         <button id="clearBtn" class="test-btn" style="margin-top:4px;color:#ff6b6b">Xóa lịch sử</button>
       </div>
     </div>
   </div>
   <script src="popup.js"></script>
 </body>
+
 </html>

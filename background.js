@@ -29,6 +29,26 @@ async function clearShopeeCookies() {
   }
 }
 
+async function processUnshorten(url, tabId) {
+  try {
+    const resp = await fetch(url, { method: "GET", redirect: "follow" });
+    const finalUrl = resp.url;
+    const cleanMatch = finalUrl.match(/-i\.(\d+)\.(\d+)/);
+    const output = cleanMatch ? "https://shopee.vn/product/" + cleanMatch[1] + "/" + cleanMatch[2] : finalUrl;
+    await clearShopeeCookies();
+    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", text: output });
+    chrome.tabs.create({ url: "https://affiliate.shopee.vn/offer/custom_link" });
+  } catch (e) {
+    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", error: "Lỗi extract: " + e.message });
+  }
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { action: "shortcut-" + command });
+  });
+});
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "summarize-selection" && info.selectionText) {
     chrome.tabs.sendMessage(tab.id, {
@@ -48,17 +68,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       chrome.tabs.sendMessage(tab.id, { action: "unshorten-result", error: "Không tìm thấy link shope.ee trong phần bôi đen" });
       return;
     }
-    try {
-      const resp = await fetch(urlMatches[0], { method: "GET", redirect: "follow" });
-      const finalUrl = resp.url;
-      const cleanMatch = finalUrl.match(/-i\.(\d+)\.(\d+)/);
-      const output = cleanMatch ? "https://shopee.vn/product/" + cleanMatch[1] + "/" + cleanMatch[2] : finalUrl;
-      await clearShopeeCookies();
-      chrome.tabs.sendMessage(tab.id, { action: "unshorten-result", text: output });
-      chrome.tabs.create({ url: "https://affiliate.shopee.vn/offer/custom_link" });
-    } catch (e) {
-      chrome.tabs.sendMessage(tab.id, { action: "unshorten-result", error: "Lỗi extract: " + e.message });
-    }
+    processUnshorten(urlMatches[0], tab.id);
   }
 });
 
@@ -98,9 +108,9 @@ const AFFILIATE_PROMPT = `Đóng vai người dùng đang review sản phẩm ch
 const MAX_INPUT_CHARS = 8000;
 
 async function getSystemPrompt(type) {
-  const data = await chrome.storage.sync.get(["customPrompt", "outputLang"]);
+  const data = await chrome.storage.sync.get(["customPrompt", "customAffPrompt", "outputLang"]);
   const lang = data.outputLang || "auto";
-  let prompt = type === "affiliate" ? AFFILIATE_PROMPT : (data.customPrompt || SUMMARY_PROMPT);
+  let prompt = type === "affiliate" ? (data.customAffPrompt || AFFILIATE_PROMPT) : (data.customPrompt || SUMMARY_PROMPT);
   if (lang === "vi") prompt += "\n- Luôn trả lời bằng tiếng Việt, dịch nếu bài viết bằng ngôn ngữ khác.";
   else if (lang === "en") prompt += "\n- Always respond in English, translate if the post is in another language.";
   else prompt += "\n- Nếu bài viết bằng tiếng Anh hoặc ngôn ngữ khác tiếng Việt, dịch tóm tắt sang tiếng Việt. Nếu bằng tiếng Việt, giữ nguyên.";
@@ -131,6 +141,10 @@ chrome.runtime.onConnect.addListener((port) => {
 // === FALLBACK: non-streaming for test/context menu ===
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "ping") { sendResponse({ ok: true }); return true; }
+  if (request.action === "unshorten-shopee-inline" && request.url && sender.tab) {
+    processUnshorten(request.url, sender.tab.id);
+    return true;
+  }
   if (request.action === "summarize") {
     const fakePort = { postMessage: () => { } };
     const controller = new AbortController();
@@ -160,7 +174,7 @@ async function handleStream(text, site, port, signal, type = "summary") {
     if (!result.rateLimited) {
       if (result.summary) {
         incrementBadge();
-        saveHistory(text, result.summary, site);
+        saveHistory(text, result.summary, site, type);
       }
       return result;
     }
@@ -170,10 +184,10 @@ async function handleStream(text, site, port, signal, type = "summary") {
 }
 
 // === HISTORY ===
-async function saveHistory(text, summary, site) {
+async function saveHistory(text, summary, site, type) {
   const data = await chrome.storage.local.get("history");
   const history = data.history || [];
-  history.unshift({ text: text.substring(0, 200), summary, date: new Date().toISOString(), site: site || "unknown" });
+  history.unshift({ text: text.substring(0, 200), summary, date: new Date().toISOString(), site: site || "unknown", type: type || "summary" });
   if (history.length > 50) history.length = 50;
   await chrome.storage.local.set({ history });
 }
@@ -221,7 +235,7 @@ async function callGroqStream(apiKey, text, systemPrompt, port, signal) {
         { role: "user", content: text },
       ],
       temperature: 0.3,
-      max_tokens: 512,
+      max_tokens: 1024,
     }),
   });
   if (resp.status === 429) return { rateLimited: true };
@@ -240,7 +254,7 @@ async function callGeminiStream(apiKey, text, systemPrompt, port, signal) {
     signal,
     body: JSON.stringify({
       contents: [{ parts: [{ text: systemPrompt + "\n\nBài viết:\n" + text }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 512 },
+      generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
     }),
   });
   if (resp.status === 429) return { rateLimited: true };

@@ -36,9 +36,21 @@
   opacity: 0.85;
 }
 
-.fbs-btn:hover { opacity: 1; box-shadow: 0 4px 16px rgba(108, 92, 231, 0.6); transform: scale(1.05); }
-.fbs-btn:active { transform: scale(1); }
-.fbs-btn svg { flex-shrink: 0; width: 12px; height: 12px; }
+.fbs-btn:hover {
+  opacity: 1;
+  box-shadow: 0 4px 16px rgba(108, 92, 231, 0.6);
+  transform: scale(1.05);
+}
+
+.fbs-btn:active {
+  transform: scale(1);
+}
+
+.fbs-btn svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+}
 
 /* Inline button: looks like Facebook's "Xem thêm" text link */
 .fbs-wrap-inline .fbs-btn {
@@ -57,18 +69,37 @@
   vertical-align: baseline;
   gap: 3px;
 }
-.fbs-wrap-inline .fbs-btn:hover { opacity: 0.7 !important; transform: none !important; }
-.fbs-wrap-inline .fbs-btn:active { transform: none !important; }
-.fbs-wrap-inline .fbs-btn svg { width: 13px; height: 13px; stroke: currentColor; }
-.fbs-wrap-inline .fbs-btn span { font-weight: 600 !important; }
+
+.fbs-wrap-inline .fbs-btn:hover {
+  opacity: 0.7 !important;
+  transform: none !important;
+}
+
+.fbs-wrap-inline .fbs-btn:active {
+  transform: none !important;
+}
+
+.fbs-wrap-inline .fbs-btn svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+}
+
+.fbs-wrap-inline .fbs-btn span {
+  font-weight: 600 !important;
+}
 
 .fbs-panel {
   display: none;
   position: fixed;
-  top: 50%; left: 50%;
+  top: 50%;
+  left: 50%;
   transform: translate(-50%, -50%);
-  width: 520px; max-width: 90vw; max-height: 70vh;
-  border-radius: 16px; overflow: hidden;
+  width: 520px;
+  max-width: 90vw;
+  max-height: 70vh;
+  border-radius: 16px;
+  overflow: hidden;
   background: #1e1e2e;
   border: 1px solid rgba(168, 85, 247, 0.4);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -76,71 +107,147 @@
   flex-direction: column;
 }
 
-.fbs-panel.fbs-visible { display: flex; animation: fbsOverlayIn 0.3s ease-out; }
+.fbs-panel.fbs-visible {
+  display: flex;
+  animation: fbsOverlayIn 0.3s ease-out;
+}
 
 .fbs-backdrop {
-  display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: rgba(0, 0, 0, 0.5); z-index: 2147483646; backdrop-filter: blur(2px);
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2147483646;
+  backdrop-filter: blur(2px);
 }
 
-.fbs-backdrop.fbs-visible { display: block; animation: fbsFadeIn 0.2s ease-out; }
+.fbs-backdrop.fbs-visible {
+  display: block;
+  animation: fbsFadeIn 0.2s ease-out;
+}
 
 @keyframes fbsOverlayIn {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
-@keyframes fbsFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fbsFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
 
 .fbs-panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; background: linear-gradient(135deg, #6c5ce7, #a855f7);
-  color: #fff; font-size: 14px; font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   flex-shrink: 0;
 }
 
-.fbs-panel-head span { display: inline-flex; align-items: center; gap: 8px; }
+.fbs-panel-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .fbs-close {
-  background: rgba(255,255,255,0.2); border: none; color: #fff;
-  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
-  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.2s;
 }
 
-.fbs-close:hover { background: rgba(255,255,255,0.4); }
+.fbs-close:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
 
 .fbs-panel-body {
-  padding: 18px 20px; font-size: 14px; line-height: 1.8; color: #e4e6eb;
+  padding: 18px 20px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #e4e6eb;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  overflow-y: auto; flex: 1;
+  overflow-y: auto;
+  flex: 1;
 }
 
-.fbs-result { white-space: pre-wrap; word-wrap: break-word; }
-.fbs-result strong { font-weight: 700; color: #d4b5ff; }
+.fbs-result {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.fbs-result strong {
+  font-weight: 700;
+  color: #d4b5ff;
+}
 
 .fbs-error {
-  color: #ff6b6b; padding: 12px 14px; background: rgba(255,107,107,0.1);
-  border-radius: 10px; font-size: 13px;
+  color: #ff6b6b;
+  padding: 12px 14px;
+  background: rgba(255, 107, 107, 0.1);
+  border-radius: 10px;
+  font-size: 13px;
 }
 
-.fbs-loading { display: flex; align-items: center; gap: 12px; color: #b0b3b8; font-size: 14px; padding: 8px 0; }
+.fbs-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #b0b3b8;
+  font-size: 14px;
+  padding: 8px 0;
+}
 
 .fbs-spinner {
-  width: 20px; height: 20px; border: 2.5px solid rgba(168,85,247,0.25);
-  border-top-color: #a855f7; border-radius: 50%;
-  animation: fbsSpin 0.7s linear infinite; flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(168, 85, 247, 0.25);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: fbsSpin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 
-@keyframes fbsSpin { to { transform: rotate(360deg); } }
+@keyframes fbsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .fbs-panel-footer {
   display: none;
   align-items: center;
   justify-content: flex-end;
   padding: 10px 18px;
-  border-top: 1px solid rgba(255,255,255,0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
@@ -149,7 +256,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border: 1px solid rgba(168,85,247,0.3);
+  border: 1px solid rgba(168, 85, 247, 0.3);
   border-radius: 8px;
   background: transparent;
   color: #b0b3b8;
@@ -159,15 +266,53 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.fbs-copy-btn:hover { color: #fff; border-color: #a855f7; background: rgba(168,85,247,0.1); }
-.fbs-copy-btn svg { flex-shrink: 0; }
+.fbs-copy-btn:hover {
+  color: #fff;
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.1);
+}
+
+.fbs-copy-btn svg {
+  flex-shrink: 0;
+}
+
+/* Regen button */
+.fbs-regen-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #b0b3b8;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-right: 6px;
+  padding: 0;
+}
+
+.fbs-regen-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-regen-btn {
+  color: #65676b;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-regen-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1c1e21;
+}
 
 /* Stop button */
 .fbs-stop-btn {
   display: none;
   align-items: center;
   padding: 6px 14px;
-  border: 1px solid rgba(255,107,107,0.3);
+  border: 1px solid rgba(255, 107, 107, 0.3);
   border-radius: 8px;
   background: transparent;
   color: #ff6b6b;
@@ -176,15 +321,21 @@
   transition: all 0.2s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-.fbs-stop-btn:hover { background: rgba(255,107,107,0.1); border-color: #ff6b6b; }
+
+.fbs-stop-btn:hover {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: #ff6b6b;
+}
 
 /* TTS button */
 .fbs-tts-btn {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 32px; height: 32px;
-  border: none; border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
   background: transparent;
   color: #b0b3b8;
   cursor: pointer;
@@ -192,16 +343,32 @@
   margin-right: auto;
   padding: 0;
 }
-.fbs-tts-btn:hover { background: rgba(255,255,255,0.1); }
-.fbs-tts-btn.fbs-playing { color: #a855f7; background: rgba(168,85,247,0.15); }
+
+.fbs-tts-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.fbs-tts-btn.fbs-playing {
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.15);
+}
 
 /* Streaming cursor */
 .fbs-cursor {
-  display: inline-block; width: 2px; height: 1em;
-  background: currentColor; vertical-align: text-bottom;
-  margin-left: 2px; animation: fbsBlink 1s step-end infinite;
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: fbsBlink 1s step-end infinite;
 }
-@keyframes fbsBlink { 50% { opacity: 0; } }
+
+@keyframes fbsBlink {
+  50% {
+    opacity: 0;
+  }
+}
 
 /* Light mode overrides — scoped to our own elements */
 .fbs-panel[data-fbs-theme="light"] {
@@ -210,9 +377,28 @@
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
 }
 
-.fbs-panel[data-fbs-theme="light"] .fbs-panel-body { color: #1c1e21; }
-.fbs-panel[data-fbs-theme="light"] .fbs-result strong { color: #6c5ce7; }
-.fbs-panel[data-fbs-theme="light"] .fbs-loading { color: #65676b; }
-.fbs-panel[data-fbs-theme="light"] .fbs-panel-footer { border-top-color: rgba(0,0,0,0.08); }
-.fbs-panel[data-fbs-theme="light"] .fbs-copy-btn { color: #65676b; border-color: rgba(0,0,0,0.15); }
-.fbs-panel[data-fbs-theme="light"] .fbs-copy-btn:hover { color: #1c1e21; border-color: #6c5ce7; }
+.fbs-panel[data-fbs-theme="light"] .fbs-panel-body {
+  color: #1c1e21;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-result strong {
+  color: #6c5ce7;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-loading {
+  color: #65676b;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-panel-footer {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-copy-btn {
+  color: #65676b;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-copy-btn:hover {
+  color: #1c1e21;
+  border-color: #6c5ce7;
+}
