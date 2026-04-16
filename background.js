@@ -1,5 +1,15 @@
 // Background service worker — Social Content Repurposer v2.0.0
 
+async function injectAndSend(tabId, message) {
+  try {
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    chrome.tabs.sendMessage(tabId, message);
+  } catch (e) {
+    console.error("Injection failed", e);
+  }
+}
+
 // === CONTEXT MENU ===
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -36,36 +46,33 @@ async function processUnshorten(url, tabId) {
     const cleanMatch = finalUrl.match(/-i\.(\d+)\.(\d+)/);
     const output = cleanMatch ? "https://shopee.vn/product/" + cleanMatch[1] + "/" + cleanMatch[2] : finalUrl;
     await clearShopeeCookies();
-    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", text: output });
+    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", text: output }).catch(() => { });
     chrome.tabs.create({ url: "https://affiliate.shopee.vn/offer/custom_link" });
   } catch (e) {
-    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", error: "Lỗi extract: " + e.message });
+    chrome.tabs.sendMessage(tabId, { action: "unshorten-result", error: "Lỗi extract: " + e.message }).catch(() => { });
   }
 }
 
 chrome.commands.onCommand.addListener((command) => {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { action: "shortcut-" + command });
+    if (tabs[0]) {
+      const msg = { action: "shortcut-" + command };
+      chrome.tabs.sendMessage(tabs[0].id, msg).catch(() => injectAndSend(tabs[0].id, msg));
+    }
   });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "summarize-selection" && info.selectionText) {
-    chrome.tabs.sendMessage(tab.id, {
-      action: "summarize-selection",
-      text: info.selectionText,
-      type: "summary",
-    });
+    const msg = { action: "summarize-selection", text: info.selectionText, type: "summary" };
+    chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
   } else if (info.menuItemId === "affiliate-rewrite" && info.selectionText) {
-    chrome.tabs.sendMessage(tab.id, {
-      action: "summarize-selection",
-      text: info.selectionText,
-      type: "affiliate",
-    });
+    const msg = { action: "summarize-selection", text: info.selectionText, type: "affiliate" };
+    chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
   } else if (info.menuItemId === "unshorten-shopee" && info.selectionText) {
     const urlMatches = info.selectionText.match(/https?:\/\/shope\.ee\/[^\s]*/);
     if (!urlMatches) {
-      chrome.tabs.sendMessage(tab.id, { action: "unshorten-result", error: "Không tìm thấy link shope.ee trong phần bôi đen" });
+      chrome.tabs.sendMessage(tab.id, { action: "unshorten-result", error: "Không tìm thấy link shope.ee trong phần bôi đen" }).catch(() => { });
       return;
     }
     processUnshorten(urlMatches[0], tab.id);

@@ -8,7 +8,8 @@
     "storage",
     "contextMenus",
     "activeTab",
-    "cookies"
+    "cookies",
+    "scripting"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
@@ -36,7 +37,7 @@
       "css": [
         "content.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_end"
     }
   ],
   "action": {

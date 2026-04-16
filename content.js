@@ -272,15 +272,7 @@
 
   // === STREAMING SUMMARIZE ===
   async function wakeServiceWorker() {
-    return new Promise((resolve) => {
-      try {
-        chrome.runtime.sendMessage({ action: "ping" }, () => {
-          // ignore chrome.runtime.lastError — just waking SW
-          void chrome.runtime.lastError;
-          resolve();
-        });
-      } catch (_) { resolve(); }
-    });
+    try { await chrome.runtime.sendMessage({ action: "ping" }); } catch (_) { }
   }
 
   async function summarizeText(text, type = "summary") {
@@ -340,13 +332,10 @@
   // === MESSAGES (CONTEXT MENU, SHORTCUTS & UNSHORTEN) ===
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === "summarize-selection" && msg.text) summarizeText(msg.text, msg.type);
-    if (msg.action === "shortcut-summarize-shortcut") {
+    if (msg.action === "shortcut-summarize-shortcut" || msg.action === "shortcut-affiliate-shortcut") {
       const text = window.getSelection().toString();
-      if (text) summarizeText(text, "summary");
-    }
-    if (msg.action === "shortcut-affiliate-shortcut") {
-      const text = window.getSelection().toString();
-      if (text) summarizeText(text, "affiliate");
+      if (text) summarizeText(text, msg.action.includes("affiliate") ? "affiliate" : "summary");
+      else alert("Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!");
     }
     if (msg.action === "unshorten-result") {
       if (msg.error) {
@@ -441,6 +430,66 @@
     inject(target, findClickable(sm), textContainer, sm);
   }
 
+  // === FLOATING TOOLBAR ===
+  let floatingToolbar = null;
+  function createFloatingToolbar() {
+    if (floatingToolbar) return;
+    floatingToolbar = document.createElement("div");
+    floatingToolbar.className = "fbs-floating-toolbar";
+    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><svg width="13" height="13" viewBox="0 0 128 128" fill="currentColor"><path d="M64 14 C36.4 14 14 36.4 14 64 C14 74.3 17.1 84 22.4 92 L28.8 85.6 C25.1 79.2 23 71.8 23 64 C23 41.3 41.3 23 64 23 C68.8 23 73.4 23.8 77.7 25.4 L68 34 L96 38 L94 10 L84.4 18.6 C78.1 15.6 71.2 14 64 14 Z"/><path d="M104.6 36 L98.2 42.4 C101.9 48.8 104 56.2 104 64 C104 86.7 85.7 105 64 105 C59.2 105 54.6 104.2 50.3 102.6 L60 94 L32 90 L34 118 L43.6 109.4 C49.9 112.4 56.8 114 64 114 C91.6 114 114 91.6 114 64 C114 53.7 110.9 44 105.6 36 Z"/><path d="M64 36 C64 54 54 64 36 64 C54 64 64 74 64 92 C64 74 74 64 92 64 C74 64 64 54 64 36 Z"/></svg> Tóm tắt</button><button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
+    document.body.appendChild(floatingToolbar);
+
+    floatingToolbar.addEventListener("mousedown", (e) => e.preventDefault());
+    floatingToolbar.addEventListener("click", (e) => {
+      e.preventDefault();
+      const action = e.target.getAttribute("data-action");
+      if (!action) return;
+      const text = window.getSelection().toString().trim();
+      if (text) {
+        floatingToolbar.classList.remove("fbs-visible");
+        summarizeText(text, action);
+      }
+    });
+
+    document.addEventListener("scroll", () => {
+      if (floatingToolbar.classList.contains("fbs-visible")) floatingToolbar.classList.remove("fbs-visible");
+    }, { capture: true, passive: true });
+  }
+
+  function handleSelection() {
+    createFloatingToolbar();
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection.toString().trim();
+      if (text.length < 15) {
+        floatingToolbar.classList.remove("fbs-visible");
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) {
+        floatingToolbar.classList.remove("fbs-visible");
+        return;
+      }
+      const top = rect.top + window.scrollY - 44;
+      const left = rect.left + window.scrollX + (rect.width / 2) - 80;
+      floatingToolbar.style.top = top + "px";
+      floatingToolbar.style.left = left + "px";
+      floatingToolbar.classList.add("fbs-visible");
+    }, 0);
+  }
+
+  document.addEventListener("mouseup", (e) => {
+    if (floatingToolbar && floatingToolbar.contains(e.target)) return;
+    handleSelection();
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    if (floatingToolbar && !floatingToolbar.contains(e.target)) {
+      floatingToolbar.classList.remove("fbs-visible");
+    }
+  });
+
   // === REDDIT ===
   function scanRedditPosts() {
     const posts = document.querySelectorAll('shreddit-post, div[data-testid="post-container"]');
@@ -464,7 +513,7 @@
       btn.innerHTML = ' <span title="Bóc Link Không Cookie" style="cursor:pointer;display:inline-flex;align-items:center;padding:0px 6px 1px;border-radius:6px;background:rgba(255,107,107,0.15);color:#ff6b6b;font-size:0.85em;font-weight:bold;margin-left:4px;">🛒 Bóc Link</span>';
       btn.querySelector("span").addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        chrome.runtime.sendMessage({ action: "unshorten-shopee-inline", url: a.href });
+        chrome.runtime.sendMessage({ action: "unshorten-shopee-inline", url: a.href }).catch(() => { });
       });
       a.insertAdjacentElement("afterend", btn);
     }
@@ -479,7 +528,7 @@
 
   function debouncedScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 150);
+    scanTimer = setTimeout(scan, 50);
   }
 
   scan();

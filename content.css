@@ -431,3 +431,61 @@
   color: #1c1e21;
   border-color: #6c5ce7;
 }
+
+/* Floating Selection Toolbar */
+.fbs-floating-toolbar {
+  position: absolute;
+  z-index: 2147483647;
+  display: none;
+  background: #1c1e21;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 4px;
+  align-items: center;
+  gap: 4px;
+  animation: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.fbs-floating-toolbar.fbs-visible {
+  display: flex;
+}
+
+.fbs-floating-toolbar::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 6px 0;
+  border-style: solid;
+  border-color: #1c1e21 transparent transparent transparent;
+  display: block;
+  width: 0;
+}
+
+.fbs-floating-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: #e4e6eb;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.fbs-floating-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.fbs-floating-btn.fbs-btn-highlight {
+  color: #a855f7;
+}
