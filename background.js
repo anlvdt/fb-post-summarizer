@@ -14,7 +14,12 @@ async function injectAndSend(tabId, message) {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "summarize-selection",
-    title: "Tóm tắt đoạn text này",
+    title: "Tóm tắt nội dung",
+    contexts: ["selection"],
+  });
+  chrome.contextMenus.create({
+    id: "status-rewrite",
+    title: "Viết thành Status MXH",
     contexts: ["selection"],
   });
   chrome.contextMenus.create({
@@ -66,6 +71,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "summarize-selection" && info.selectionText) {
     const msg = { action: "summarize-selection", text: info.selectionText, type: "summary" };
     chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
+  } else if (info.menuItemId === "status-rewrite" && info.selectionText) {
+    const msg = { action: "summarize-selection", text: info.selectionText, type: "status" };
+    chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
   } else if (info.menuItemId === "affiliate-rewrite" && info.selectionText) {
     const msg = { action: "summarize-selection", text: info.selectionText, type: "affiliate" };
     chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
@@ -100,24 +108,46 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 // === DEFAULT PROMPT ===
-const SUMMARY_PROMPT = `Đóng vai tôi, viết lại nội dung sau thành một status để đăng Facebook cá nhân. Quy tắc bắt buộc:
-- Văn phong tự nhiên, chân thật, chia sẻ góc nhìn cá nhân (dưới 200 chữ).
-- Giữ thông điệp cốt lõi của bài gốc, TUYỆT ĐỐI không đạo văn.
-- Không dùng từ ngữ sáo rỗng hay văn mẫu AI (như "tóm lại", "nhìn chung", "bài viết này").
-- Viết thẳng vào vấn đề như một bài post đời thường trên mạng xã hội.`;
+const SUMMARY_PROMPT = `Tóm tắt nội dung sau thành đoạn văn ngắn gọn, dễ hiểu. Quy tắc:
+- Viết thành 1-2 đoạn văn liền mạch, không gạch đầu dòng.
+- Giữ các ý chính quan trọng nhất, bỏ chi tiết thừa.
+- Dùng ngôn ngữ đơn giản, tự nhiên.
+- Dưới 150 chữ.`;
 
-const AFFILIATE_PROMPT = `Đóng vai người dùng đang review sản phẩm chân thực. Viết lại bài sau để làm affiliate marketing. Quy tắc bắt buộc:
-- Viết 1 bài review mộc mạc, ngắn gọn (dưới 150 chữ).
-- Giữ nguyên các điểm mạnh sản phẩm từ bài gốc, né 100% đạo văn.
-- Không chào hỏi, không kết luận thừa.
-- Ở cuối bài, CHỈ để đúng 1 dòng: "👉 Link mua ở đây nha: [LINK_SHOPEE_CỦA_TÔI]"`;
+const STATUS_PROMPT = `Viết lại nội dung sau thành status Facebook cá nhân của mình. Quy tắc:
+- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng 1 lần rồi viết nội dung.
+- Xưng "mình", gọi người đọc là "bạn" hoặc "mọi người".
+- Viết như đang kể chuyện cho bạn bè nghe, tự nhiên, gần gũi, có cảm xúc cá nhân.
+- KHÔNG xuống dòng giữa các câu, chỉ xuống dòng khi chuyển ý lớn (tối đa 2-3 đoạn).
+- KHÔNG dùng từ ngữ hàn lâm, sáo rỗng như "nhận ra rằng", "điều thú vị", "chia sẻ với các bạn".
+- Dưới 180 chữ, viết thẳng vào vấn đề, không mở bài dài dòng.`;
+
+const AFFILIATE_PROMPT = `Viết review sản phẩm để làm affiliate. Quy tắc:
+- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng 1 lần rồi viết nội dung.
+- Xưng "mình", viết như đang kể trải nghiệm thật cho bạn bè.
+- Review mộc mạc, chân thực, dưới 120 chữ, KHÔNG xuống dòng nhiều.
+- Giữ điểm mạnh sản phẩm từ bài gốc nhưng diễn đạt lại theo cách của mình.
+- Cuối bài chỉ để 1 dòng: "Link mua: [LINK]"`;
 
 const MAX_INPUT_CHARS = 8000;
 
+const TITLE_RULE = "\n- BẮT BUỘC bắt đầu bằng một tiêu đề ngắn gọn (3-7 từ) viết IN HOA, sau đó xuống dòng.";
+
 async function getSystemPrompt(type) {
-  const data = await chrome.storage.sync.get(["customPrompt", "customAffPrompt", "outputLang"]);
+  const data = await chrome.storage.sync.get(["customPrompt", "customStatusPrompt", "customAffPrompt", "outputLang"]);
   const lang = data.outputLang || "auto";
-  let prompt = type === "affiliate" ? (data.customAffPrompt || AFFILIATE_PROMPT) : (data.customPrompt || SUMMARY_PROMPT);
+  let prompt;
+  
+  if (type === "affiliate") {
+    prompt = data.customAffPrompt || AFFILIATE_PROMPT;
+    if (data.customAffPrompt) prompt += TITLE_RULE;
+  } else if (type === "status") {
+    prompt = data.customStatusPrompt || STATUS_PROMPT;
+    if (data.customStatusPrompt) prompt += TITLE_RULE;
+  } else {
+    prompt = data.customPrompt || SUMMARY_PROMPT;
+  }
+  
   if (lang === "vi") prompt += "\n- Luôn trả lời bằng tiếng Việt, dịch nếu bài viết bằng ngôn ngữ khác.";
   else if (lang === "en") prompt += "\n- Always respond in English, translate if the post is in another language.";
   else prompt += "\n- Nếu bài viết bằng tiếng Anh hoặc ngôn ngữ khác tiếng Việt, dịch tóm tắt sang tiếng Việt. Nếu bằng tiếng Việt, giữ nguyên.";

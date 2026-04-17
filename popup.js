@@ -36,7 +36,7 @@ chrome.storage.sync.get(KEYS, (d) => {
 
   // Onboarding: highlight API key if empty
   if (!d.apiKey) {
-    showStatus("👋 Nhập API Key để bắt đầu sử dụng!", "success");
+    showStatus("Nhập API Key để bắt đầu sử dụng!", "success");
     apiKeyInput.style.borderColor = "#a855f7";
     apiKeyInput.focus();
   }
@@ -83,7 +83,7 @@ function showStatus(msg, type) {
   status.textContent = msg;
   status.className = "status " + type;
   status.style.display = "block";
-  if (!msg.includes("👋")) setTimeout(() => { status.style.display = "none"; }, 3000);
+  if (!msg.includes("Nhập API Key")) setTimeout(() => { status.style.display = "none"; }, 3000);
 }
 
 // === HISTORY ===
@@ -106,7 +106,7 @@ async function loadHistory() {
   }
   list.innerHTML = historyData.map((h, i) => {
     const badgeType = h.type || "summary";
-    const badgeText = badgeType === "affiliate" ? "🛒 Affiliate" : "📝 Status";
+    const badgeText = badgeType === "affiliate" ? "Affiliate" : badgeType === "status" ? "Status" : "Tóm tắt";
     return '<div class="history-item" data-idx="' + i + '">' +
       '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") +
       '<span class="history-badge ' + badgeType + '">' + badgeText + '</span></div>' +
