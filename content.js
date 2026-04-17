@@ -108,8 +108,8 @@
       el = el.parentElement;
       if (!el || el === document.body) break;
       const len = (el.innerText || "").length;
-      if (len >= 100 && len < 4000) best = el;
-      if (len >= 4000) break;
+      if (len >= 100 && len < 10000) best = el;
+      if (len >= 10000) break;
     }
     return best;
   }
@@ -466,8 +466,9 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     floatingToolbar.addEventListener("mousedown", (e) => e.preventDefault());
     floatingToolbar.addEventListener("click", (e) => {
       e.preventDefault();
-      const action = e.target.getAttribute("data-action");
-      if (!action) return;
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
       const text = window.getSelection().toString().trim();
       if (text) {
         floatingToolbar.classList.remove("fbs-visible");
@@ -485,7 +486,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     setTimeout(() => {
       const selection = window.getSelection();
       const text = selection.toString().trim();
-      if (text.length < 15) {
+      if (text.length < 15 || selection.rangeCount === 0) {
         floatingToolbar.classList.remove("fbs-visible");
         return;
       }

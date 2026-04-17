@@ -108,25 +108,37 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 // === DEFAULT PROMPT ===
-const SUMMARY_PROMPT = `Tóm tắt nội dung sau thành đoạn văn ngắn gọn, dễ hiểu. Quy tắc:
-- Viết thành 1-2 đoạn văn liền mạch, không gạch đầu dòng.
-- Giữ các ý chính quan trọng nhất, bỏ chi tiết thừa.
-- Dùng ngôn ngữ đơn giản, tự nhiên.
-- Dưới 150 chữ.`;
+const SUMMARY_PROMPT = `Bạn là người đọc hiểu rất giỏi. Hãy đọc kỹ bài viết, hiểu thông điệp cốt lõi, rồi VIẾT LẠI đại ý bằng lời của bạn để người đọc nắm được ý chính nhanh nhất.
 
-const STATUS_PROMPT = `Viết lại nội dung sau thành status Facebook cá nhân của mình. Quy tắc:
-- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng 1 lần rồi viết nội dung.
+Quy tắc:
+- Xác định: Bài này nói về cái gì? Thông điệp chính là gì?
+- Viết lại bằng lời của bạn, KHÔNG copy nguyên câu từ bài gốc.
+- Chỉ giữ đại ý và những điểm then chốt. Bỏ ví dụ phụ, rào đón, lặp ý.
+- Viết 2-4 câu liền mạch, không gạch đầu dòng, không tiêu đề.
+- Giọng văn tự nhiên, dễ hiểu.
+- Ngắn gọn, đủ ý — người đọc lướt qua là hiểu ngay bài gốc nói gì.`;
+
+const STATUS_PROMPT = `Bạn là người viết content MXH giỏi. Hãy đọc hiểu bài viết sau, nắm bắt ý chính, rồi viết thành một status Facebook cá nhân hoàn toàn mới — không phải tóm tắt, mà là viết lại theo góc nhìn và trải nghiệm của mình.
+
+Quy tắc:
+- Đọc hiểu bài gốc, tìm ra insight hoặc góc nhìn hay nhất để viết status.
+- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng rồi viết nội dung.
 - Xưng "mình", gọi người đọc là "bạn" hoặc "mọi người".
-- Viết như đang kể chuyện cho bạn bè nghe, tự nhiên, gần gũi, có cảm xúc cá nhân.
-- KHÔNG xuống dòng giữa các câu, chỉ xuống dòng khi chuyển ý lớn (tối đa 2-3 đoạn).
-- KHÔNG dùng từ ngữ hàn lâm, sáo rỗng như "nhận ra rằng", "điều thú vị", "chia sẻ với các bạn".
-- Dưới 180 chữ, viết thẳng vào vấn đề, không mở bài dài dòng.`;
+- Viết như đang kể chuyện cho bạn bè, tự nhiên, có cảm xúc cá nhân.
+- Giữ lại chi tiết hay, số liệu đáng nhớ nếu có — nhưng diễn đạt lại bằng lời mình.
+- KHÔNG dùng từ sáo rỗng: "nhận ra rằng", "điều thú vị", "chia sẻ với các bạn".
+- KHÔNG copy nguyên câu từ bài gốc.
+- 2-4 đoạn, viết thẳng vào vấn đề.`;
 
-const AFFILIATE_PROMPT = `Viết review sản phẩm để làm affiliate. Quy tắc:
-- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng 1 lần rồi viết nội dung.
+const AFFILIATE_PROMPT = `Bạn là người viết review sản phẩm tự nhiên, chân thực. Hãy đọc hiểu bài viết về sản phẩm, nắm bắt điểm mạnh cốt lõi, rồi viết một bài review affiliate hoàn toàn mới — như thể mình đã dùng thử sản phẩm.
+
+Quy tắc:
+- Đọc hiểu bài gốc, xác định: Sản phẩm này giải quyết vấn đề gì? Điểm mạnh thật sự là gì?
+- Bắt đầu bằng tiêu đề ngắn (3-7 từ) viết IN HOA, xuống dòng rồi viết nội dung.
 - Xưng "mình", viết như đang kể trải nghiệm thật cho bạn bè.
-- Review mộc mạc, chân thực, dưới 120 chữ, KHÔNG xuống dòng nhiều.
-- Giữ điểm mạnh sản phẩm từ bài gốc nhưng diễn đạt lại theo cách của mình.
+- Mở đầu bằng vấn đề mình gặp, sau đó kể trải nghiệm dùng sản phẩm.
+- Diễn đạt lại điểm mạnh bằng lời mình, kèm chi tiết cụ thể. KHÔNG copy bài gốc.
+- Review mộc mạc, chân thực, 2-3 đoạn ngắn.
 - Cuối bài chỉ để 1 dòng: "Link mua: [LINK]"`;
 
 const MAX_INPUT_CHARS = 8000;
@@ -134,7 +146,7 @@ const MAX_INPUT_CHARS = 8000;
 const TITLE_RULE = "\n- BẮT BUỘC bắt đầu bằng một tiêu đề ngắn gọn (3-7 từ) viết IN HOA, sau đó xuống dòng.";
 
 async function getSystemPrompt(type) {
-  const data = await chrome.storage.sync.get(["customPrompt", "customStatusPrompt", "customAffPrompt", "outputLang"]);
+  const data = await chrome.storage.sync.get(["customSummaryPrompt", "customStatusPrompt", "customAffPrompt", "outputLang"]);
   const lang = data.outputLang || "auto";
   let prompt;
   
@@ -145,7 +157,7 @@ async function getSystemPrompt(type) {
     prompt = data.customStatusPrompt || STATUS_PROMPT;
     if (data.customStatusPrompt) prompt += TITLE_RULE;
   } else {
-    prompt = data.customPrompt || SUMMARY_PROMPT;
+    prompt = data.customSummaryPrompt || SUMMARY_PROMPT;
   }
   
   if (lang === "vi") prompt += "\n- Luôn trả lời bằng tiếng Việt, dịch nếu bài viết bằng ngôn ngữ khác.";
@@ -224,7 +236,7 @@ async function handleStream(text, site, port, signal, type = "summary") {
 async function saveHistory(text, summary, site, type) {
   const data = await chrome.storage.local.get("history");
   const history = data.history || [];
-  history.unshift({ text: text.substring(0, 200), summary, date: new Date().toISOString(), site: site || "unknown", type: type || "summary" });
+  history.unshift({ text: text.substring(0, 500), summary, date: new Date().toISOString(), site: site || "unknown", type: type || "summary" });
   if (history.length > 50) history.length = 50;
   await chrome.storage.local.set({ history });
 }
@@ -290,7 +302,8 @@ async function callGeminiStream(apiKey, text, systemPrompt, port, signal) {
     headers: { "Content-Type": "application/json" },
     signal,
     body: JSON.stringify({
-      contents: [{ parts: [{ text: systemPrompt + "\n\nBài viết:\n" + text }] }],
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: text }] }],
       generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
     }),
   });

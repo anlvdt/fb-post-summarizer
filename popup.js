@@ -14,7 +14,8 @@ const providerSel = document.getElementById("provider");
 const apiKeyInput = document.getElementById("apiKey");
 const minLengthInput = document.getElementById("minLength");
 const outputLangSel = document.getElementById("outputLang");
-const customPromptEl = document.getElementById("customPrompt");
+const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
+const customStatusPromptEl = document.getElementById("customStatusPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const toggleKeyBtn = document.getElementById("toggleKey");
 const saveBtn = document.getElementById("saveBtn");
@@ -23,14 +24,15 @@ const status = document.getElementById("status");
 const linkGroq = document.getElementById("linkGroq");
 const linkGemini = document.getElementById("linkGemini");
 
-const KEYS = ["apiKey", "minLength", "provider", "outputLang", "customPrompt", "customAffPrompt"];
+const KEYS = ["apiKey", "minLength", "provider", "outputLang", "customSummaryPrompt", "customStatusPrompt", "customAffPrompt"];
 
 chrome.storage.sync.get(KEYS, (d) => {
   if (d.apiKey) apiKeyInput.value = d.apiKey;
   if (d.minLength) minLengthInput.value = d.minLength;
   if (d.provider) providerSel.value = d.provider;
   if (d.outputLang) outputLangSel.value = d.outputLang;
-  if (d.customPrompt) customPromptEl.value = d.customPrompt;
+  if (d.customSummaryPrompt) customSummaryPromptEl.value = d.customSummaryPrompt;
+  if (d.customStatusPrompt) customStatusPromptEl.value = d.customStatusPrompt;
   if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
   updateLinks();
 
@@ -63,7 +65,8 @@ saveBtn.addEventListener("click", () => {
     minLength: parseInt(minLengthInput.value) || 400,
     provider: providerSel.value,
     outputLang: outputLangSel.value,
-    customPrompt: customPromptEl.value.trim(),
+    customSummaryPrompt: customSummaryPromptEl.value.trim(),
+    customStatusPrompt: customStatusPromptEl.value.trim(),
     customAffPrompt: customAffPromptEl.value.trim(),
   }, () => showStatus("Đã lưu ✓", "success"));
 });

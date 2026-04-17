@@ -275,6 +275,11 @@ button:hover {
   color: #4fc3f7;
 }
 
+.history-badge.status {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
 .history-badge.affiliate {
   background: rgba(255, 107, 107, 0.15);
   color: #ff6b6b;
