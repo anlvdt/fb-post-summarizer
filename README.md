@@ -1,7 +1,7 @@
-# Social Content Repurposer
+# FeedWriter
 
 <p align="center">
-  <img src="icons/icon128.png" width="80" alt="Logo">
+  <img src="icons/icon128.png" width="80" alt="FeedWriter">
 </p>
 
 <p align="center">

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Social Content Repurposer",
+  "name": "FeedWriter",
   "version": "2.1.0",
   "description": "Tóm tắt, viết status & affiliate từ bài viết Facebook bằng AI. Dịch từ Anh-Việt. Tối ưu cho Facebook.",
   "author": "Lê Ẩn",
