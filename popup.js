@@ -14,6 +14,9 @@ const providerSel = document.getElementById("provider");
 const apiKeyInput = document.getElementById("apiKey");
 const minLengthInput = document.getElementById("minLength");
 const outputLangSel = document.getElementById("outputLang");
+const summaryLengthSel = document.getElementById("summaryLength");
+const promptStyleSel = document.getElementById("promptStyle");
+const customInstructionsEl = document.getElementById("customInstructions");
 const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customStatusPromptEl = document.getElementById("customStatusPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
@@ -24,13 +27,20 @@ const status = document.getElementById("status");
 const linkGroq = document.getElementById("linkGroq");
 const linkGemini = document.getElementById("linkGemini");
 
-const KEYS = ["apiKey", "minLength", "provider", "outputLang", "customSummaryPrompt", "customStatusPrompt", "customAffPrompt"];
+const KEYS = [
+  "apiKey", "minLength", "provider", "outputLang",
+  "summaryLength", "promptStyle", "customInstructions",
+  "customSummaryPrompt", "customStatusPrompt", "customAffPrompt"
+];
 
 chrome.storage.sync.get(KEYS, (d) => {
   if (d.apiKey) apiKeyInput.value = d.apiKey;
   if (d.minLength) minLengthInput.value = d.minLength;
   if (d.provider) providerSel.value = d.provider;
   if (d.outputLang) outputLangSel.value = d.outputLang;
+  if (d.summaryLength) summaryLengthSel.value = d.summaryLength;
+  if (d.promptStyle) promptStyleSel.value = d.promptStyle;
+  if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
   if (d.customSummaryPrompt) customSummaryPromptEl.value = d.customSummaryPrompt;
   if (d.customStatusPrompt) customStatusPromptEl.value = d.customStatusPrompt;
   if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
@@ -65,6 +75,9 @@ saveBtn.addEventListener("click", () => {
     minLength: parseInt(minLengthInput.value) || 400,
     provider: providerSel.value,
     outputLang: outputLangSel.value,
+    summaryLength: summaryLengthSel.value,
+    promptStyle: promptStyleSel.value,
+    customInstructions: customInstructionsEl.value.trim(),
     customSummaryPrompt: customSummaryPromptEl.value.trim(),
     customStatusPrompt: customStatusPromptEl.value.trim(),
     customAffPrompt: customAffPromptEl.value.trim(),

@@ -55,6 +55,30 @@
       </div>
 
       <div class="field">
+        <label for="summaryLength">Độ dài kết quả</label>
+        <select id="summaryLength">
+          <option value="short">Ngắn gọn (1-2 câu)</option>
+          <option value="medium" selected>Vừa phải (3-5 câu)</option>
+          <option value="long">Chi tiết (nhiều hơn)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="promptStyle">Phong cách tóm tắt</label>
+        <select id="promptStyle">
+          <option value="default">Mặc định</option>
+          <option value="summary_bullet">Bullet Points</option>
+          <option value="summary_detailed">Chi tiết có cấu trúc</option>
+          <option value="summary_structured">Giữ cấu trúc gốc</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
+        <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu và dữ liệu, bỏ ví dụ..."></textarea>
+      </div>
+
+      <div class="field">
         <label for="minLength">Độ dài tối thiểu (ký tự)</label>
         <input type="number" id="minLength" value="400" min="100" max="5000" step="100">
       </div>

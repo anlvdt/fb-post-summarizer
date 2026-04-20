@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Social Content Repurposer",
-  "version": "2.0.0",
-  "description": "Biến bài viết MXH thành status cá nhân & bài Affiliate Marketing bằng AI",
+  "version": "2.1.0",
+  "description": "Tóm tắt, viết status & affiliate từ bài viết Facebook bằng AI. Dịch từ Anh-Việt. Tối ưu cho Facebook.",
   "author": "Lê Ẩn",
   "permissions": [
     "storage",
