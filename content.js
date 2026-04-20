@@ -473,19 +473,38 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
       // Expand to get full text
       if (seeMoreClickable) {
         try { seeMoreClickable.click(); } catch (_) { }
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 1200));
       }
 
       const text = cleanText(extractMainContent(textContainer || target) || (textContainer || target).innerText || "");
 
       // Try to collapse back by clicking "See less" / "Ẩn bớt"
-      if (textContainer) {
-        const collapseBtn = Array.from(textContainer.querySelectorAll('div[role="button"], span'))
-          .find(el => {
-            const t = (el.textContent || "").trim().toLowerCase();
-            return t === "ẩn bớt" || t === "see less" || t === "show less";
-          });
-        if (collapseBtn) try { collapseBtn.click(); } catch (_) { }
+      // Search wider: up to 5 parents above textContainer, because FB often
+      // places the collapse button outside the original text container
+      if (seeMoreClickable) {
+        await new Promise(r => setTimeout(r, 300));
+        const collapseKeywords = ["ẩn bớt", "see less", "show less", "thu gọn"];
+        let searchRoot = textContainer || target;
+        // Walk up to find a wider container
+        for (let i = 0; i < 5; i++) {
+          if (searchRoot.parentElement && searchRoot.parentElement !== document.body) {
+            searchRoot = searchRoot.parentElement;
+          }
+        }
+        const candidates = searchRoot.querySelectorAll('div[role="button"], span[role="button"], span, a');
+        let collapsed = false;
+        for (const el of candidates) {
+          const t = (el.textContent || "").trim().toLowerCase();
+          if (t.length > 20) continue; // skip long text nodes
+          if (collapseKeywords.some(kw => t === kw || t.includes(kw))) {
+            try { el.click(); collapsed = true; } catch (_) { }
+            break;
+          }
+        }
+        // Fallback: try clicking the same "See more" element again (FB toggles it)
+        if (!collapsed && seeMoreClickable) {
+          try { seeMoreClickable.click(); } catch (_) { }
+        }
       }
 
       await summarizeText(text, type);
