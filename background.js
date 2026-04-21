@@ -215,7 +215,7 @@ YÊU CẦU:
 const STATUS_EMOTIONAL_PROMPT = `Viết status MXH có cảm xúc từ nội dung vừa đọc được.
 
 QUY TRÌNH:
-1. CẢMC XÚC: Đọc xong bài này, điều gì khiến mình ấn tượng/xúc động nhất?
+1. CẢM XÚC: Đọc xong bài này, điều gì khiến mình ấn tượng/xúc động nhất?
 2. TÓM TẮT: Nội dung gốc nói gì? (2-3 câu, ghi credit nếu biết)
 3. LIÊN HỆ: Điều này gợi cho mình suy nghĩ/cảm xúc gì? Liên hệ thực tế ra sao?
 
@@ -228,50 +228,54 @@ YÊU CẦU:
 - Giọng kể chuyện, chân thật, có "hồn"
 ` + VNREVIEW_RULES;
 
-// AFFILIATE - Chân thật như đã dùng thử + Quy tắc VnReview
-const AFFILIATE_PROMPT = `Bạn là người dùng thật, đã trải nghiệm sản phẩm.
+// AFFILIATE - Review sản phẩm chân thật + Quy tắc VnReview
+const AFFILIATE_PROMPT = `Bạn là người dùng thật, viết review sản phẩm tự nhiên.
 
-NHIỆM VỤ: Viết review/affiliate từ thông tin sản phẩm, như CHÍNH MÌNH đã dùng thử.
+NHIỆM VỤ: Viết bài affiliate từ thông tin sản phẩm, như đã dùng thử.
 
-PHONG CÁCH:
-- Xưng "Mình" - như kể cho bạn bè
-- CHÂN THẬT, không phóng đại, không PR cứng
-- Có chi tiết cụ thể (dùng bao lâu, kết quả thế nào)
-- Điểm mạnh viết như phát hiện ra, không quảng cáo
-
-CẤU TRÚC:
-1. VẤN ĐỀ: Mình từng gặp vấn đề gì...
-2. TÌM KIẾM: Đã thử các giải pháp khác...
-3. TRẢI NGHIỆM: Dùng sản phẩm này thấy...
-4. KẾT: Ai phù hợp thì tham khảo, link ở dưới
+QUY TRÌNH:
+1. XÁC ĐỊNH: Sản phẩm giải quyết vấn đề gì? Điểm nổi bật nhất?
+2. XÂY DỰNG: Tạo câu chuyện trải nghiệm chân thật (vấn đề → tìm kiếm → thử dùng → kết quả)
+3. VIẾT: Xưng "mình", giọng kể bạn bè, chi tiết cụ thể
 
 YÊU CẦU:
 - 2-3 đoạn ngắn, tổng 100-200 từ
+- Mở bằng vấn đề thực tế, KHÔNG mở bằng tên sản phẩm
+- Điểm mạnh viết như phát hiện, không quảng cáo
 - Cuối bài: "Link: [LINK]" hoặc "Mua ở đây: [LINK]"
 - KHÔNG hô hào "MUA NGAY", "GIÁ SỐC"
-- VIẾT LẠI hoàn toàn, KHÔNG copy
+- Giọng chân thật, không phóng đại
 ` + VNREVIEW_RULES;
 
-// AFFILIATE NHẸ NHÀNG - Soft sell + Quy tắc VnReview
-const AFFILIATE_SOFT_PROMPT = `Viết affiliate review nhẹ nhàng, không giống quảng cáo.
+// AFFILIATE NHẸ NHÀNG - Soft sell
+const AFFILIATE_SOFT_PROMPT = `Viết chia sẻ trải nghiệm sản phẩm nhẹ nhàng, không giống quảng cáo.
 
-Yêu cầu:
-- Không "review", không "recommend" - viết như chia sẻ trải nghiệm
-- Mở đầu bằng câu chuyện/vấn đề thật
+QUY TRÌNH:
+1. Tìm 1 vấn đề thực tế mà sản phẩm giải quyết
+2. Viết như đang kể chuyện, phát hiện sản phẩm một cách tự nhiên
+3. Để link ở cuối, không kêu gọi mua
+
+YÊU CẦU:
+- 80-150 từ, giọng nhẹ nhàng
+- Mở bằng câu chuyện/vấn đề, KHÔNG mở bằng tên sản phẩm
 - Điểm mạnh viết như phát hiện ra, không PR
-- Không kêu gọi mua trực tiếp - để link ở cuối tự nhiên
-- Tổng 80-150 từ
+- Link ở cuối tự nhiên, không kêu gọi
 ` + VNREVIEW_RULES;
 
-// AFFILIATE CÂU CHUYỆN - Storytelling format + Quy tắc VnReview
-const AFFILIATE_STORY_PROMPT = `Viết affiliate theo format câu chuyện/mẹo hay.
+// AFFILIATE CÂU CHUYỆN - Storytelling format
+const AFFILIATE_STORY_PROMPT = `Viết bài affiliate theo format câu chuyện hấp dẫn.
 
-Yêu cầu:
-- Mở đầu: Mình đang gặp vấn đề gì đó → Tìm giải pháp → Phát hiện sản phẩm
-- Kể lại trải nghiệm dùng thử như có thật
-- Điểm mạnh: "Điều mình thích là..."
-- Kết: Chia sẻ link cho ai cần
-- Giọng tự nhiên, không PR
+QUY TRÌNH:
+1. TÌNH HUỐNG: Mình đang gặp vấn đề gì cụ thể?
+2. HÀNH TRÌNH: Đã thử những gì? Tại sao chưa ổn?
+3. PHÁT HIỆN: Tìm ra sản phẩm này, dùng thử thấy sao?
+4. KẾT QUẢ: Điều mình thích nhất + chia sẻ link cho ai cần
+
+YÊU CẦU:
+- 100-200 từ, giọng kể chuyện tự nhiên
+- Xưng "mình", chi tiết cụ thể (bao lâu, kết quả gì)
+- Không PR cứng, không hô hào
+- Link cuối bài tự nhiên
 ` + VNREVIEW_RULES;
 
 // TÓM TẮT GIỮ CẤU TRÚC - Preserve original structure
