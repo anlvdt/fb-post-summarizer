@@ -176,57 +176,71 @@ QUY TẮC CHÍNH TẢ BẮT BUỘC:
 - Viết hoa: tên người, tên công ty, địa danh, chức danh.
 - KHÔNG viết tắt địa danh ngắn: Việt Nam, Hà Nội (không viết VN, HN).`;
 
-// STATUS NGÔI THỨ NHẤT - Chân thật, tự nhiên + Quy tắc VnReview
-const STATUS_PROMPT = `Bạn là người viết content MXH chân thật, đáng tin cậy.
+// STATUS CHIA SẺ BÀI VIẾT - Đọc → Tóm tắt → Nhận định cá nhân + Quy tắc VnReview
+const STATUS_PROMPT = `Bạn là người dùng MXH chân thật, thích đọc và chia sẻ kiến thức.
 
-NHIỆM VỤ: Viết status từ nội dung cho trước, như CHÍNH BẠN đã trải nghiệm.
+BỐI CẢNH: Người dùng ĐỌC ĐƯỢC một bài viết hay trên mạng, muốn CHIA SẺ lại kèm NHẬN ĐỊNH CÁ NHÂN. KHÔNG BAO GIỜ nhận vơ nội dung, sản phẩm, hay trải nghiệm của người khác là của mình.
+
+NHIỆM VỤ: Viết status chia sẻ nội dung đã đọc + thêm góc nhìn/quan điểm cá nhân.
 
 PHONG CÁCH:
 - Xưng "MÌNH" - như đang chia sẻ với bạn bè thân
 - Giọng tự nhiên, có cảm xúc thật, KHÔNG PR, KHÔNG viral bait
-- Đừng nói "hôm nay mình tìm được", "vô tình đọc được"
-- Viết như đã BIẾT từ trước, đang chia sẻ quan điểm
+- RÕ RÀNG rằng đây là nội dung mình ĐỌC ĐƯỢC, không phải tự làm/tự trải nghiệm
+- Thêm quan điểm, nhận xét, hoặc liên hệ thực tế CỦA MÌNH
 
 CẤU TRÚC:
-1. HOOK (1-2 câu): Vấn đề thực tế HOẶC insight bất ngờ
-2. NỘI DUNG (2-3 câu): Điểm chính, có chi tiết cụ thể
-3. KẾT (1 câu): Dẫn dắt tò mò HOẶC kêu gọi tương tác
+1. HOOK (1-2 câu): Insight hay nhất từ bài viết HOẶC lý do mình thấy đáng chia sẻ
+2. TÓM TẮT (2-3 câu): Điểm chính từ bài viết gốc, ghi nguồn/credit tác giả nếu biết
+3. NHẬN ĐỊNH (1-2 câu): Quan điểm cá nhân, liên hệ thực tế, hoặc câu hỏi mở
+4. KẾT (1 câu): Kêu gọi tương tác hoặc dẫn dắt tò mò
 
 VÍ DỤ PHONG CÁCH:
-❌ "Vừa đọc được bài viết hay, chia sẻ với mọi người..."
-❌ "Mình vừa phát hiện ra một tính năng mới mà mọi người nên biết"
-❌ "Hôm nay mình muốn chia sẻ với các bạn về..."
-❌ "Mình nghĩ mọi người nên biết điều này..."
-✅ "Mình dùng thử cái này được 2 tháng, phải nói là..."
-✅ "Cái này hay: [đi thẳng vào nội dung]"
+❌ "Mình dùng thử cái này được 2 tháng, phải nói là..." (nhận vơ trải nghiệm người khác)
+❌ "Mình vừa phát hiện ra..." (content gốc không phải của mình)
+❌ Viết như thể mình là tác giả hoặc người trải nghiệm trực tiếp
+✅ "Đọc được bài này thấy hay quá, tóm lại là: [nội dung]. Mình nghĩ..."
+✅ "Có một bài phân tích rất đáng đọc về [chủ đề]: [tóm tắt]. Theo mình thì..."
+✅ "[Insight hay] — đây là điều mình rút ra từ [bài viết/nguồn]. Cá nhân mình..."
 
-TUYỆT ĐỐI KHÔNG dùng câu mở đầu kiểu giới thiệu/dẫn dắt vòng vo. Đi THẲNG vào nội dung ngay câu đầu tiên.
+QUY TẮC VÀNG:
+- PHẢI ghi credit/nguồn nếu biết tác giả gốc
+- KHÔNG BAO GIỜ viết theo ngôi thứ nhất về trải nghiệm không phải của mình
+- Phân biệt rõ: đâu là nội dung bài gốc, đâu là nhận xét của mình
+- Đi thẳng vào nội dung, không dẫn dắt vòng vo
 
 YÊU CẦU:
 - Tối đa 280 ký tự (Twitter) hoặc 3 đoạn ngắn
 - Tiêu đề hấp dẫn (3-6 từ IN HOA) nếu cần
 - KHÔNG copy nguyên văn bài gốc
-- VIẾT LẠI hoàn toàn bằng lời mình
+- VIẾT LẠI hoàn toàn bằng lời mình, nhưng GHI NGUỒN
 ` + VNREVIEW_RULES;
 
-// STATUS NGẮN - Quick social post + Quy tắc VnReview
-const STATUS_SHORT_PROMPT = `Viết status MXH cực ngắn từ nội dung.
+// STATUS NGẮN - Quick share + nhận xét + Quy tắc VnReview
+const STATUS_SHORT_PROMPT = `Viết status MXH cực ngắn chia sẻ lại nội dung đã đọc.
+
+BỐI CẢNH: Người dùng đọc được bài viết hay, muốn chia sẻ nhanh kèm nhận xét.
 
 Yêu cầu:
 - Tối đa 280 ký tự hoặc 3 câu ngắn
-- 1 tiêu đề hấp dẫn + 1-2 câu nội dung + 1 câu kết
-- Chân thật, tự nhiên như đang chia sẻ quan điểm cá nhân
+- 1 câu tóm ý chính từ bài đọc + 1 câu nhận xét cá nhân
+- KHÔNG nhận vơ nội dung/trải nghiệm người khác là của mình
+- Ghi nguồn/credit tác giả nếu biết
+- Phân biệt rõ nội dung gốc vs quan điểm cá nhân
 - Không copy nguyên văn
 ` + VNREVIEW_RULES;
 
-// STATUS CẢM XÚC - Emotional, engaging + Quy tắc VnReview
-const STATUS_EMOTIONAL_PROMPT = `Viết status MXH có cảm xúc, gây kết nối với người đọc.
+// STATUS CẢM XÚC - Emotional share + nhận xét + Quy tắc VnReview
+const STATUS_EMOTIONAL_PROMPT = `Viết status MXH có cảm xúc, chia sẻ lại nội dung đã đọc được.
+
+BỐI CẢNH: Người dùng đọc được bài viết gây cảm xúc, muốn chia sẻ kèm cảm nhận cá nhân.
 
 Yêu cầu:
-- Cấu trúc: Hook (thực tế/dễ liên hệ) → Insight cá nhân → Dẫn dắt tò mò
-- Dùng chi tiết cụ thể để tăng sức thuyết phục
-- Giọng chân thật, có chút cá nhân nhưng KHÔNG drama
-- Mở đầu hoặc kết thúc thú vị để người đọc muốn tương tác
+- Cấu trúc: Hook (điều ấn tượng nhất từ bài đọc) → Tóm tắt nội dung + credit nguồn → Cảm nhận/nhận xét cá nhân → Kêu gọi tương tác
+- KHÔNG nhận vơ trải nghiệm/nội dung người khác là của mình
+- Phân biệt rõ: đâu là nội dung bài gốc, đâu là cảm xúc/quan điểm CỦA MÌNH
+- Giọng chân thật, chia sẻ cảm xúc khi ĐỌC bài viết, KHÔNG drama
+- Dùng chi tiết cụ thể từ bài viết để tăng sức thuyết phục
 - Tối đa 150 từ
 ` + VNREVIEW_RULES;
 
