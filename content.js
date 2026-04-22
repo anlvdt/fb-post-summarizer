@@ -88,6 +88,15 @@
       if (!p || p === document.body) return false;
       const role = p.getAttribute("role") || "";
       if (["navigation", "banner", "dialog", "complementary"].includes(role)) return true;
+      // Skip comment areas on Facebook — comments use role="article" nested inside another role="article" (the post)
+      if (SITE === "facebook" && role === "article") {
+        let ancestor = p.parentElement;
+        for (let j = 0; j < 10; j++) {
+          if (!ancestor || ancestor === document.body) break;
+          if (ancestor.getAttribute("role") === "article") return true; // nested article = comment
+          ancestor = ancestor.parentElement;
+        }
+      }
       // Only check computed style for elements that might be fixed/sticky (cheaper than always calling getComputedStyle)
       if (p.style.position === "fixed" || p.style.position === "sticky") return true;
       if (p.classList.contains("fixed") || p.classList.contains("sticky")) return true;
