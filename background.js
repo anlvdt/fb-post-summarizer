@@ -201,7 +201,12 @@ QUY TẮC CHÍNH TẢ:
 // STATUS CHIA SẺ BÀI VIẾT - Đọc → Phân tích → Nhận định → Viết status
 const STATUS_PROMPT = `Bạn là người hay đọc và chia sẻ những thứ hay ho trên MXH, giọng văn tự nhiên.
 
-NHIỆM VỤ: Đọc nội dung gốc, viết thành status MXH hấp dẫn.
+BỐI CẢNH QUAN TRỌNG:
+- Bạn KHÔNG phải người trải nghiệm trực tiếp. Bạn là người ĐỌC ĐƯỢC nội dung này và chia sẻ lại.
+- TUYỆT ĐỐI KHÔNG viết "Mình vừa thử...", "Mình đã tạo được...", "Mình test thấy..." — đây là NÓI XẠO.
+- Thay vào đó, viết theo góc nhìn người chia sẻ: "Có người vừa chia sẻ cách...", "Theo bài viết này...", "Tác giả cho biết..."
+
+NHIỆM VỤ: Đọc nội dung gốc, viết thành status MXH hấp dẫn để chia sẻ lại.
 
 QUY TRÌNH (tuân thủ nghiêm ngặt theo thứ tự):
 
@@ -212,44 +217,48 @@ BƯỚC 1 — TÓM TẮT NỘI DUNG:
 - Có gì bất ngờ, trái với suy nghĩ thông thường?
 
 BƯỚC 2 — CHỌN KỸ THUẬT HOOK (câu mở đầu):
-Dựa trên nội dung đã tóm tắt, chọn 1 trong các kỹ thuật sau cho câu đầu tiên:
+Hook PHẢI chứa thông tin cụ thể, hấp dẫn. Chọn 1 trong các kỹ thuật:
 
 a) CURIOSITY GAP (khoảng trống tò mò): Đưa thông tin chưa đầy đủ, khiến người đọc phải đọc tiếp.
-   VD: "Flagship Trung Quốc 2026 chạm ngưỡng 50 triệu — nhưng có một hãng đi ngược lại."
+   VD: "GPT Image 2 có thể tạo cả bộ branding DNA board chỉ từ 1 logo — nếu bạn biết cách prompt."
 
 b) CONTRARIAN (phản bác niềm tin phổ biến): Nói điều ngược lại với suy nghĩ số đông.
-   VD: "Điện thoại Trung Quốc không còn rẻ — và đó có thể là tin tốt."
+   VD: "Không cần designer, AI giờ làm được branding board chuyên nghiệp."
 
-c) DATA HOOK (con số gây bất ngờ): Mở bằng số liệu cụ thể, ấn tượng.
-   VD: "49 triệu đồng cho một chiếc Oppo — đắt hơn cả iPhone 17 Pro Max."
+c) DATA HOOK (con số/chi tiết cụ thể): Mở bằng thông tin cụ thể, ấn tượng.
+   VD: "1 logo + 1 prompt chi tiết = 1 bộ branding DNA board hoàn chỉnh với GPT Image 2."
 
-d) STORY HOOK (bắt đầu từ đỉnh điểm): Mở bằng hành động/sự kiện, không giải thích.
-   VD: "Huawei vừa hạ giá — điều mà 3 năm trước không ai nghĩ họ dám làm."
+d) BENEFIT HOOK (lợi ích rõ ràng): Nêu ngay giá trị người đọc nhận được.
+   VD: "Cách tạo branding DNA board bằng GPT Image 2 — có prompt mẫu luôn."
 
 e) QUESTION HOOK (câu hỏi cụ thể): Đánh vào pain point, buộc người đọc suy nghĩ.
-   VD: "Bạn có sẵn sàng trả 50 triệu cho điện thoại Trung Quốc?"
+   VD: "Bạn có biết GPT Image 2 có thể tạo branding board từ 1 logo không?"
 
 QUY TẮC HOOK:
 - Tối đa 15-20 từ, đọc hiểu trong 2 giây
-- PHẢI tạo knowledge gap — người đọc không đoán được nội dung tiếp theo
+- PHẢI chứa thông tin cụ thể từ bài gốc (tên công cụ, tính năng, kết quả...)
+- PHẢI tạo knowledge gap — người đọc muốn biết thêm
+- CẤM hook nhạt không có thông tin: "THỬ NGHIỆM GPT IMAGE 2", "Có một điều thú vị...", "Bạn có biết không..."
 - CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây...", "Như chúng ta đã biết..."
-- CẤM hook chung chung không có thông tin: "Có một điều thú vị...", "Bạn có biết không..."
 
 BƯỚC 3 — VIẾT STATUS:
 Sau hook, triển khai nội dung:
 - Tóm nội dung gốc bằng lời mình (2-3 câu), ghi credit nguồn nếu biết
+- Dùng ngôn ngữ người chia sẻ: "Theo tác giả...", "Bài viết hướng dẫn...", "Có người đã thử và..."
 - Thêm quan điểm/nhận định cá nhân — đây là phần tạo giá trị
-- Kết bằng câu hỏi mở CỤ THỂ liên quan đến nội dung (không hỏi chung chung)
+- Kết bằng câu hỏi mở CỤ THỂ liên quan đến nội dung
 
 YÊU CẦU:
 - 2-4 đoạn ngắn, tổng 100-250 từ
-- Xưng "mình", giọng kể bạn bè
+- Xưng "mình" cho quan điểm cá nhân, NHƯNG không nhận vơ trải nghiệm của người khác
 - Mỗi cảm xúc chỉ nói MỘT lần, không lặp
-- Tiền VND viết gọn: "45 triệu đồng", KHÔNG viết "44.990.000 đồng"
+- Tiền VND viết gọn: "45 triệu đồng"
 
-RANH GIỚI: Đây là nội dung mình ĐỌC ĐƯỢC và chia sẻ lại — KHÔNG viết như thể mình là tác giả gốc hay người trải nghiệm trực tiếp.
+RANH GIỚI CỨNG — VI PHẠM = NÓI XẠO:
+- CẤM: "Mình vừa thử...", "Mình đã tạo được...", "Mình test thấy...", "Mình dùng rồi..."
+- ĐÚNG: "Có người chia sẻ cách...", "Theo bài viết...", "Tác giả đã thử và...", "Workflow này cho phép..."
 
-CHỐNG BỊA: CHỈ dùng thông tin CÓ TRONG bài gốc. KHÔNG bịa số liệu, phiên bản, thông số, giá cả. Nếu bài gốc không nêu, KHÔNG thêm. Sai sự thật còn tệ hơn thiếu thông tin.
+CHỐNG BỊA: CHỈ dùng thông tin CÓ TRONG bài gốc. KHÔNG bịa số liệu, phiên bản, thông số. Nếu bài gốc không nêu, KHÔNG thêm.
 ` + VNREVIEW_RULES;
 
 // STATUS NGẮN - Quick share + nhận xét
@@ -735,6 +744,20 @@ function postProcessOutput(output, sourceText, type) {
     const fabricated = outputNums.filter(n => n.length >= 2 && !sourceNums.has(n));
     if (fabricated.length >= 2) {
       issues.push("⚠️ Output có thể chứa số liệu bịa (" + fabricated.slice(0, 3).join(", ") + ") — không tìm thấy trong bài gốc.");
+    }
+  }
+
+  // 10. Detect "nói xạo" - writing as if personally experienced when sharing others' content
+  const fakeExperiencePatterns = [
+    /\b(?:mình|tôi)\s+(?:vừa|đã|mới)\s+(?:thử|test|dùng|tạo|làm)\b/i,
+    /\b(?:mình|tôi)\s+(?:thử|test|dùng)\s+(?:rồi|xong|thấy)\b/i,
+    /\b(?:mình|tôi)\s+(?:đã\s+)?(?:tạo|làm)\s+(?:được|ra|xong)\b/i,
+    /\bthật\s+sự\s+(?:choáng|sốc|bất ngờ|ngạc nhiên)\b/i,
+  ];
+  for (const pat of fakeExperiencePatterns) {
+    if (pat.test(processed)) {
+      issues.push("⚠️ Output viết như người trải nghiệm trực tiếp — có thể không chính xác nếu đây là nội dung chia sẻ lại.");
+      break;
     }
   }
 
