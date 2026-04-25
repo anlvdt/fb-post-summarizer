@@ -56,13 +56,13 @@
       translateTooltip.innerHTML =
         '<div class="fbs-translate-word">' + word + '</div>' +
         '<div class="fbs-translate-result">' + translation + '</div>' +
-        '<button class="fbs-translate-copy" title="Copy">📋</button>';
+        '<button class="fbs-translate-copy" title="Copy">Copy</button>';
 
       translateTooltip.querySelector(".fbs-translate-copy").addEventListener("click", (e) => {
         e.stopPropagation();
         navigator.clipboard.writeText(resp.translation || "").then(() => {
           e.target.textContent = "✓";
-          setTimeout(() => { e.target.textContent = "📋"; }, 1000);
+          setTimeout(() => { e.target.textContent = "Copy"; }, 1000);
         });
       });
     });

@@ -203,6 +203,12 @@ button:hover {
   color: #fff;
 }
 
+.alarm-active {
+  border-color: #34d399 !important;
+  color: #34d399 !important;
+  background: rgba(52, 211, 153, 0.12) !important;
+}
+
 .status {
   display: none;
   margin-top: 8px;
@@ -329,4 +335,172 @@ button:hover {
 
 .history-item {
   cursor: pointer;
+}
+
+/* Review / Tin hay tab */
+.review-section {
+  margin-bottom: 12px;
+}
+
+.review-main-btn {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.review-main-btn:hover {
+  opacity: 0.9;
+}
+
+.review-main-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 10px 0 6px;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.review-select-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.review-select-all input {
+  width: auto;
+  margin: 0;
+}
+
+.review-list {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.review-item {
+  padding: 8px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: #16162a;
+  border: 1px solid #2a2a4a;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.review-item input[type="checkbox"] {
+  width: auto;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.review-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.review-item-title {
+  font-size: 11px;
+  color: #e0e0e0;
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-item-meta {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 2px;
+}
+
+.review-item-reason {
+  font-size: 10px;
+  color: #f59e0b;
+  font-style: italic;
+}
+
+.review-item-score {
+  font-size: 10px;
+  font-weight: 700;
+  color: #34d399;
+  flex-shrink: 0;
+  background: rgba(52, 211, 153, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.review-item-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.review-export-btn {
+  width: 100%;
+  padding: 9px;
+  border: 2px solid #34d399;
+  border-radius: 8px;
+  background: rgba(52, 211, 153, 0.1);
+  color: #34d399;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.review-export-btn:hover {
+  background: rgba(52, 211, 153, 0.25);
+}
+
+.review-divider {
+  border-top: 1px solid #2a2a4a;
+  margin: 14px 0;
+}
+
+.review-alarm-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ccc;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.review-alarm-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.review-time-input {
+  width: 130px;
+  padding: 5px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+  color-scheme: dark;
+}
+
+.review-alarm-status {
+  font-size: 10px;
+  color: #666;
+  margin-top: 4px;
 }

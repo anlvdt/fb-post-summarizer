@@ -10,7 +10,9 @@
     "contextMenus",
     "activeTab",
     "cookies",
-    "scripting"
+    "scripting",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",

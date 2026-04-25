@@ -6,6 +6,7 @@ document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.add("active");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "history") loadHistory();
+    if (tab.dataset.tab === "review") loadReviewTab();
   });
 });
 
@@ -188,4 +189,158 @@ document.getElementById("clearBtn").addEventListener("click", async () => {
   await chrome.storage.local.remove("history");
   loadHistory();
   showStatus("Đã xóa", "success");
+});
+
+// === REVIEW TAB ===
+let reviewItems = [];
+
+function setAlarmButtonState(enabled) {
+  const btnOn = document.getElementById("setAlarmBtn");
+  const btnOff = document.getElementById("clearAlarmBtn");
+  if (enabled) {
+    btnOn.classList.add("alarm-active");
+    btnOff.classList.remove("alarm-active");
+  } else {
+    btnOn.classList.remove("alarm-active");
+    btnOff.classList.remove("alarm-active");
+  }
+}
+
+async function loadReviewTab() {
+  // Load existing review results
+  let data = null;
+  try { data = await chrome.runtime.sendMessage({ action: "get-ai-review" }); } catch (_) { }
+  if (data && data.items && data.items.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (data.date === today) {
+      reviewItems = data.items;
+      renderReviewResults();
+    }
+  }
+  // Load alarm status
+  const alarmData = await chrome.storage.local.get("reviewAlarm");
+  const alarm = alarmData.reviewAlarm;
+  if (alarm && alarm.enabled) {
+    document.getElementById("reviewTime").value =
+      String(alarm.hour).padStart(2, "0") + ":" + String(alarm.minute).padStart(2, "0");
+    document.getElementById("alarmStatus").textContent = "Đã bật — chạy lúc " +
+      String(alarm.hour).padStart(2, "0") + ":" + String(alarm.minute).padStart(2, "0") + " mỗi ngày";
+    document.getElementById("alarmStatus").style.color = "#34d399";
+    setAlarmButtonState(true);
+  } else {
+    document.getElementById("alarmStatus").textContent = "Chưa bật";
+    document.getElementById("alarmStatus").style.color = "#666";
+    setAlarmButtonState(false);
+  }
+}
+
+function renderReviewResults() {
+  const container = document.getElementById("reviewResults");
+  const list = document.getElementById("reviewList");
+  const countEl = document.getElementById("reviewCount");
+
+  container.style.display = "block";
+  countEl.textContent = `AI chọn ${reviewItems.length} tin hay`;
+
+  list.innerHTML = reviewItems.map((item, i) => {
+    const title = esc(item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 80));
+    const imgHtml = item.imageUrl
+      ? '<img class="review-item-thumb" src="' + esc(item.imageUrl) + '" onerror="this.style.display=\'none\'">'
+      : '';
+    return '<div class="review-item">' +
+      '<input type="checkbox" class="review-check" data-idx="' + i + '" checked>' +
+      '<div class="review-item-content">' +
+      '<div class="review-item-title">' + title + '</div>' +
+      '<div class="review-item-meta">' + esc(item.author || item.site || "") + ' · ' + esc(item.aiReason || "") + '</div>' +
+      '</div>' +
+      (item.aiScore ? '<span class="review-item-score">' + item.aiScore + '</span>' : '') +
+      imgHtml +
+      '</div>';
+  }).join("");
+
+  // Select all checkbox
+  document.getElementById("selectAllReview").checked = true;
+  document.getElementById("selectAllReview").addEventListener("change", (e) => {
+    list.querySelectorAll(".review-check").forEach(cb => { cb.checked = e.target.checked; });
+  });
+}
+
+// AI Review button
+document.getElementById("aiReviewBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("aiReviewBtn");
+  const statusEl = document.getElementById("reviewStatus");
+  btn.disabled = true;
+  btn.textContent = "Đang phân tích...";
+  statusEl.style.display = "none";
+
+  try {
+    const result = await chrome.runtime.sendMessage({ action: "ai-review" });
+    if (result.error) {
+      statusEl.textContent = result.error;
+      statusEl.className = "status error";
+      statusEl.style.display = "block";
+    } else if (result.success) {
+      reviewItems = result.items;
+      renderReviewResults();
+      statusEl.textContent = `Đã tìm ${result.count} tin hay!`;
+      statusEl.className = "status success";
+      statusEl.style.display = "block";
+    }
+  } catch (e) {
+    statusEl.textContent = "Lỗi: " + e.message;
+    statusEl.className = "status error";
+    statusEl.style.display = "block";
+  }
+
+  btn.disabled = false;
+  btn.textContent = "AI Đề xuất tin hay";
+});
+
+// Export DTCN JSON
+document.getElementById("exportDtcnBtn").addEventListener("click", async () => {
+  const checks = document.querySelectorAll(".review-check:checked");
+  const selectedItems = Array.from(checks).map(cb => reviewItems[+cb.dataset.idx]).filter(Boolean);
+
+  if (selectedItems.length === 0) {
+    alert("Chọn ít nhất 1 tin để export!");
+    return;
+  }
+
+  const result = await chrome.runtime.sendMessage({ action: "export-dtcn", items: selectedItems });
+  if (result && result.data) {
+    const exportPayload = {
+      _scanned_candidates: result.data,
+      source: "feedwriter",
+      exported_at: new Date().toISOString(),
+      count: result.data.length,
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = "feedwriter-dtcn-" + dateStr + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+});
+
+// Alarm controls
+document.getElementById("setAlarmBtn").addEventListener("click", async () => {
+  const time = document.getElementById("reviewTime").value;
+  if (!time) return;
+  const [hour, minute] = time.split(":").map(Number);
+  await chrome.storage.local.set({ reviewAlarm: { hour, minute, enabled: true } });
+  document.getElementById("alarmStatus").textContent = "Đã bật — chạy lúc " + time + " mỗi ngày";
+  document.getElementById("alarmStatus").style.color = "#34d399";
+  setAlarmButtonState(true);
+  chrome.runtime.sendMessage({ action: "set-review-alarm", hour, minute }).catch(() => { });
+});
+
+document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
+  await chrome.storage.local.set({ reviewAlarm: { enabled: false } });
+  document.getElementById("alarmStatus").textContent = "Đã tắt";
+  document.getElementById("alarmStatus").style.color = "#666";
+  setAlarmButtonState(false);
+  chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => { });
 });

@@ -369,7 +369,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     if (msg.action !== "summarize") return;
     try {
-      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type);
+      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type, msg.sourceUrl, msg.imageUrl, msg.author, msg.postTitle);
       if (result && result.error) port.postMessage({ action: "error", error: result.error });
       else if (result && result.summary) port.postMessage({ action: "done", full: result.summary, quality: result.quality, issues: result.issues });
     } catch (e) {
@@ -395,6 +395,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleStream(request.text, request.site || "unknown", fakePort, controller.signal, "summary")
       .then(r => sendResponse(r || { error: "Unknown error" }))
       .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  // === AI REVIEW ===
+  if (request.action === "ai-review") {
+    reviewTodayHistory()
+      .then(r => sendResponse(r))
+      .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  // === GET AI REVIEW RESULTS ===
+  if (request.action === "get-ai-review") {
+    chrome.storage.local.get("aiReview", (data) => {
+      sendResponse(data.aiReview || null);
+    });
+    return true;
+  }
+  // === EXPORT DTCN JSON ===
+  if (request.action === "export-dtcn") {
+    const items = request.items || [];
+    const exported = exportDtcnJson(items);
+    sendResponse({ success: true, data: exported });
+    return true;
+  }
+  // === SET/CLEAR AUTO REVIEW ALARM ===
+  if (request.action === "set-review-alarm") {
+    const hour = request.hour || 18;
+    const minute = request.minute || 0;
+    // Calculate delay to next occurrence
+    const now = new Date();
+    const target = new Date();
+    target.setHours(hour, minute, 0, 0);
+    if (target <= now) target.setDate(target.getDate() + 1);
+    const delayMs = target - now;
+    chrome.alarms.create("daily-ai-review", {
+      delayInMinutes: delayMs / 60000,
+      periodInMinutes: 24 * 60,
+    });
+    chrome.storage.local.set({ reviewAlarm: { hour, minute, enabled: true } });
+    sendResponse({ success: true });
+    return true;
+  }
+  if (request.action === "clear-review-alarm") {
+    chrome.alarms.clear("daily-ai-review");
+    chrome.storage.local.set({ reviewAlarm: { enabled: false } });
+    sendResponse({ success: true });
     return true;
   }
   // === TRANSLATE WORD ===
@@ -667,7 +712,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 7. Quality score
+  // 11. Quality score
   let quality = "good";
   if (issues.some(i => i.includes("fail") || i.includes("trống"))) quality = "fail";
   else if (issues.some(i => i.includes("⚠️") || i.includes("copy"))) quality = "warn";
@@ -676,7 +721,7 @@ function postProcessOutput(output, sourceText, type) {
   return { text: processed, quality, issues };
 }
 
-async function handleStream(text, site, port, signal, type = "summary") {
+async function handleStream(text, site, port, signal, type = "summary", sourceUrl = "", imageUrl = "", author = "", postTitle = "") {
   // === INPUT GUARDRAILS ===
   const inputCheck = validateInput(text);
   if (!inputCheck.valid) return { error: inputCheck.error };
@@ -715,7 +760,7 @@ async function handleStream(text, site, port, signal, type = "summary") {
         result.issues = postResult.issues;
 
         incrementBadge();
-        saveHistory(text, result.summary, site, type);
+        saveHistory(text, result.summary, site, type, sourceUrl, imageUrl, author, postTitle);
       }
       return result;
     }
@@ -726,13 +771,174 @@ async function handleStream(text, site, port, signal, type = "summary") {
 }
 
 // === HISTORY ===
-async function saveHistory(text, summary, site, type) {
+async function saveHistory(text, summary, site, type, sourceUrl, imageUrl, author, postTitle) {
   const data = await chrome.storage.local.get("history");
   const history = data.history || [];
-  history.unshift({ text: text.substring(0, 500), summary, date: new Date().toISOString(), site: site || "unknown", type: type || "summary" });
-  if (history.length > 50) history.length = 50;
+  history.unshift({
+    text: text.substring(0, 2000),
+    summary,
+    date: new Date().toISOString(),
+    site: site || "unknown",
+    type: type || "summary",
+    sourceUrl: sourceUrl || "",
+    imageUrl: imageUrl || "",
+    author: author || "",
+    postTitle: postTitle || "",
+  });
+  if (history.length > 200) history.length = 200;
   await chrome.storage.local.set({ history });
 }
+
+// === AI REVIEW: Đề xuất tin hay ===
+async function reviewTodayHistory() {
+  const syncData = await chrome.storage.sync.get(["apiKey", "provider"]);
+  const localData = await chrome.storage.local.get("history");
+  const apiKey = syncData.apiKey;
+  const provider = syncData.provider || "groq";
+  if (!apiKey) return { error: "Chưa nhập API Key. Vào tab Cài đặt để nhập." };
+  const data = { history: localData.history };
+
+  const history = data.history || [];
+  const today = new Date().toISOString().slice(0, 10);
+  const todayItems = history.filter(h => h.date && h.date.startsWith(today));
+
+  if (todayItems.length === 0) return { error: "Chưa có bài tóm tắt nào hôm nay." };
+
+  // Cap at 20 most recent items; truncate each to keep prompt under token limit
+  const MAX_ITEMS = 20;
+  const SUMMARY_CAP = 200;
+  const TITLE_CAP = 80;
+  const cappedItems = todayItems.slice(0, MAX_ITEMS);
+
+  // Build prompt for AI to review
+  const itemsList = cappedItems.map((h, i) => {
+    const title = (h.postTitle || "N/A").substring(0, TITLE_CAP);
+    const summary = (h.summary || "").substring(0, SUMMARY_CAP);
+    return `[${i}] Nguồn: ${h.site} | Tác giả: ${h.author || "N/A"} | Tiêu đề: ${title}\nTóm tắt: ${summary}\nLink: ${h.sourceUrl || "N/A"}`;
+  }).join("\n\n");
+
+  const systemPrompt = `Bạn là biên tập viên tin công nghệ. Nhiệm vụ: đánh giá danh sách bài tóm tắt trong ngày và chọn ra những bài HAY NHẤT để đăng "Điểm tin công nghệ".
+
+Tiêu chí chọn:
+- Tin nóng, xu hướng, có giá trị thông tin cao
+- Đủ nội dung để viết bài ngắn (150-350 chữ)
+- Có link nguồn (ưu tiên)
+- Không trùng lặp chủ đề
+- Ưu tiên tin AI, smartphone, bảo mật, startup, sản phẩm mới
+
+Trả về ĐÚNG JSON array, mỗi phần tử là index của bài được chọn kèm lý do ngắn:
+[{"index": 0, "score": 85, "reason": "Tin AI mới ra mắt, hot"}, ...]
+
+CHỈ trả về JSON, không giải thích thêm.`;
+
+  try {
+    const callFn = provider === "groq" ? callGroqNonStream : callGeminiNonStream;
+    const result = await callFn(apiKey, itemsList, systemPrompt);
+    if (!result) return { error: "AI không phản hồi." };
+
+    // Parse AI response
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return { error: "AI phản hồi không hợp lệ." };
+
+    const picks = JSON.parse(jsonMatch[0]);
+    const recommended = picks
+      .filter(p => typeof p.index === "number" && p.index >= 0 && p.index < todayItems.length)
+      .map(p => ({
+        ...todayItems[p.index],
+        aiScore: p.score || 0,
+        aiReason: p.reason || "",
+      }));
+
+    // Save recommendations
+    await chrome.storage.local.set({
+      aiReview: { date: today, items: recommended, reviewedAt: new Date().toISOString() }
+    });
+
+    return { success: true, count: recommended.length, items: recommended };
+  } catch (e) {
+    return { error: "Lỗi AI Review: " + e.message };
+  }
+}
+
+// Non-streaming API calls for AI review
+async function callNonStream(url, extraHeaders, body, extractFn) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...extraHeaders },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const msg = data?.error?.message || ("HTTP " + response.status);
+    throw new Error(msg);
+  }
+  return extractFn(data) || "";
+}
+
+async function callGroqNonStream(apiKey, userMessage, systemPrompt) {
+  return callNonStream(
+    "https://api.groq.com/openai/v1/chat/completions",
+    { "Authorization": "Bearer " + apiKey },
+    {
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    },
+    (d) => d?.choices?.[0]?.message?.content
+  );
+}
+
+async function callGeminiNonStream(apiKey, userMessage, systemPrompt) {
+  return callNonStream(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey,
+    {},
+    {
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userMessage }] }],
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.3 },
+    },
+    (d) => d?.candidates?.[0]?.content?.parts?.[0]?.text
+  );
+}
+
+// === EXPORT: Generate dtcn-v2 compatible JSON ===
+function exportDtcnJson(items) {
+  return items.map(item => ({
+    source: formatSourceName(item.site, item.author),
+    title: item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 100),
+    link: item.sourceUrl || "",
+    image: item.imageUrl || "",
+    summary: item.summary || "",
+    full_body: item.text || "",
+    score: item.aiScore || 50,
+    pub_date: item.date || new Date().toISOString(),
+  }));
+}
+
+function formatSourceName(site, author) {
+  const siteNames = { facebook: "Facebook", threads: "Threads", x: "X (Twitter)", linkedin: "LinkedIn", reddit: "Reddit" };
+  const siteName = siteNames[site] || site || "Web";
+  return author ? `${author} (${siteName})` : siteName;
+}
+
+// === ALARM: Auto review ===
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === "daily-ai-review") {
+    const result = await reviewTodayHistory();
+    if (result.success && result.count > 0) {
+      chrome.notifications.create("ai-review-done", {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "FeedWriter — Đề xuất tin hay",
+        message: `AI đã chọn ${result.count} tin hay trong ngày. Mở extension để xem & export.`,
+      });
+    }
+  }
+});
 
 // === STREAMING HELPERS ===
 async function processStream(response, port, signal, parseLine) {

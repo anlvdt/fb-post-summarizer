@@ -14,12 +14,14 @@
       </span>
       <h1>FeedWriter</h1>
     </div>
-    <p class="author">by <a href="https://github.com/anlvdt" target="_blank" style="color:#a855f7;text-decoration:none">Le An</a></p>
+    <p class="author">by <a href="https://github.com/anlvdt" target="_blank"
+        style="color:#a855f7;text-decoration:none">Le An</a></p>
 
     <!-- Tabs -->
     <div class="tabs">
       <button class="tab active" data-tab="settings">Cài đặt</button>
       <button class="tab" data-tab="history">Lịch sử</button>
+      <button class="tab" data-tab="review">Tin hay</button>
     </div>
 
     <!-- Settings Tab -->
@@ -112,7 +114,8 @@
         <a href="https://console.groq.com/keys" target="_blank" id="linkGroq">Lấy Groq API Key miễn phí</a>
         <a href="https://aistudio.google.com/apikey" target="_blank" id="linkGemini" style="display:none">Lấy Gemini API
           Key miễn phí</a>
-        <a href="https://github.com/anlvdt/fb-post-summarizer" target="_blank" style="margin-top:4px;display:block;color:#888;font-size:11px">⭐ GitHub — Star nếu thấy hữu ích</a>
+        <a href="https://github.com/anlvdt/fb-post-summarizer" target="_blank"
+          style="margin-top:4px;display:block;color:#888;font-size:11px">GitHub — Star nếu thấy hữu ích</a>
       </div>
     </div>
 
@@ -129,6 +132,36 @@
         <button id="exportBtn" class="test-btn">Export JSON</button>
         <button id="exportMdBtn" class="test-btn" style="margin-top:4px">Export Markdown</button>
         <button id="clearBtn" class="test-btn" style="margin-top:4px;color:#ff6b6b">Xóa lịch sử</button>
+      </div>
+    </div>
+
+    <!-- Review / Tin hay Tab -->
+    <div class="tab-content" id="tab-review">
+      <div class="review-section">
+        <button id="aiReviewBtn" class="review-main-btn">AI Đề xuất tin hay</button>
+        <div id="reviewStatus" class="status" style="display:none"></div>
+
+        <div id="reviewResults" style="display:none">
+          <div class="review-header">
+            <span id="reviewCount"></span>
+            <label class="review-select-all"><input type="checkbox" id="selectAllReview" checked> Chọn tất cả</label>
+          </div>
+          <div id="reviewList" class="review-list"></div>
+          <button id="exportDtcnBtn" class="review-export-btn">Export JSON cho DTCN-V2</button>
+        </div>
+      </div>
+
+      <div class="review-divider"></div>
+
+      <div class="review-section">
+        <label class="review-alarm-label">Tự động đề xuất hàng ngày</label>
+        <div class="review-alarm-row">
+          <input type="time" id="reviewTime" value="18:00" class="review-time-input">
+          <button id="setAlarmBtn" class="test-btn" style="width:auto;margin:0;padding:5px 12px">Bật</button>
+          <button id="clearAlarmBtn" class="test-btn"
+            style="width:auto;margin:0;padding:5px 12px;color:#ff6b6b">Tắt</button>
+        </div>
+        <div id="alarmStatus" class="review-alarm-status"></div>
       </div>
     </div>
   </div>
