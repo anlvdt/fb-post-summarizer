@@ -20,11 +20,6 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["selection"],
   });
   chrome.contextMenus.create({
-    id: "status-rewrite",
-    title: "Viết thành Status MXH",
-    contexts: ["selection"],
-  });
-  chrome.contextMenus.create({
     id: "affiliate-rewrite",
     title: "Chế bài Affiliate Marketing",
     contexts: ["selection"],
@@ -73,9 +68,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "summarize-selection" && info.selectionText) {
     const msg = { action: "summarize-selection", text: info.selectionText, type: "summary" };
     chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
-  } else if (info.menuItemId === "status-rewrite" && info.selectionText) {
-    const msg = { action: "summarize-selection", text: info.selectionText, type: "status" };
-    chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
   } else if (info.menuItemId === "affiliate-rewrite" && info.selectionText) {
     const msg = { action: "summarize-selection", text: info.selectionText, type: "affiliate" };
     chrome.tabs.sendMessage(tab.id, msg).catch(() => injectAndSend(tab.id, msg));
@@ -113,28 +105,44 @@ chrome.runtime.onStartup.addListener(async () => {
 // References: VietAI ViT5, Underthesea, Vietnamese summarization best practices
 
 // TÓM TẮT TIẾNG VIỆT CHUẨN - Hybrid extractive + abstractive approach
-const SUMMARY_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt tiếng Việt.
+const SUMMARY_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt tiếng Việt, giỏi viết tiêu đề hấp dẫn.
 
-NHIỆM VỤ: Đọc kỹ nội dung, xác định thông tin quan trọng, viết lại ngắn gọn.
+NHIỆM VỤ: Đọc kỹ nội dung, xác định thông tin quan trọng, viết TIÊU ĐỀ có hook mạnh + tóm tắt ngắn gọn.
 
 QUY TRÌNH:
 1. XÁC ĐỊNH: Chủ đề chính là gì? Kết luận/điểm then chốt nhất?
-2. TRÍCH XUẤT: Các ý quan trọng nhất (2-5 điểm)
-3. VIẾT LẠI: Hoàn toàn bằng lời của bạn, KHÔNG copy
+2. VIẾT TIÊU ĐỀ (HOOK): Dòng đầu tiên là tiêu đề in đậm, hấp dẫn, tạo tò mò. Dùng 1 trong các kỹ thuật:
+   - CURIOSITY GAP: Thông tin chưa đầy đủ khiến người đọc muốn biết thêm
+   - CONTRARIAN: Phản bác niềm tin phổ biến
+   - DATA HOOK: Con số/chi tiết cụ thể gây ấn tượng
+   - BENEFIT HOOK: Nêu ngay giá trị người đọc nhận được
+   - QUESTION HOOK: Câu hỏi cụ thể đánh vào pain point
+   Tiêu đề tối đa 15-20 từ, PHẢI chứa thông tin cụ thể từ bài gốc.
+3. TRÍCH XUẤT: Các ý quan trọng nhất (2-5 điểm)
+4. VIẾT LẠI: Hoàn toàn bằng lời của bạn, KHÔNG copy
+
+FORMAT OUTPUT:
+**[Tiêu đề hook mạnh]**
+
+[Nội dung tóm tắt]
 
 YÊU CẦU:
-- Tối đa 5 câu liền mạch hoặc 5 bullet points
+- Tiêu đề PHẢI ở dòng đầu, bọc trong **...**
+- Tối đa 5 câu liền mạch hoặc 5 bullet points cho phần tóm tắt
 - Giọng tự nhiên, dễ hiểu như đang kể cho bạn bè
 - Giữ thông tin có giá trị thực, dữ liệu, kết luận
 - Bỏ ví dụ dài, chi tiết lan man, rào đón
 - CHỈ dùng thông tin CÓ TRONG bài gốc, KHÔNG bịa thêm số liệu/thông số/phiên bản
+- CẤM tiêu đề nhạt không có thông tin: "Tin mới", "Có một điều thú vị..."
+- CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây..."
 - Trả lời bằng tiếng Việt`;
 
 // TÓM TẮT NGẮN - Quick overview
 const SUMMARY_SHORT_PROMPT = `Tóm tắt cực ngắn nội dung sau:
 
 Yêu cầu:
-- 1-2 câu duy nhất
+- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ
+- Sau tiêu đề: 1-2 câu tóm tắt
 - Nắm bắt thông điệp cốt lõi nhất
 - Viết lại bằng lời mình, KHÔNG copy
 - Giọng tự nhiên`;
@@ -142,13 +150,14 @@ Yêu cầu:
 // TÓM TẮT CHI TIẾT - Detailed với cấu trúc
 const SUMMARY_DETAILED_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt có cấu trúc.
 
-NHIỆM VỤ: Tóm tắt chi tiết, giữ cấu trúc logic.
+NHIỆM VỤ: Viết tiêu đề hook mạnh + tóm tắt chi tiết, giữ cấu trúc logic.
 
 YÊU CẦU:
+- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 20 từ
 - Xác định thesis/luận điểm chính
 - Các luận điểm hỗ trợ quan trọng nhất
 - Kết luận và hàm ý
-- Cấu trúc rõ ràng: Mở đầu → Điểm chính → Kết luận
+- Cấu trúc rõ ràng: Tiêu đề → Điểm chính → Kết luận
 - Tối đa 150 từ
 - Viết lại hoàn toàn, KHÔNG copy`;
 
@@ -156,6 +165,7 @@ YÊU CẦU:
 const SUMMARY_BULLET_PROMPT = `Tóm tắt thành các bullet points ngắn gọn.
 
 Quy tắc:
+- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ
 - Mỗi bullet tối đa 15 từ
 - Ưu tiên thông tin có giá trị, dữ liệu, kết luận
 - Bỏ ví dụ, chỉ giữ kết quả
@@ -197,117 +207,6 @@ QUY TẮC CHÍNH TẢ:
 - Ngày tháng: dùng gạch chéo (13/10/2011). Viết hoa tên tháng chữ (tháng Sáu), tháng 10 trở đi dùng số. Viết hoa tên ngày (thứ Hai, Chủ nhật).
 - Viết hoa: tên người, tên công ty, địa danh, chức danh.
 - KHÔNG viết tắt địa danh ngắn: Việt Nam, Hà Nội (không viết VN, HN).`;
-
-// STATUS CHIA SẺ BÀI VIẾT - Đọc → Phân tích → Nhận định → Viết status
-const STATUS_PROMPT = `Bạn là người hay đọc và chia sẻ những thứ hay ho trên MXH, giọng văn tự nhiên.
-
-BỐI CẢNH QUAN TRỌNG:
-- Bạn KHÔNG phải người trải nghiệm trực tiếp. Bạn là người ĐỌC ĐƯỢC nội dung này và chia sẻ lại.
-- TUYỆT ĐỐI KHÔNG viết "Mình vừa thử...", "Mình đã tạo được...", "Mình test thấy..." — đây là NÓI XẠO.
-- Thay vào đó, viết theo góc nhìn người chia sẻ: "Có người vừa chia sẻ cách...", "Theo bài viết này...", "Tác giả cho biết..."
-
-NHIỆM VỤ: Đọc nội dung gốc, viết thành status MXH hấp dẫn để chia sẻ lại.
-
-QUY TRÌNH (tuân thủ nghiêm ngặt theo thứ tự):
-
-BƯỚC 1 — TÓM TẮT NỘI DUNG:
-Đọc kỹ bài gốc, xác định:
-- Chủ đề chính là gì?
-- Insight/dữ liệu đáng giá nhất?
-- Có gì bất ngờ, trái với suy nghĩ thông thường?
-
-BƯỚC 2 — CHỌN KỸ THUẬT HOOK (câu mở đầu):
-Hook PHẢI chứa thông tin cụ thể, hấp dẫn. Chọn 1 trong các kỹ thuật:
-
-a) CURIOSITY GAP (khoảng trống tò mò): Đưa thông tin chưa đầy đủ, khiến người đọc phải đọc tiếp.
-   VD: "GPT Image 2 có thể tạo cả bộ branding DNA board chỉ từ 1 logo — nếu bạn biết cách prompt."
-
-b) CONTRARIAN (phản bác niềm tin phổ biến): Nói điều ngược lại với suy nghĩ số đông.
-   VD: "Không cần designer, AI giờ làm được branding board chuyên nghiệp."
-
-c) DATA HOOK (con số/chi tiết cụ thể): Mở bằng thông tin cụ thể, ấn tượng.
-   VD: "1 logo + 1 prompt chi tiết = 1 bộ branding DNA board hoàn chỉnh với GPT Image 2."
-
-d) BENEFIT HOOK (lợi ích rõ ràng): Nêu ngay giá trị người đọc nhận được.
-   VD: "Cách tạo branding DNA board bằng GPT Image 2 — có prompt mẫu luôn."
-
-e) QUESTION HOOK (câu hỏi cụ thể): Đánh vào pain point, buộc người đọc suy nghĩ.
-   VD: "Bạn có biết GPT Image 2 có thể tạo branding board từ 1 logo không?"
-
-QUY TẮC HOOK:
-- Tối đa 15-20 từ, đọc hiểu trong 2 giây
-- PHẢI chứa thông tin cụ thể từ bài gốc (tên công cụ, tính năng, kết quả...)
-- PHẢI tạo knowledge gap — người đọc muốn biết thêm
-- CẤM hook nhạt không có thông tin: "THỬ NGHIỆM GPT IMAGE 2", "Có một điều thú vị...", "Bạn có biết không..."
-- CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây...", "Như chúng ta đã biết..."
-
-BƯỚC 3 — VIẾT STATUS:
-Sau hook, triển khai nội dung:
-- Tóm nội dung gốc bằng lời mình (2-3 câu), ghi credit nguồn nếu biết
-- Dùng ngôn ngữ người chia sẻ: "Theo tác giả...", "Bài viết hướng dẫn...", "Có người đã thử và..."
-- Thêm quan điểm/nhận định cá nhân — đây là phần tạo giá trị
-- Kết bằng câu hỏi mở CỤ THỂ liên quan đến nội dung
-
-YÊU CẦU:
-- 2-4 đoạn ngắn, tổng 100-250 từ
-- Xưng "mình" cho quan điểm cá nhân, NHƯNG không nhận vơ trải nghiệm của người khác
-- Mỗi cảm xúc chỉ nói MỘT lần, không lặp
-- Tiền VND viết gọn: "45 triệu đồng"
-
-RANH GIỚI CỨNG — VI PHẠM = NÓI XẠO:
-- CẤM: "Mình vừa thử...", "Mình đã tạo được...", "Mình test thấy...", "Mình dùng rồi..."
-- ĐÚNG: "Có người chia sẻ cách...", "Theo bài viết...", "Tác giả đã thử và...", "Workflow này cho phép..."
-
-CHỐNG BỊA: CHỈ dùng thông tin CÓ TRONG bài gốc. KHÔNG bịa số liệu, phiên bản, thông số. Nếu bài gốc không nêu, KHÔNG thêm.
-` + VNREVIEW_RULES;
-
-// STATUS NGẮN - Quick share + nhận xét
-const STATUS_SHORT_PROMPT = `Viết status MXH cực ngắn chia sẻ nội dung hay vừa đọc.
-
-QUY TRÌNH (tuân thủ theo thứ tự):
-
-BƯỚC 1 — TÓM TẮT: Chọn 1 insight đáng giá nhất từ bài gốc.
-
-BƯỚC 2 — VIẾT HOOK: Câu đầu tiên dùng 1 trong các kỹ thuật:
-- Con số gây bất ngờ: "49 triệu cho Oppo — đắt hơn iPhone."
-- Phản bác: "Điện thoại TQ không còn rẻ."
-- Curiosity gap: "Một hãng TQ vừa làm điều ngược lại tất cả."
-Tối đa 15 từ, đọc hiểu trong 2 giây. CẤM câu dẫn dắt rỗng.
-
-BƯỚC 3 — VIẾT: Thêm 1-2 câu tóm tắt + nhận xét cá nhân.
-
-YÊU CẦU:
-- Tối đa 3 câu ngắn, dưới 280 ký tự
-- Ghi nguồn/credit nếu biết
-- Viết lại bằng lời mình, không copy
-- Tiền VND viết gọn: "45 triệu đồng"
-` + VNREVIEW_RULES;
-
-// STATUS CẢM XÚC - Emotional share + cảm nhận cá nhân
-const STATUS_EMOTIONAL_PROMPT = `Viết status MXH có cảm xúc từ nội dung vừa đọc được.
-
-QUY TRÌNH (tuân thủ theo thứ tự):
-
-BƯỚC 1 — TÓM TẮT: Đọc bài gốc, xác định điều gì gây ấn tượng/xúc động nhất.
-
-BƯỚC 2 — VIẾT HOOK: Câu đầu tiên dùng 1 trong các kỹ thuật:
-- Story hook: Bắt đầu từ đỉnh điểm cảm xúc, không giải thích.
-- Data hook: Con số cụ thể gây bất ngờ.
-- Question hook: Câu hỏi đánh vào cảm xúc.
-Tối đa 15-20 từ. CẤM câu dẫn dắt rỗng kiểu "Mình vừa đọc được..."
-
-BƯỚC 3 — VIẾT STATUS:
-- Tóm nội dung gốc (2-3 câu, ghi credit nếu biết)
-- Liên hệ cảm xúc/suy nghĩ cá nhân — dùng chi tiết cụ thể
-- Kết bằng câu hỏi hoặc suy ngẫm mở CỤ THỂ
-
-YÊU CẦU:
-- 2-3 đoạn, tối đa 150 từ
-- Mỗi cảm xúc chỉ nói MỘT lần, không lặp
-- Tiền VND viết gọn: "45 triệu đồng"
-- Đây là nội dung mình ĐỌC ĐƯỢC — không viết như người trải nghiệm trực tiếp
-- Giọng kể chuyện, chân thật, có "hồn"
-` + VNREVIEW_RULES;
 
 // AFFILIATE - Review sản phẩm chân thật + Quy tắc VnReview
 const AFFILIATE_PROMPT = `Bạn là người dùng thật, viết review sản phẩm tự nhiên.
@@ -362,9 +261,10 @@ YÊU CẦU:
 // TÓM TẮT GIỮ CẤU TRÚC - Preserve original structure
 const SUMMARY_STRUCTURED_PROMPT = `Bạn là chuyên gia tóm tắt có cấu trúc.
 
-NHIỆM VỤ: Giữ nguyên cấu trúc bài viết, chỉ rút gọn nội dung.
+NHIỆM VỤ: Viết tiêu đề hook mạnh, giữ nguyên cấu trúc bài viết, chỉ rút gọn nội dung.
 
 YÊU CẦU:
+- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh, tối đa 20 từ
 - Giữ headings, bullet points, numbering
 - Mỗi section: rút còn 1-3 ý quan trọng nhất
 - Bỏ ví dụ, chỉ giữ kết luận/điểm chính
@@ -380,11 +280,6 @@ const PROMPT_TEMPLATES = {
   summary_bullet: SUMMARY_BULLET_PROMPT,
   summary_structured: SUMMARY_STRUCTURED_PROMPT,
 
-  // Status variants
-  status: STATUS_PROMPT,
-  status_short: STATUS_SHORT_PROMPT,
-  status_emotional: STATUS_EMOTIONAL_PROMPT,
-
   // Affiliate variants
   affiliate: AFFILIATE_PROMPT,
   affiliate_soft: AFFILIATE_SOFT_PROMPT,
@@ -396,7 +291,7 @@ const MAX_OUTPUT_TOKENS = 1024;
 
 async function getSystemPrompt(type, site) {
   const data = await chrome.storage.sync.get([
-    "customSummaryPrompt", "customStatusPrompt", "customAffPrompt",
+    "customSummaryPrompt", "customAffPrompt",
     "outputLang", "promptStyle", "summaryLength", "customInstructions"
   ]);
 
@@ -406,16 +301,13 @@ async function getSystemPrompt(type, site) {
   const customInstructions = data.customInstructions || "";
 
   // Determine base type for prompt lookup
-  const baseType = type.startsWith("affiliate") ? "affiliate"
-    : type.startsWith("status") ? "status" : "summary";
+  const baseType = type.startsWith("affiliate") ? "affiliate" : "summary";
 
   let prompt;
 
   // 1. Custom user prompt takes highest priority
   if (baseType === "affiliate" && data.customAffPrompt) {
     prompt = data.customAffPrompt;
-  } else if (baseType === "status" && data.customStatusPrompt) {
-    prompt = data.customStatusPrompt;
   } else if (baseType === "summary" && data.customSummaryPrompt) {
     prompt = data.customSummaryPrompt;
   }
@@ -447,6 +339,10 @@ async function getSystemPrompt(type, site) {
 
   // === SMART CONTEXT: Auto-detect content type ===
   prompt += "\n\nTRƯỚC KHI VIẾT, hãy tự xác định loại nội dung (tin tức/ý kiến cá nhân/review sản phẩm/hướng dẫn/câu chuyện) và điều chỉnh giọng văn phù hợp.";
+
+  if (baseType === "summary") {
+    prompt += "\n- QUAN TRỌNG: Tiêu đề (dòng đầu tiên) PHẢI ĐƯỢC VIẾT HOA TOÀN BỘ.";
+  }
 
   // Add custom instructions if provided
   if (customInstructions) {
@@ -658,10 +554,9 @@ function postProcessOutput(output, sourceText, type) {
   }
 
   // 2. Length validation based on type
-  const minLen = { summary: 20, status: 15, affiliate: 30 };
-  const maxLen = { summary: 2000, status: 1500, affiliate: 3000 };
-  const baseType = type.startsWith("affiliate") ? "affiliate"
-    : type.startsWith("status") ? "status" : "summary";
+  const minLen = { summary: 20, affiliate: 30 };
+  const maxLen = { summary: 2000, affiliate: 3000 };
+  const baseType = type.startsWith("affiliate") ? "affiliate" : "summary";
 
   if (processed.length < (minLen[baseType] || 20)) {
     issues.push("Output ngắn bất thường.");
@@ -695,6 +590,17 @@ function postProcessOutput(output, sourceText, type) {
   processed = processed.replace(/^["'""'']+|["'""'']+$/g, "").trim();
   // Remove "Tóm tắt:" or "Summary:" prefix that LLMs sometimes prepend
   processed = processed.replace(/^(tóm tắt|summary|status|review|affiliate)\s*[:：]\s*/i, "").trim();
+
+  if (type && type.startsWith("summary")) {
+    const lines = processed.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim().length > 0) {
+        lines[i] = lines[i].toUpperCase();
+        break;
+      }
+    }
+    processed = lines.join("\n");
+  }
 
   // 6. VnReview spelling rules auto-fix
   // Fix common currency formatting

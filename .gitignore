@@ -15,3 +15,6 @@ Bộ các quy tắc VnReview*
 KARPATHY-AI-LEARNING-GUIDE*
 cropper.py
 *.pyc
+
+# Repomix
+repomix-output.*

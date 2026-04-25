@@ -193,10 +193,10 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
       '<div class="fbs-panel-body"></div>' +
       '<div class="fbs-panel-footer">' +
       '<button class="fbs-tts-btn" title="Đọc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>' +
-      '<button class="fbs-status-btn" title="Viết thành Status"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Viết Status</button>' +
+      '<button class="fbs-edit-btn" title="Chỉnh sửa trước khi copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa</button>' +
       '<button class="fbs-stop-btn">Dừng</button>' +
       '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
-      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
+      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy Status</button>' +
       '</div>';
     document.body.appendChild(panel);
     panelBody = panel.querySelector(".fbs-panel-body");
@@ -205,14 +205,32 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     panel.querySelector(".fbs-stop-btn").addEventListener("click", stopSummarize);
     panel.querySelector(".fbs-tts-btn").addEventListener("click", toggleTTS);
     panel.querySelector(".fbs-regen-btn").addEventListener("click", regenerate);
-    panel.querySelector(".fbs-status-btn").addEventListener("click", convertToStatus);
+    panel.querySelector(".fbs-edit-btn").addEventListener("click", toggleEdit);
   }
 
   let lastSummarizeParams = null;
   
-  function convertToStatus() {
-    if (!lastSummarizeParams || !lastSummarizeParams.text) return;
-    summarizeText(lastSummarizeParams.text, "status");
+  function toggleEdit() {
+    if (!panelBody) return;
+    const editBtn = panel.querySelector(".fbs-edit-btn");
+    const existingTextarea = panelBody.querySelector(".fbs-edit-textarea");
+    
+    if (existingTextarea) {
+      // Save edits and switch back to display mode
+      const editedText = existingTextarea.value;
+      // Store edited text for copy
+      panelBody.dataset.editedText = editedText;
+      panelBody.innerHTML = '<div class="fbs-result">' + fmt(editedText) + '</div>';
+      editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa';
+    } else {
+      // Switch to edit mode
+      const currentText = panelBody.dataset.editedText || panelBody.innerText || "";
+      panelBody.innerHTML = '<textarea class="fbs-edit-textarea">' + esc(currentText) + '</textarea>';
+      const textarea = panelBody.querySelector(".fbs-edit-textarea");
+      textarea.focus();
+      textarea.setSelectionRange(0, 0);
+      editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Xong';
+    }
   }
   
   function regenerate() {
@@ -231,10 +249,11 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     const titleText = panel.querySelector(".fbs-title-text");
     if (titleText) {
       if (type === "affiliate") titleText.textContent = "Chế bài Affiliate";
-      else if (type === "status") titleText.textContent = "Viết Status MXH";
       else titleText.textContent = "Tóm tắt nội dung";
     }
     panelBody.innerHTML = html;
+    // Clear edited text cache when new content loads
+    delete panelBody.dataset.editedText;
     backdrop.classList.add("fbs-visible");
     panel.classList.add("fbs-visible");
     const footer = panel.querySelector(".fbs-panel-footer");
@@ -244,7 +263,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     panel.querySelector(".fbs-copy-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
     panel.querySelector(".fbs-regen-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
     panel.querySelector(".fbs-tts-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
-    panel.querySelector(".fbs-status-btn").style.display = (!isSummarizing && !streaming && type === "summary" && html.includes("fbs-result")) ? "inline-flex" : "none";
+    panel.querySelector(".fbs-edit-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
     if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
   }
 
@@ -268,7 +287,9 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
   }
 
   function copyResult() {
-    const text = panelBody?.innerText || "";
+    // If in edit mode, get text from textarea; otherwise use edited cache or display text
+    const textarea = panelBody?.querySelector(".fbs-edit-textarea");
+    const text = textarea ? textarea.value : (panelBody?.dataset?.editedText || panelBody?.innerText || "");
     navigator.clipboard.writeText(text).then(() => {
       const btn = panel.querySelector(".fbs-copy-btn");
       const orig = btn.innerHTML;
@@ -309,7 +330,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
     d.innerHTML =
-      '<img src="' + ICON_BASE64 + '" width="12" height="12" style="vertical-align:-2px"><span title="Click: Tóm tắt | Shift+Click: Viết Status"> Tóm tắt</span>';
+      '<img src="' + ICON_BASE64 + '" width="12" height="12" style="vertical-align:-2px"><span title="Tóm tắt nội dung"> Tóm tắt</span>';
     return d;
   }
 
@@ -319,7 +340,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
     d.style.cssText = "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
-    d.innerHTML = ' · <span title="Click: Tóm tắt | Shift+Click: Viết Status" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><img src="' + ICON_BASE64 + '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt</span>';
+    d.innerHTML = ' · <span title="Tóm tắt nội dung" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><img src="' + ICON_BASE64 + '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt</span>';
     const pill = d.querySelector("span");
     d.addEventListener("mouseenter", () => { pill.style.background = "rgba(79,195,247,0.28)"; });
     d.addEventListener("mouseleave", () => { pill.style.background = "rgba(79,195,247,0.13)"; });
@@ -352,7 +373,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
 
     lastSummarizeParams = { text, type };
     isSummarizing = true;
-    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : type === "status" ? "Đang viết Status..." : "Đang tóm tắt...";
+    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : "Đang tóm tắt...";
     openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
 
     // Wake SW before connecting port (MV3 SW dies after ~30s idle)
@@ -401,11 +422,6 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     if (msg.action === "shortcut-summarize-shortcut") {
       const text = window.getSelection().toString();
       if (text) summarizeText(text, "summary");
-      else alert("Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!");
-    }
-    if (msg.action === "shortcut-status-shortcut") {
-      const text = window.getSelection().toString();
-      if (text) summarizeText(text, "status");
       else alert("Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!");
     }
     if (msg.action === "shortcut-affiliate-shortcut") {
@@ -471,8 +487,8 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     const btnEl = wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
     btnEl.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const type = e.shiftKey ? "status" : "summary";
-      const title = type === "status" ? "Đang viết Status..." : "Đang tóm tắt...";
+      const type = "summary";
+      const title = "Đang tóm tắt...";
       openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
 
       // Expand to get full text
@@ -508,7 +524,7 @@ const ICON_BASE64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAA
     if (floatingToolbar) return;
     floatingToolbar = document.createElement("div");
     floatingToolbar.className = "fbs-floating-toolbar";
-    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' + ICON_BASE64 + '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button><button class="fbs-floating-btn" data-action="status"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Status</button><button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
+    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' + ICON_BASE64 + '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button><button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
     document.body.appendChild(floatingToolbar);
 
     floatingToolbar.addEventListener("mousedown", (e) => e.preventDefault());

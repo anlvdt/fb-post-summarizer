@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FeedWriter",
   "version": "2.1.0",
-  "description": "Tóm tắt, viết status & affiliate từ bài viết Facebook bằng AI. Dịch từ Anh-Việt. Tối ưu cho Facebook.",
+  "description": "Tóm tắt bài viết bằng AI với tiêu đề hook mạnh, chỉnh sửa & copy thành status. Chế bài affiliate. Dịch từ Anh-Việt.",
   "author": "Le An (anlvdt)",
   "homepage_url": "https://github.com/anlvdt/fb-post-summarizer",
   "permissions": [
@@ -75,13 +75,6 @@
         "mac": "Command+Shift+S"
       },
       "description": "Tóm tắt nội dung văn bản bôi đen"
-    },
-    "status-shortcut": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+T",
-        "mac": "Command+Shift+T"
-      },
-      "description": "Viết Status MXH từ văn bản bôi đen"
     },
     "affiliate-shortcut": {
       "suggested_key": {

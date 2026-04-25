@@ -429,7 +429,7 @@
 }
 
 /* Status button */
-.fbs-status-btn {
+.fbs-edit-btn {
   display: none;
   align-items: center;
   padding: 6px 12px;
@@ -444,21 +444,55 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   margin-right: auto;
   margin-left: 8px;
+  gap: 4px;
 }
 
-.fbs-status-btn:hover {
+.fbs-edit-btn:hover {
   background: linear-gradient(135deg, rgba(108, 92, 231, 0.25), rgba(168, 85, 247, 0.25));
   border-color: #a855f7;
 }
 
-.fbs-panel[data-fbs-theme="light"] .fbs-status-btn {
+.fbs-panel[data-fbs-theme="light"] .fbs-edit-btn {
   color: #6c5ce7;
   border-color: rgba(108, 92, 231, 0.3);
   background: linear-gradient(135deg, rgba(108, 92, 231, 0.08), rgba(168, 85, 247, 0.08));
 }
 
-.fbs-panel[data-fbs-theme="light"] .fbs-status-btn:hover {
+.fbs-panel[data-fbs-theme="light"] .fbs-edit-btn:hover {
   background: linear-gradient(135deg, rgba(108, 92, 231, 0.15), rgba(168, 85, 247, 0.15));
+}
+
+/* Edit textarea */
+.fbs-edit-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e4e6eb;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.fbs-edit-textarea:focus {
+  border-color: #a855f7;
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-edit-textarea {
+  background: rgba(0, 0, 0, 0.03);
+  color: #1c1e21;
+  border-color: rgba(108, 92, 231, 0.2);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-edit-textarea:focus {
+  border-color: #6c5ce7;
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.1);
 }
 
 /* Stop button */

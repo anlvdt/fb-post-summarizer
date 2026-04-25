@@ -18,7 +18,6 @@ const summaryLengthSel = document.getElementById("summaryLength");
 const promptStyleSel = document.getElementById("promptStyle");
 const customInstructionsEl = document.getElementById("customInstructions");
 const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
-const customStatusPromptEl = document.getElementById("customStatusPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const toggleKeyBtn = document.getElementById("toggleKey");
 const saveBtn = document.getElementById("saveBtn");
@@ -30,7 +29,7 @@ const linkGemini = document.getElementById("linkGemini");
 const KEYS = [
   "apiKey", "minLength", "provider", "outputLang",
   "summaryLength", "promptStyle", "customInstructions",
-  "customSummaryPrompt", "customStatusPrompt", "customAffPrompt"
+  "customSummaryPrompt", "customAffPrompt"
 ];
 
 chrome.storage.sync.get(KEYS, (d) => {
@@ -42,7 +41,6 @@ chrome.storage.sync.get(KEYS, (d) => {
   if (d.promptStyle) promptStyleSel.value = d.promptStyle;
   if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
   if (d.customSummaryPrompt) customSummaryPromptEl.value = d.customSummaryPrompt;
-  if (d.customStatusPrompt) customStatusPromptEl.value = d.customStatusPrompt;
   if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
   updateLinks();
 
@@ -79,7 +77,6 @@ saveBtn.addEventListener("click", () => {
     promptStyle: promptStyleSel.value,
     customInstructions: customInstructionsEl.value.trim(),
     customSummaryPrompt: customSummaryPromptEl.value.trim(),
-    customStatusPrompt: customStatusPromptEl.value.trim(),
     customAffPrompt: customAffPromptEl.value.trim(),
   }, () => showStatus("Đã lưu ✓", "success"));
 });
@@ -122,7 +119,7 @@ async function loadHistory() {
   }
   list.innerHTML = historyData.map((h, i) => {
     const badgeType = h.type || "summary";
-    const badgeText = badgeType === "affiliate" ? "Affiliate" : badgeType === "status" ? "Status" : "Tóm tắt";
+    const badgeText = badgeType === "affiliate" ? "Affiliate" : "Tóm tắt";
     return '<div class="history-item" data-idx="' + i + '">' +
       '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") +
       '<span class="history-badge ' + badgeType + '">' + badgeText + '</span></div>' +
