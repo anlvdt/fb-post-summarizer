@@ -494,16 +494,23 @@
       return;
     }
 
+    if (!isContextValid()) {
+      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      return;
+    }
+
     // Smart cache key includes settings that affect output
-    const settings = await new Promise(r => chrome.storage.sync.get(["summaryLength", "promptStyle"], r));
+    let settings;
+    try {
+      settings = await new Promise(r => chrome.storage.sync.get(["summaryLength", "promptStyle"], r));
+    } catch (_) {
+      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      return;
+    }
     const cacheKey = hashText(text) + "_" + type + "_" + (settings.summaryLength || "medium") + "_" + (settings.promptStyle || "default");
 
     if (summaryCache.has(cacheKey)) {
       openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(cacheKey)) + '</div>', false, type);
-      return;
-    }
-    if (!isContextValid()) {
-      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
       return;
     }
 

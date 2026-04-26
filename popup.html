@@ -1,52 +1,26 @@
 <!DOCTYPE html>
 <html lang="vi">
-
 <head>
   <meta charset="UTF-8">
   <link rel="stylesheet" href="popup.css">
 </head>
-
 <body>
   <div class="popup">
     <div class="header">
-      <span class="logo">
-        <img src="icons/icon48.png" width="22" height="22" alt="Logo">
-      </span>
+      <span class="logo"><img src="icons/icon48.png" width="22" height="22" alt="Logo"></span>
       <h1>FeedWriter</h1>
     </div>
-    <p class="author">by <a href="https://github.com/anlvdt" target="_blank"
-        style="color:#a855f7;text-decoration:none">Le An</a></p>
 
-    <!-- Tabs -->
     <div class="tabs">
       <button class="tab active" data-tab="settings">Cài đặt</button>
+      <button class="tab" data-tab="apikeys">API Keys</button>
       <button class="tab" data-tab="history">Lịch sử</button>
       <button class="tab" data-tab="review">Tin hay</button>
+      <button class="tab" data-tab="about">About</button>
     </div>
 
     <!-- Settings Tab -->
     <div class="tab-content active" id="tab-settings">
-      <div class="field">
-        <label for="provider">Dịch vụ AI</label>
-        <select id="provider">
-          <option value="groq">Groq — Llama 3.3 70B (khuyên dùng)</option>
-          <option value="gemini">Google Gemini 2.0 Flash</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="apiKey">API Key</label>
-        <div class="input-group">
-          <input type="password" id="apiKey" placeholder="Nhập API key">
-          <button type="button" id="toggleKey" class="icon-btn" title="Hiện/ẩn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
       <div class="field">
         <label for="outputLang">Ngôn ngữ tóm tắt</label>
         <select id="outputLang">
@@ -55,7 +29,6 @@
           <option value="en">Luôn tiếng Anh</option>
         </select>
       </div>
-
       <div class="field">
         <label for="summaryLength">Độ dài kết quả</label>
         <select id="summaryLength">
@@ -64,7 +37,6 @@
           <option value="long">Chi tiết (nhiều hơn)</option>
         </select>
       </div>
-
       <div class="field">
         <label for="promptStyle">Phong cách tóm tắt</label>
         <select id="promptStyle">
@@ -74,48 +46,72 @@
           <option value="summary_structured">Giữ cấu trúc gốc</option>
         </select>
       </div>
-
       <div class="field">
         <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
-        <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu và dữ liệu, bỏ ví dụ..."></textarea>
+        <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu, bỏ ví dụ..."></textarea>
       </div>
-
       <div class="field">
         <label for="minLength">Độ dài tối thiểu (ký tự)</label>
         <input type="number" id="minLength" value="400" min="100" max="5000" step="100">
       </div>
-
       <div class="field">
-        <label for="customSummaryPrompt">Tùy chỉnh Prompt cho Tóm tắt (để trống = mặc định)</label>
+        <label for="customSummaryPrompt">Prompt tóm tắt (để trống = mặc định)</label>
         <textarea id="customSummaryPrompt" rows="2" placeholder="VD: Tóm tắt chi tiết hơn..."></textarea>
       </div>
-
       <div class="field">
-        <label for="customAffPrompt">Tùy chỉnh Prompt cho Affiliate</label>
+        <label for="customAffPrompt">Prompt Affiliate</label>
         <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
       </div>
-
-      <button id="saveBtn">Lưu cài đặt</button>
-      <button id="testBtn" class="test-btn">Test kết nối</button>
+      <button id="saveBtn" class="btn btn-primary">Lưu cài đặt</button>
       <div id="status" class="status"></div>
+    </div>
 
-      <div
-        style="font-size: 12px; color: #b0b3b8; margin-top: 12px; background: #16162a; border: 1px solid #333; padding: 10px; border-radius: 8px; line-height: 1.5;">
-        <b style="color:#fff;">Chuột phải:</b> Bôi đen chữ & chọn tính năng<br>
-        <b style="color:#fff;">Phím tắt:</b><br>
-        - Tóm tắt: Ctrl/Cmd + Shift + S<br>
-        - Affiliate: Ctrl/Cmd + Shift + A<br>
-        <b style="color:#fff;">Mẹo:</b> Tóm tắt xong → Sửa → Copy Status<br>
-        <i style="color:#777; font-size: 11px; margin-top: 3px; display: block;">(Đổi phím:
-          chrome://extensions/shortcuts)</i>
+    <!-- API Keys Tab -->
+    <div class="tab-content" id="tab-apikeys">
+      <div class="field">
+        <label>Thêm API Key</label>
+        <div class="input-group">
+          <input type="text" id="newApiKey" placeholder="Dán API key vào đây">
+          <button type="button" id="addKeyBtn" class="icon-btn" title="Thêm" style="background:linear-gradient(135deg,#6c5ce7,#a855f7);color:#fff;border:none;font-size:18px">+</button>
+        </div>
+        <div class="field-hint">Tự nhận diện provider từ key prefix. Hỗ trợ Groq, Gemini, Cerebras, SambaNova, OpenRouter.</div>
       </div>
 
-      <div class="links">
-        <a href="https://console.groq.com/keys" target="_blank" id="linkGroq">Lấy Groq API Key miễn phí</a>
-        <a href="https://aistudio.google.com/apikey" target="_blank" id="linkGemini" style="display:none">Lấy Gemini API
-          Key miễn phí</a>
-        <a href="https://github.com/anlvdt/fb-post-summarizer" target="_blank"
-          style="margin-top:4px;display:block;color:#888;font-size:11px">GitHub — Star nếu thấy hữu ích</a>
+      <div class="apikey-info">
+        Tự động rotate key khi bị rate limit. Tự động chuyển provider khi tất cả key của 1 provider hết hạn.
+      </div>
+
+      <div id="keyListGroq" class="key-list" style="display:none">
+        <div class="key-list-header">Groq <span class="key-limit-badge">100K token/ngày/key</span></div>
+        <div id="keyListGroqItems" class="key-list-items"></div>
+      </div>
+      <div id="keyListGemini" class="key-list" style="display:none;margin-top:6px">
+        <div class="key-list-header">Gemini <span class="key-limit-badge">1500 req/ngày/key</span></div>
+        <div id="keyListGeminiItems" class="key-list-items"></div>
+      </div>
+      <div id="keyListCerebras" class="key-list" style="display:none;margin-top:6px">
+        <div class="key-list-header">Cerebras <span class="key-limit-badge">1M token/ngày/key</span></div>
+        <div id="keyListCerebrasItems" class="key-list-items"></div>
+      </div>
+      <div id="keyListSambanova" class="key-list" style="display:none;margin-top:6px">
+        <div class="key-list-header">SambaNova <span class="key-limit-badge">20M token/ngày</span></div>
+        <div id="keyListSambanovaItems" class="key-list-items"></div>
+      </div>
+      <div id="keyListOpenrouter" class="key-list" style="display:none;margin-top:6px">
+        <div class="key-list-header">OpenRouter <span class="key-limit-badge">50 req/ngày free</span></div>
+        <div id="keyListOpenrouterItems" class="key-list-items"></div>
+      </div>
+
+      <button id="testBtn" class="btn btn-secondary" style="margin-top:10px">Test kết nối</button>
+      <div id="keyStatus" class="status"></div>
+
+      <div class="provider-guide">
+        <div class="provider-guide-title">Lấy API Key miễn phí</div>
+        <div class="guide-step"><a href="https://console.groq.com/keys" target="_blank">Groq</a> — gsk_... / 100K token/ngày</div>
+        <div class="guide-step"><a href="https://cloud.cerebras.ai" target="_blank">Cerebras</a> — csk-... / 1M token/ngày</div>
+        <div class="guide-step"><a href="https://cloud.sambanova.ai" target="_blank">SambaNova</a> — $5 credit free / 20M token/ngày</div>
+        <div class="guide-step"><a href="https://aistudio.google.com/apikey" target="_blank">Gemini</a> — AI... / 1500 req/ngày</div>
+        <div class="guide-step"><a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a> — sk-or-... / 50 req/ngày</div>
       </div>
     </div>
 
@@ -123,49 +119,96 @@
     <div class="tab-content" id="tab-history">
       <div id="historyList" class="history-list"></div>
       <div id="historyDetail" class="history-detail" style="display:none">
-        <button id="historyBack" class="test-btn" style="margin-bottom:6px">← Quay lại</button>
+        <button id="historyBack" class="btn btn-secondary" style="margin-bottom:6px">← Quay lại</button>
         <div class="history-detail-date" id="historyDetailDate"></div>
         <div class="history-detail-body" id="historyDetailBody"></div>
-        <button id="historyDetailCopy" class="test-btn" style="margin-top:6px">Copy</button>
+        <button id="historyDetailCopy" class="btn btn-secondary" style="margin-top:6px">Copy</button>
       </div>
       <div id="historyActions">
-        <button id="exportBtn" class="test-btn">Export JSON</button>
-        <button id="exportMdBtn" class="test-btn" style="margin-top:4px">Export Markdown</button>
-        <button id="clearBtn" class="test-btn" style="margin-top:4px;color:#ff6b6b">Xóa lịch sử</button>
+        <button id="exportBtn" class="btn btn-secondary">Export JSON</button>
+        <button id="exportMdBtn" class="btn btn-secondary">Export Markdown</button>
+        <button id="clearBtn" class="btn btn-danger">Xóa lịch sử</button>
       </div>
     </div>
 
-    <!-- Review / Tin hay Tab -->
+    <!-- Review Tab -->
     <div class="tab-content" id="tab-review">
       <div class="review-section">
-        <button id="aiReviewBtn" class="review-main-btn">AI Đề xuất tin hay</button>
+        <button id="aiReviewBtn" class="btn btn-warm">AI Đề xuất tin hay</button>
         <div id="reviewStatus" class="status" style="display:none"></div>
-
         <div id="reviewResults" style="display:none">
           <div class="review-header">
             <span id="reviewCount"></span>
             <label class="review-select-all"><input type="checkbox" id="selectAllReview" checked> Chọn tất cả</label>
           </div>
           <div id="reviewList" class="review-list"></div>
-          <button id="exportDtcnBtn" class="review-export-btn">Export JSON cho DTCN-V2</button>
+          <button id="exportDtcnBtn" class="btn btn-accent">Export JSON cho DTCN-V2</button>
         </div>
       </div>
-
       <div class="review-divider"></div>
-
       <div class="review-section">
         <label class="review-alarm-label">Tự động đề xuất hàng ngày</label>
         <div class="review-alarm-row">
           <input type="time" id="reviewTime" value="18:00" class="review-time-input">
-          <button id="setAlarmBtn" class="test-btn" style="width:auto;margin:0;padding:5px 12px">Bật</button>
-          <button id="clearAlarmBtn" class="test-btn"
-            style="width:auto;margin:0;padding:5px 12px;color:#ff6b6b">Tắt</button>
+          <button id="setAlarmBtn" class="btn btn-secondary" style="width:auto;padding:5px 12px">Bật</button>
+          <button id="clearAlarmBtn" class="btn btn-danger" style="width:auto;padding:5px 12px">Tắt</button>
         </div>
         <div id="alarmStatus" class="review-alarm-status"></div>
+      </div>
+    </div>
+
+    <!-- About Tab -->
+    <div class="tab-content" id="tab-about">
+      <div class="about-section">
+        <div class="about-section-title">Tác giả</div>
+        <div class="about-card">
+          <div class="about-author">
+            <img class="about-avatar" src="icons/icon48.png" alt="avatar">
+            <div class="about-author-info">
+              <div class="about-author-name">Le An (anlvdt)</div>
+              <div class="about-author-bio">Developer / Content Creator</div>
+            </div>
+          </div>
+          <div style="margin-top:8px; font-size:11px;">
+            <a href="https://github.com/anlvdt" target="_blank">github.com/anlvdt</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="about-section">
+        <div class="about-section-title">Phím tắt</div>
+        <div class="about-card">
+          <div class="about-shortcut"><span>Tóm tắt</span><span class="about-shortcut-key">Ctrl+Shift+S</span></div>
+          <div class="about-shortcut"><span>Affiliate</span><span class="about-shortcut-key">Ctrl+Shift+A</span></div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:6px;">Đổi phím: chrome://extensions/shortcuts</div>
+        </div>
+      </div>
+
+      <div class="about-section">
+        <div class="about-section-title">Hướng dẫn</div>
+        <div class="about-card">
+          Chuột phải bôi đen chữ → chọn tính năng.<br>
+          Tóm tắt xong → Sửa → Copy Status.<br>
+          Hỗ trợ: Facebook, Threads, X, LinkedIn, Reddit.
+        </div>
+      </div>
+
+      <div class="about-section">
+        <div class="about-section-title">Giao diện</div>
+        <div class="theme-toggle">
+          <label>Theme</label>
+          <select id="themeSelect">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="text-align:center; margin-top:10px;">
+        <a href="https://github.com/anlvdt/fb-post-summarizer" target="_blank" style="color:var(--text-muted); font-size:11px; text-decoration:none;">FeedWriter v2.1 — GitHub</a>
       </div>
     </div>
   </div>
   <script src="popup.js"></script>
 </body>
-
 </html>

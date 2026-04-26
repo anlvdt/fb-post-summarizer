@@ -13,7 +13,7 @@ async function injectAndSend(tabId, message) {
 }
 
 // === CONTEXT MENU ===
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
     id: "summarize-selection",
     title: "Tóm tắt nội dung",
@@ -29,6 +29,35 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Bóc Link Shopee (No Cookie)",
     contexts: ["selection"],
   });
+
+  // Migrate old single apiKey to multi-key system
+  chrome.storage.sync.get(["apiKey", "apiKeys", "provider"], (data) => {
+    const apiKeys = data.apiKeys || { groq: [], gemini: [], cerebras: [], sambanova: [], openrouter: [] };
+    for (const p of ["groq", "gemini", "cerebras", "sambanova", "openrouter"]) {
+      if (!apiKeys[p]) apiKeys[p] = [];
+    }
+    if (data.apiKey && !apiKeys.groq?.length && !apiKeys.gemini?.length) {
+      const provider = data.provider || "groq";
+      if (!apiKeys[provider].includes(data.apiKey)) {
+        apiKeys[provider].push(data.apiKey);
+      }
+    }
+    chrome.storage.sync.set({ apiKeys });
+  });
+
+  // Re-register alarm on install/update
+  const alarmData = await chrome.storage.local.get(["reviewAlarm"]);
+  const alarm = alarmData.reviewAlarm;
+  if (alarm && alarm.enabled) {
+    const now = new Date();
+    const target = new Date();
+    target.setHours(alarm.hour, alarm.minute, 0, 0);
+    if (target <= now) target.setDate(target.getDate() + 1);
+    chrome.alarms.create("daily-ai-review", {
+      delayInMinutes: (target - now) / 60000,
+      periodInMinutes: 24 * 60,
+    });
+  }
 });
 
 async function clearShopeeCookies() {
@@ -91,15 +120,6 @@ async function incrementBadge() {
   chrome.action.setBadgeText({ text: count.toString() });
   chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
 }
-
-chrome.runtime.onStartup.addListener(async () => {
-  const today = new Date().toDateString();
-  const data = await chrome.storage.local.get(["dailyCount", "lastDate"]);
-  if (data.lastDate === today) {
-    chrome.action.setBadgeText({ text: (data.dailyCount || 0).toString() });
-    chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
-  }
-});
 
 // === IMPROVED PROMPTS based on Vietnamese NLP research ===
 // References: VietAI ViT5, Underthesea, Vietnamese summarization best practices
@@ -286,6 +306,100 @@ const PROMPT_TEMPLATES = {
   affiliate_story: AFFILIATE_STORY_PROMPT,
 };
 
+// === API KEY ROTATION ===
+// Supports multiple API keys per provider with automatic rotation on rate limit
+// Cross-provider fallback: if all keys of one provider are limited, try another provider
+
+const PROVIDER_PRIORITY = ["groq", "cerebras", "sambanova", "gemini", "openrouter"];
+
+const CALL_FN_STREAM_MAP = {
+  groq: "callGroqStream",
+  gemini: "callGeminiStream",
+  cerebras: "callCerebrasStream",
+  sambanova: "callSambanovaStream",
+  openrouter: "callOpenrouterStream",
+};
+
+const CALL_FN_NONSTREAM_MAP = {
+  groq: "callGroqNonStream",
+  gemini: "callGeminiNonStream",
+  cerebras: "callCerebrasNonStream",
+  sambanova: "callSambanovaNonStream",
+  openrouter: "callOpenrouterNonStream",
+};
+
+// Get the best available key across ALL providers
+async function getAvailableKey() {
+  const data = await chrome.storage.sync.get(["apiKeys"]);
+  const apiKeys = data.apiKeys || {};
+  const localData = await chrome.storage.local.get(["keyStatus", "keyRotationIndex"]);
+  const keyStatus = localData.keyStatus || {};
+  const rotationIndex = localData.keyRotationIndex || {};
+  const now = Date.now();
+
+  // Try each provider in priority order
+  for (const provider of PROVIDER_PRIORITY) {
+    const keys = apiKeys[provider] || [];
+    if (keys.length === 0) continue;
+
+    const startIdx = (rotationIndex[provider] || 0) % keys.length;
+    for (let i = 0; i < keys.length; i++) {
+      const idx = (startIdx + i) % keys.length;
+      const key = keys[idx];
+      const status = keyStatus[key] || {};
+
+      if (!status.rateLimitedUntil || now >= status.rateLimitedUntil) {
+        // Found a usable key — update rotation
+        const newRotation = { ...rotationIndex, [provider]: (idx + 1) % keys.length };
+        keyStatus[key] = { ...(keyStatus[key] || {}), lastUsed: now };
+        await chrome.storage.local.set({ keyRotationIndex: newRotation, keyStatus });
+        return { key, provider, index: idx };
+      }
+    }
+  }
+
+  // All keys across all providers are rate-limited
+  let soonestTime = Infinity;
+  let totalKeys = 0;
+  for (const provider of PROVIDER_PRIORITY) {
+    const keys = apiKeys[provider] || [];
+    totalKeys += keys.length;
+    for (const key of keys) {
+      const until = (keyStatus[key] || {}).rateLimitedUntil || 0;
+      if (until < soonestTime) soonestTime = until;
+    }
+  }
+
+  if (totalKeys === 0) return { key: null, provider: null, noKeys: true };
+  const waitMin = Math.max(1, Math.ceil((soonestTime - now) / 60000));
+  return { key: null, provider: null, allLimited: true, waitMinutes: waitMin, total: totalKeys };
+}
+
+// Legacy single-provider getApiKey (kept for backward compat in some paths)
+async function getApiKey(provider) {
+  const result = await getAvailableKey();
+  return result;
+}
+
+async function markKeyRateLimited(key, retryAfterMs) {
+  const localData = await chrome.storage.local.get(["keyStatus"]);
+  const keyStatus = localData.keyStatus || {};
+  keyStatus[key] = {
+    ...(keyStatus[key] || {}),
+    rateLimitedUntil: Date.now() + (retryAfterMs || 30 * 60 * 1000),
+    lastRateLimited: Date.now(),
+  };
+  await chrome.storage.local.set({ keyStatus });
+}
+
+function parseRetryAfter(errorMessage) {
+  const match = errorMessage?.match(/try again in (\d+)m([\d.]+)s/i);
+  if (match) return (parseInt(match[1]) * 60 + parseFloat(match[2])) * 1000;
+  const secMatch = errorMessage?.match(/retry.?after:?\s*(\d+)/i);
+  if (secMatch) return parseInt(secMatch[1]) * 1000;
+  return 30 * 60 * 1000;
+}
+
 const MAX_INPUT_CHARS = 8000;
 const MAX_OUTPUT_TOKENS = 1024;
 
@@ -385,6 +499,13 @@ chrome.runtime.onConnect.addListener((port) => {
 // === FALLBACK: non-streaming for test/context menu ===
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "ping") { sendResponse({ ok: true }); return true; }
+  // === GET KEY STATUS for popup ===
+  if (request.action === "get-key-status") {
+    chrome.storage.local.get(["keyStatus"], (data) => {
+      sendResponse(data.keyStatus || {});
+    });
+    return true;
+  }
   if (request.action === "unshorten-shopee-inline" && request.url && sender.tab) {
     processUnshorten(request.url, sender.tab.id);
     return true;
@@ -395,6 +516,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleStream(request.text, request.site || "unknown", fakePort, controller.signal, "summary")
       .then(r => sendResponse(r || { error: "Unknown error" }))
       .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+  // === TEST CONNECTION (lightweight, no guardrails) ===
+  if (request.action === "test-connection") {
+    (async () => {
+      try {
+        const keyInfo = await getAvailableKey();
+        if (!keyInfo.key) {
+          if (keyInfo.noKeys) return sendResponse({ error: "Chưa có API Key." });
+          if (keyInfo.allLimited) return sendResponse({ error: "Tất cả " + keyInfo.total + " key bị rate limit. Thử lại sau ~" + keyInfo.waitMinutes + " phút." });
+          return sendResponse({ error: "Không tìm được key." });
+        }
+        const nonStreamFns = {
+          groq: callGroqNonStream,
+          gemini: callGeminiNonStream,
+          cerebras: callCerebrasNonStream,
+          sambanova: callSambanovaNonStream,
+          openrouter: callOpenrouterNonStream,
+        };
+        const callFn = nonStreamFns[keyInfo.provider];
+        if (!callFn) return sendResponse({ error: "Provider lỗi: " + keyInfo.provider });
+        const result = await callFn(keyInfo.key, "Reply with exactly: OK", "You are a test bot. Reply OK.");
+        sendResponse({ ok: true, provider: keyInfo.provider, response: (result || "").substring(0, 50) });
+      } catch (e) {
+        sendResponse({ error: e.message });
+      }
+    })();
     return true;
   }
   // === AI REVIEW ===
@@ -458,8 +606,10 @@ async function translateWord(word) {
   const key = word.toLowerCase().trim();
   if (translateCache.has(key)) return translateCache.get(key);
 
-  const data = await chrome.storage.sync.get(["apiKey", "provider"]);
-  if (!data.apiKey) return { error: "Chưa nhập API Key." };
+  const keyInfo = await getAvailableKey();
+  if (!keyInfo.key) return { error: "Chưa nhập API Key." };
+  const apiKey = keyInfo.key;
+  const provider = keyInfo.provider;
 
   const prompt = `Dịch từ/cụm từ tiếng Anh sang tiếng Việt. Trả lời NGẮN GỌN theo format:
 [phiên âm] — nghĩa 1, nghĩa 2
@@ -471,40 +621,20 @@ Ví dụ:
 
 Từ cần dịch: "${key}"`;
 
-  const provider = data.provider || "groq";
-
   try {
     let result;
-    if (provider === "groq") {
-      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + data.apiKey },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.1,
-          max_tokens: 150,
-        }),
-      });
-      if (!resp.ok) return { error: "API lỗi" };
-      const json = await resp.json();
-      result = json.choices?.[0]?.message?.content || "";
-    } else {
-      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + data.apiKey;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 150 },
-        }),
-      });
-      if (!resp.ok) return { error: "API lỗi" };
-      const json = await resp.json();
-      result = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    }
+    // Use non-streaming call for translation (works for all providers)
+    const callFnMap = {
+      groq: callGroqNonStream,
+      gemini: callGeminiNonStream,
+      cerebras: callCerebrasNonStream,
+      sambanova: callSambanovaNonStream,
+      openrouter: callOpenrouterNonStream,
+    };
+    const callFn = callFnMap[provider] || callGroqNonStream;
+    result = await callFn(apiKey, prompt, "You are a concise English-Vietnamese dictionary.");
 
-    const output = { word: key, translation: result.trim() };
+    const output = { word: key, translation: (result || "").trim() };
     translateCache.set(key, output);
     // Keep cache small
     if (translateCache.size > 200) {
@@ -726,12 +856,8 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
   const inputCheck = validateInput(text);
   if (!inputCheck.valid) return { error: inputCheck.error };
 
-  const data = await chrome.storage.sync.get(["apiKey", "provider", "summaryLength"]);
-  const apiKey = data.apiKey;
-  const provider = data.provider || "groq";
+  const data = await chrome.storage.sync.get(["summaryLength"]);
   const summaryLength = data.summaryLength || "medium";
-
-  if (!apiKey) return { error: "Chưa nhập API Key. Click icon extension để cài đặt." };
 
   // Clean and truncate text
   const cleanedText = cleanInputText(inputCheck.text);
@@ -740,36 +866,52 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
     : cleanedText;
 
   const systemPrompt = await getSystemPrompt(type, site);
-  const callFn = provider === "groq" ? callGroqStream : callGeminiStream;
+  const streamFns = {
+    groq: callGroqStream,
+    gemini: callGeminiStream,
+    cerebras: callCerebrasStream,
+    sambanova: callSambanovaStream,
+    openrouter: callOpenrouterStream,
+  };
 
-  // Calculate max tokens based on length preference
   const maxTokensMap = { short: 256, medium: 512, long: 1024 };
   const maxTokens = maxTokensMap[summaryLength] || 512;
 
-  for (let attempt = 0; attempt <= 2; attempt++) {
+  for (let attempt = 0; attempt <= 3; attempt++) {
     if (signal.aborted) return { error: "Đã hủy." };
-    const result = await callFn(apiKey, truncated, systemPrompt, port, signal, maxTokens);
-    if (!result.rateLimited) {
-      if (result.summary) {
-        // === OUTPUT GUARDRAILS ===
-        const postResult = postProcessOutput(result.summary, text, type);
-        result.summary = postResult.text;
 
-        // Attach quality metadata for UI
-        result.quality = postResult.quality;
-        result.issues = postResult.issues;
-
-        incrementBadge();
-        saveHistory(text, result.summary, site, type, sourceUrl, imageUrl, author, postTitle);
-      }
-      return result;
+    // Get best available key across all providers
+    const keyInfo = await getAvailableKey();
+    if (!keyInfo.key) {
+      if (keyInfo.noKeys) return { error: "Chưa có API Key. Thêm ở tab API Keys." };
+      if (keyInfo.allLimited) return { error: "Tất cả " + keyInfo.total + " key đều bị rate limit. Thử lại sau ~" + keyInfo.waitMinutes + " phút." };
+      return { error: "Không tìm được key khả dụng." };
     }
-    // Exponential backoff for rate limiting
-    await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
-  }
-  return { error: "API quá tải. Vui lòng thử lại sau." };
-}
 
+    const callFn = streamFns[keyInfo.provider];
+    if (!callFn) return { error: "Provider không hợp lệ: " + keyInfo.provider };
+
+    const result = await callFn(keyInfo.key, truncated, systemPrompt, port, signal, maxTokens);
+
+    if (result.rateLimited) {
+      const retryMs = parseRetryAfter(result.rateLimitError || "");
+      await markKeyRateLimited(keyInfo.key, retryMs);
+      // Loop will automatically try next available key/provider
+      continue;
+    }
+
+    if (result.summary) {
+      const postResult = postProcessOutput(result.summary, text, type);
+      result.summary = postResult.text;
+      result.quality = postResult.quality;
+      result.issues = postResult.issues;
+      incrementBadge();
+      saveHistory(text, result.summary, site, type, sourceUrl, imageUrl, author, postTitle);
+    }
+    return result;
+  }
+  return { error: "Tất cả API đều quá tải. Thử lại sau hoặc thêm key mới." };
+}
 // === HISTORY ===
 async function saveHistory(text, summary, site, type, sourceUrl, imageUrl, author, postTitle) {
   const data = await chrome.storage.local.get("history");
@@ -791,11 +933,16 @@ async function saveHistory(text, summary, site, type, sourceUrl, imageUrl, autho
 
 // === AI REVIEW: Đề xuất tin hay ===
 async function reviewTodayHistory() {
-  const syncData = await chrome.storage.sync.get(["apiKey", "provider"]);
   const localData = await chrome.storage.local.get("history");
-  const apiKey = syncData.apiKey;
-  const provider = syncData.provider || "groq";
-  if (!apiKey) return { error: "Chưa nhập API Key. Vào tab Cài đặt để nhập." };
+
+  const keyInfo = await getAvailableKey();
+  if (!keyInfo.key) {
+    if (keyInfo.noKeys) return { error: "Chưa có API Key. Thêm ở tab API Keys." };
+    if (keyInfo.allLimited) return { error: "Tất cả key đều bị rate limit. Thử lại sau ~" + keyInfo.waitMinutes + " phút." };
+    return { error: "Không tìm được key khả dụng." };
+  }
+  const apiKey = keyInfo.key;
+  const provider = keyInfo.provider;
   const data = { history: localData.history };
 
   const history = data.history || [];
@@ -832,7 +979,14 @@ Trả về ĐÚNG JSON array, mỗi phần tử là index của bài được ch
 CHỈ trả về JSON, không giải thích thêm.`;
 
   try {
-    const callFn = provider === "groq" ? callGroqNonStream : callGeminiNonStream;
+    const callFnMap = {
+      groq: callGroqNonStream,
+      gemini: callGeminiNonStream,
+      cerebras: callCerebrasNonStream,
+      sambanova: callSambanovaNonStream,
+      openrouter: callOpenrouterNonStream,
+    };
+    const callFn = callFnMap[provider] || callGroqNonStream;
     const result = await callFn(apiKey, itemsList, systemPrompt);
     if (!result) return { error: "AI không phản hồi." };
 
@@ -926,15 +1080,64 @@ function formatSourceName(site, author) {
 }
 
 // === ALARM: Auto review ===
+// Re-register alarm on SW startup if previously enabled
+chrome.runtime.onStartup.addListener(async () => {
+  const today = new Date().toDateString();
+  const data = await chrome.storage.local.get(["dailyCount", "lastDate", "reviewAlarm"]);
+  if (data.lastDate === today) {
+    chrome.action.setBadgeText({ text: (data.dailyCount || 0).toString() });
+    chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
+  }
+  // Re-create alarm if it was enabled
+  const alarm = data.reviewAlarm;
+  if (alarm && alarm.enabled) {
+    const existing = await chrome.alarms.get("daily-ai-review");
+    if (!existing) {
+      const now = new Date();
+      const target = new Date();
+      target.setHours(alarm.hour, alarm.minute, 0, 0);
+      if (target <= now) target.setDate(target.getDate() + 1);
+      chrome.alarms.create("daily-ai-review", {
+        delayInMinutes: (target - now) / 60000,
+        periodInMinutes: 24 * 60,
+      });
+    }
+  }
+});
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "daily-ai-review") {
-    const result = await reviewTodayHistory();
-    if (result.success && result.count > 0) {
-      chrome.notifications.create("ai-review-done", {
+    try {
+      const result = await reviewTodayHistory();
+      if (result.success && result.count > 0) {
+        chrome.notifications.create("ai-review-done", {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "FeedWriter — Đề xuất tin hay",
+          message: `AI đã chọn ${result.count} tin hay. Mở extension để xem.`,
+        });
+      } else if (result.error) {
+        chrome.notifications.create("ai-review-error", {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "FeedWriter — Lỗi đề xuất",
+          message: result.error,
+        });
+      } else {
+        // No items found today
+        chrome.notifications.create("ai-review-empty", {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "FeedWriter",
+          message: "Chưa có bài tóm tắt nào hôm nay để đề xuất.",
+        });
+      }
+    } catch (e) {
+      chrome.notifications.create("ai-review-crash", {
         type: "basic",
         iconUrl: "icons/icon128.png",
-        title: "FeedWriter — Đề xuất tin hay",
-        message: `AI đã chọn ${result.count} tin hay trong ngày. Mở extension để xem & export.`,
+        title: "FeedWriter — Lỗi",
+        message: "Lỗi khi chạy đề xuất: " + e.message,
       });
     }
   }
@@ -986,7 +1189,10 @@ async function callGroqStream(apiKey, text, systemPrompt, port, signal, maxToken
       max_tokens: maxTokens,
     }),
   });
-  if (resp.status === 429) return { rateLimited: true };
+  if (resp.status === 429) {
+    const err = await resp.json().catch(() => ({}));
+    return { rateLimited: true, rateLimitError: err.error?.message || "" };
+  }
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
     return { error: "Groq API lỗi: " + (err.error?.message || resp.statusText) };
@@ -1006,10 +1212,157 @@ async function callGeminiStream(apiKey, text, systemPrompt, port, signal, maxTok
       generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
     }),
   });
-  if (resp.status === 429) return { rateLimited: true };
+  if (resp.status === 429) {
+    const err = await resp.json().catch(() => ({}));
+    return { rateLimited: true, rateLimitError: err.error?.message || "" };
+  }
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
     return { error: "Gemini API lỗi: " + (err.error?.message || resp.statusText) };
   }
   return processStream(resp, port, signal, (d) => d.candidates?.[0]?.content?.parts?.[0]?.text || "");
+}
+
+// === CEREBRAS: OpenAI-compatible API, ultra-fast inference ===
+async function callCerebrasStream(apiKey, text, systemPrompt, port, signal, maxTokens = 512) {
+  const resp = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+    signal,
+    body: JSON.stringify({
+      model: "llama3.3-70b",
+      stream: true,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text },
+      ],
+      temperature: 0.3,
+      max_tokens: maxTokens,
+    }),
+  });
+  if (resp.status === 429) {
+    const err = await resp.json().catch(() => ({}));
+    return { rateLimited: true, rateLimitError: err.error?.message || "" };
+  }
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return { error: "Cerebras API lỗi: " + (err.error?.message || resp.statusText) };
+  }
+  return processStream(resp, port, signal, (d) => d.choices?.[0]?.delta?.content || "");
+}
+
+async function callCerebrasNonStream(apiKey, userMessage, systemPrompt) {
+  return callNonStream(
+    "https://api.cerebras.ai/v1/chat/completions",
+    { "Authorization": "Bearer " + apiKey },
+    {
+      model: "llama3.3-70b",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    },
+    (d) => d?.choices?.[0]?.message?.content
+  );
+}
+
+// === SAMBANOVA: OpenAI-compatible API, fast open-source models ===
+async function callSambanovaStream(apiKey, text, systemPrompt, port, signal, maxTokens = 512) {
+  const resp = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+    signal,
+    body: JSON.stringify({
+      model: "Meta-Llama-3.3-70B-Instruct",
+      stream: true,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text },
+      ],
+      temperature: 0.3,
+      max_tokens: maxTokens,
+    }),
+  });
+  if (resp.status === 429) {
+    const err = await resp.json().catch(() => ({}));
+    return { rateLimited: true, rateLimitError: err.error?.message || "" };
+  }
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return { error: "SambaNova API lỗi: " + (err.error?.message || resp.statusText) };
+  }
+  return processStream(resp, port, signal, (d) => d.choices?.[0]?.delta?.content || "");
+}
+
+async function callSambanovaNonStream(apiKey, userMessage, systemPrompt) {
+  return callNonStream(
+    "https://api.sambanova.ai/v1/chat/completions",
+    { "Authorization": "Bearer " + apiKey },
+    {
+      model: "Meta-Llama-3.3-70B-Instruct",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    },
+    (d) => d?.choices?.[0]?.message?.content
+  );
+}
+
+// === OPENROUTER: Unified API gateway, many free models ===
+async function callOpenrouterStream(apiKey, text, systemPrompt, port, signal, maxTokens = 512) {
+  const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + apiKey,
+      "HTTP-Referer": "https://github.com/anlvdt/fb-post-summarizer",
+      "X-Title": "FeedWriter",
+    },
+    signal,
+    body: JSON.stringify({
+      model: "meta-llama/llama-3.3-70b-instruct:free",
+      stream: true,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text },
+      ],
+      temperature: 0.3,
+      max_tokens: maxTokens,
+    }),
+  });
+  if (resp.status === 429) {
+    const err = await resp.json().catch(() => ({}));
+    return { rateLimited: true, rateLimitError: err.error?.message || "" };
+  }
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return { error: "OpenRouter API lỗi: " + (err.error?.message || resp.statusText) };
+  }
+  return processStream(resp, port, signal, (d) => d.choices?.[0]?.delta?.content || "");
+}
+
+async function callOpenrouterNonStream(apiKey, userMessage, systemPrompt) {
+  return callNonStream(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      "Authorization": "Bearer " + apiKey,
+      "HTTP-Referer": "https://github.com/anlvdt/fb-post-summarizer",
+      "X-Title": "FeedWriter",
+    },
+    {
+      model: "meta-llama/llama-3.3-70b-instruct:free",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    },
+    (d) => d?.choices?.[0]?.message?.content
+  );
 }
