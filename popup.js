@@ -32,10 +32,11 @@ const promptStyleSel = document.getElementById("promptStyle");
 const customInstructionsEl = document.getElementById("customInstructions");
 const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
+const sourceTemplateEl = document.getElementById("sourceTemplate");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
 
-chrome.storage.sync.get(["minLength","outputLang","summaryLength","promptStyle","customInstructions","customSummaryPrompt","customAffPrompt","apiKeys"], (d) => {
+chrome.storage.sync.get(["minLength","outputLang","summaryLength","promptStyle","customInstructions","customSummaryPrompt","customAffPrompt","sourceTemplate","apiKeys"], (d) => {
   if (d.minLength) minLengthInput.value = d.minLength;
   if (d.outputLang) outputLangSel.value = d.outputLang;
   if (d.summaryLength) summaryLengthSel.value = d.summaryLength;
@@ -43,6 +44,7 @@ chrome.storage.sync.get(["minLength","outputLang","summaryLength","promptStyle",
   if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
   if (d.customSummaryPrompt) customSummaryPromptEl.value = d.customSummaryPrompt;
   if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
+  if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
   const total = Object.values(d.apiKeys || {}).reduce((s, a) => s + (a ? a.length : 0), 0);
   if (total === 0) showStatus('Chưa có API Key. Thêm ở tab "API Keys".', "error");
 });
@@ -56,6 +58,7 @@ saveBtn.addEventListener("click", () => {
     customInstructions: customInstructionsEl.value.trim(),
     customSummaryPrompt: customSummaryPromptEl.value.trim(),
     customAffPrompt: customAffPromptEl.value.trim(),
+    sourceTemplate: sourceTemplateEl.value.trim(),
   }, () => showStatus("Đã lưu", "success"));
 });
 

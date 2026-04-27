@@ -66,7 +66,8 @@
     const root = document.querySelector('div[role="main"]')
       || document.querySelector('div[id^="mount_0_0"]')
       || document.querySelector("main") || document.body;
-    const els = root.querySelectorAll("div, span, button");
+    // Use more specific selector to reduce DOM traversal
+    const els = root.querySelectorAll('div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]');
     for (const el of els) {
       if (el.dataset.fbsScanned) continue;
       if (el.children.length > 3) continue;
@@ -192,18 +193,18 @@
       '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
       '<div class="fbs-panel-body"></div>' +
       '<div class="fbs-panel-footer">' +
-      '<button class="fbs-tts-btn" title="Đọc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>' +
       '<button class="fbs-edit-btn" title="Chỉnh sửa trước khi copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa</button>' +
       '<button class="fbs-stop-btn">Dừng</button>' +
       '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
-      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy Status</button>' +
+      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
+      '<button class="fbs-post-status-btn" title="Đăng lên Facebook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg> Đăng</button>' +
       '</div>';
     document.body.appendChild(panel);
     panelBody = panel.querySelector(".fbs-panel-body");
     panel.querySelector(".fbs-close").addEventListener("click", closeOverlay);
     panel.querySelector(".fbs-copy-btn").addEventListener("click", copyResult);
+    panel.querySelector(".fbs-post-status-btn").addEventListener("click", handlePostStatus);
     panel.querySelector(".fbs-stop-btn").addEventListener("click", stopSummarize);
-    panel.querySelector(".fbs-tts-btn").addEventListener("click", toggleTTS);
     panel.querySelector(".fbs-regen-btn").addEventListener("click", regenerate);
     panel.querySelector(".fbs-edit-btn").addEventListener("click", toggleEdit);
   }
@@ -249,6 +250,7 @@
     const titleText = panel.querySelector(".fbs-title-text");
     if (titleText) {
       if (type === "affiliate") titleText.textContent = "Chế bài Affiliate";
+      else if (type === "status_share") titleText.textContent = "Viết Status";
       else titleText.textContent = "Tóm tắt nội dung";
     }
     panelBody.innerHTML = html;
@@ -261,8 +263,8 @@
     footer.style.display = hasContent ? "flex" : "none";
     panel.querySelector(".fbs-stop-btn").style.display = (isSummarizing || streaming) ? "inline-flex" : "none";
     panel.querySelector(".fbs-copy-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
+    panel.querySelector(".fbs-post-status-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result") && SITE === "facebook" && type !== "affiliate") ? "inline-flex" : "none";
     panel.querySelector(".fbs-regen-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
-    panel.querySelector(".fbs-tts-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
     panel.querySelector(".fbs-edit-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
     if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
   }
@@ -270,10 +272,11 @@
   function closeOverlay() {
     stopSummarize();
     if (speechSynthesis.speaking) speechSynthesis.cancel();
-    if (panel) panel.classList.remove("fbs-visible");
+    if (panel) {
+      panel.classList.remove("fbs-visible");
+      panel.classList.remove("fbs-panel-left");
+    }
     if (backdrop) backdrop.classList.remove("fbs-visible");
-    const tts = panel?.querySelector(".fbs-tts-btn");
-    if (tts) tts.classList.remove("fbs-playing");
   }
 
   function stopSummarize() {
@@ -298,16 +301,257 @@
     });
   }
 
-  function toggleTTS() {
-    const btn = panel.querySelector(".fbs-tts-btn");
-    if (speechSynthesis.speaking) { speechSynthesis.cancel(); btn.classList.remove("fbs-playing"); return; }
-    const text = panelBody?.innerText || "";
-    if (!text) return;
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "vi-VN"; u.rate = 1.1;
-    u.onend = () => btn.classList.remove("fbs-playing");
-    speechSynthesis.speak(u);
-    btn.classList.add("fbs-playing");
+  // === ĐĂNG STATUS ===
+
+  async function handlePostStatus() {
+    // Không cần check lastSummarizeParams — lấy text trực tiếp từ panel
+    if (isSummarizing || !panelBody) return;
+
+    try {
+      // Lấy text từ panel — ưu tiên edited text, rồi fbs-result element (tránh lấy text nút bấm)
+      const textarea = panelBody.querySelector(".fbs-edit-textarea");
+      const resultEl = panelBody.querySelector(".fbs-result");
+      let text = "";
+      if (textarea) {
+        text = textarea.value;
+      } else if (panelBody.dataset.editedText) {
+        text = panelBody.dataset.editedText;
+      } else if (resultEl) {
+        text = resultEl.innerText;
+      }
+      text = text.trim();
+      if (!text) return;
+
+      // Lấy metadata từ DOM element (nếu có)
+      const _element = lastSummarizeParams?._element || null;
+      const rawUrl = _element ? extractPostPermalink(_element) : location.href;
+      const author = _element ? extractPostAuthor(_element) : "";
+      const source = _element ? extractPostSource(_element) : "";
+      const imageUrl = _element ? extractPostImage(_element) : "";
+
+      // Append nguồn nếu chưa có — dùng template từ settings
+      if (!text.includes("Nguồn:") && !text.includes("nguồn:") && !text.includes("Credit:")) {
+        const authorText = author || "không rõ";
+        const platform = SITE === "facebook" ? "FB" : SITE === "x" ? "X" : SITE === "linkedin" ? "LinkedIn" : SITE === "threads" ? "Threads" : SITE === "reddit" ? "Reddit" : "";
+        let settings;
+        try { settings = await new Promise(r => chrome.storage.sync.get("sourceTemplate", r)); } catch (_) { settings = {}; }
+        const template = settings.sourceTemplate || "Nguồn: {platform} {author} (Link full dưới cmt)";
+        const sourceLine = template
+          .replace(/\{author\}/g, authorText)
+          .replace(/\{platform\}/g, platform)
+          .replace(/\{source\}/g, source || "");
+        text += "\n\n" + sourceLine.replace(/\s+/g, " ").trim();
+      }
+
+      // Normalize link (strip tracking params, clean Facebook URL)
+      let cleanUrl = rawUrl;
+      if (rawUrl && rawUrl !== location.href) {
+        try {
+          const u = new URL(rawUrl);
+          if (u.hostname.includes("facebook.com")) {
+            const mp = u.searchParams.get("multi_permalinks");
+            if (mp && u.pathname.includes("/groups/")) {
+              cleanUrl = u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+            } else {
+              const sfid = u.searchParams.get("story_fbid");
+              const uid = u.searchParams.get("id");
+              if (sfid && uid) {
+                cleanUrl = u.origin + "/" + uid + "/posts/" + sfid + "/";
+              } else {
+                cleanUrl = u.origin + u.pathname;
+              }
+            }
+          } else {
+            // Strip tracking params
+            for (const k of [...u.searchParams.keys()]) {
+              if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref"].includes(k)) u.searchParams.delete(k);
+            }
+            cleanUrl = u.toString().replace(/\?$/, "");
+          }
+        } catch (_) {}
+      }
+
+      // Dịch panel sang phải, ẩn backdrop
+      panel.classList.add("fbs-panel-left");
+      if (backdrop) backdrop.classList.remove("fbs-visible");
+      openFacebookComposer(text, cleanUrl, imageUrl);
+    } catch (_) {
+      // Fallback
+      const resultEl = panelBody?.querySelector(".fbs-result");
+      const text = resultEl ? resultEl.innerText : (panelBody?.innerText || "");
+      panel.classList.add("fbs-panel-left");
+      if (backdrop) backdrop.classList.remove("fbs-visible");
+      openFacebookComposer(text.trim(), "", "");
+    }
+  }
+
+  function openFacebookComposer(text, sourceUrl, imageUrl) {
+    const pasteKey = navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl';
+
+    const preview = document.createElement("div");
+    preview.className = "fbs-status-preview";
+
+    // Ảnh preview (nếu có)
+    const imgHtml = imageUrl
+      ? '<div class="fbs-sp-image"><img src="' + esc(imageUrl) + '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img">Copy ảnh</button></div>'
+      : '';
+
+    preview.innerHTML =
+      '<div class="fbs-sp-header">Preview Status <span class="fbs-sp-charcount">' + text.length + ' ký tự</span></div>' +
+      imgHtml +
+      '<div class="fbs-sp-text">' + esc(text).replace(/\n/g, "<br>") + '</div>' +
+      '<div class="fbs-sp-link-input">' +
+      '<input type="text" class="fbs-sp-link-field" placeholder="Click phải vào thời gian bài viết > Copy link > Paste vào đây" value="' + esc(sourceUrl || "") + '">' +
+      '<button class="fbs-sp-shorten-btn">Làm sạch</button>' +
+      '</div>' +
+      '<div class="fbs-sp-comment" style="display:none">' +
+      '<div class="fbs-sp-comment-label">Comment đầu tiên:</div>' +
+      '<div class="fbs-sp-comment-text"></div>' +
+      '<button class="fbs-sp-copy-comment">Copy comment</button>' +
+      '</div>' +
+      '<div class="fbs-sp-actions">' +
+      '<button class="fbs-sp-copy-text">Copy text</button>' +
+      '<button class="fbs-sp-open-fb">Đăng status</button>' +
+      '</div>';
+
+    panelBody.appendChild(preview);
+    panelBody.scrollTop = panelBody.scrollHeight;
+
+    const footer = panel.querySelector(".fbs-panel-footer");
+    if (footer) footer.style.display = "none";
+
+    const linkField = preview.querySelector(".fbs-sp-link-field");
+    const commentSection = preview.querySelector(".fbs-sp-comment");
+    const commentText = preview.querySelector(".fbs-sp-comment-text");
+
+    // Generate comment content từ link
+    function updateComment(url) {
+      if (!url) {
+        commentSection.style.display = "none";
+        return;
+      }
+      commentSection.style.display = "block";
+      commentText.textContent = "Link bài gốc: " + url;
+    }
+
+    // Nếu đã có link sẵn
+    if (sourceUrl) updateComment(sourceUrl);
+
+    // Normalize Facebook URL
+    function normalizeFbUrl(raw) {
+      try {
+        const u = new URL(raw);
+        if (u.hostname.includes("facebook.com")) {
+          const mp = u.searchParams.get("multi_permalinks");
+          if (mp && u.pathname.includes("/groups/")) {
+            return u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+          }
+          const sfid = u.searchParams.get("story_fbid");
+          const uid = u.searchParams.get("id");
+          if (sfid && uid) {
+            return u.origin + "/" + uid + "/posts/" + sfid + "/";
+          }
+          return u.origin + u.pathname;
+        }
+        // Non-FB: strip tracking
+        for (const k of [...u.searchParams.keys()]) {
+          if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref"].includes(k)) u.searchParams.delete(k);
+        }
+        return u.toString().replace(/\?$/, "");
+      } catch (_) { return raw; }
+    }
+
+    // Auto-normalize khi paste link
+    linkField.addEventListener("paste", () => {
+      setTimeout(() => {
+        const url = linkField.value.trim();
+        if (!url) return;
+        const clean = normalizeFbUrl(url);
+        linkField.value = clean;
+        updateComment(clean);
+      }, 50);
+    });
+
+    // Cũng update khi user gõ tay
+    linkField.addEventListener("input", () => {
+      const url = linkField.value.trim();
+      updateComment(url);
+    });
+
+    // Copy text
+    preview.querySelector(".fbs-sp-copy-text").addEventListener("click", async () => {
+      const btn = preview.querySelector(".fbs-sp-copy-text");
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "Đã copy! " + pasteKey + "+V";
+      setTimeout(() => { btn.textContent = "Copy text"; }, 2500);
+    });
+
+    // Làm sạch link
+    preview.querySelector(".fbs-sp-shorten-btn").addEventListener("click", () => {
+      const btn = preview.querySelector(".fbs-sp-shorten-btn");
+      const url = linkField.value.trim();
+      if (!url) return;
+      const clean = normalizeFbUrl(url);
+      linkField.value = clean;
+      updateComment(clean);
+      btn.textContent = "OK!";
+      setTimeout(() => { btn.textContent = "Làm sạch"; }, 2000);
+    });
+
+    // Copy comment (link bài gốc)
+    preview.querySelector(".fbs-sp-copy-comment").addEventListener("click", async () => {
+      const btn = preview.querySelector(".fbs-sp-copy-comment");
+      const content = commentText.textContent;
+      if (!content) return;
+      await navigator.clipboard.writeText(content);
+      btn.textContent = "Đã copy! Paste vào comment";
+      setTimeout(() => { btn.textContent = "Copy comment"; }, 2500);
+    });
+
+    // Copy ảnh
+    const copyImgBtn = preview.querySelector(".fbs-sp-copy-img");
+    if (copyImgBtn) {
+      copyImgBtn.addEventListener("click", async () => {
+        try {
+          copyImgBtn.textContent = "...";
+          const imgEl = preview.querySelector(".fbs-sp-image img");
+          const canvas = document.createElement("canvas");
+          canvas.width = imgEl.naturalWidth;
+          canvas.height = imgEl.naturalHeight;
+          canvas.getContext("2d").drawImage(imgEl, 0, 0);
+          const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          copyImgBtn.textContent = "Đã copy!";
+          setTimeout(() => { copyImgBtn.textContent = "Copy ảnh"; }, 2500);
+        } catch (_) {
+          window.open(imageUrl, "_blank");
+          copyImgBtn.textContent = "Mở tab mới";
+          setTimeout(() => { copyImgBtn.textContent = "Copy ảnh"; }, 2000);
+        }
+      });
+    }
+
+    // Đăng status — auto-copy text + mở Facebook composer
+    preview.querySelector(".fbs-sp-open-fb").addEventListener("click", async () => {
+      const btn = preview.querySelector(".fbs-sp-open-fb");
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "Đã copy! Đang mở...";
+      if (SITE === "facebook") {
+        setTimeout(() => {
+          const allButtons = document.querySelectorAll('div[role="main"] div[role="button"]');
+          for (const b of allButtons) {
+            const t = (b.textContent || "").toLowerCase();
+            if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something")) {
+              b.click();
+              btn.textContent = "Đăng status";
+              return;
+            }
+          }
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          btn.textContent = "Đăng status";
+        }, 200);
+      }
+    });
   }
 
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
@@ -349,27 +593,20 @@
 
   // === POST METADATA EXTRACTION ===
   function extractPostPermalink(element) {
-    // Try to find permalink from the post's DOM
-    if (!element) return location.href;
-
-    // Walk up to find the post container (role="article" on Facebook)
+    // Nếu đang xem bài đơn lẻ (URL chứa /posts/, /permalink/, story_fbid) → dùng URL trang
+    const url = location.href;
+    if (SITE === "facebook") {
+      if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks/.test(url)) return url;
+      return ""; // Đang ở newsfeed → không biết link bài nào → để user paste
+    }
+    // Non-Facebook: thử tìm trong DOM
+    if (!element) return url;
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
       if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
-
-    // Strategy 1: Facebook — timestamp links contain permalink
-    const timeLinks = postContainer.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/reel/"], a[href*="/photo/"], a[href*="/videos/"]');
-    for (const a of timeLinks) {
-      const href = a.href;
-      if (href && !href.includes("#") && !href.includes("comment")) {
-        try { return new URL(href).origin + new URL(href).pathname; } catch (_) { }
-      }
-    }
-
-    // Strategy 2: Threads/X/LinkedIn — look for post-specific links
     const platformLinks = {
       threads: 'a[href*="/post/"]',
       x: 'a[href*="/status/"]',
@@ -383,9 +620,7 @@
         try { return new URL(link.href).origin + new URL(link.href).pathname; } catch (_) { }
       }
     }
-
-    // Fallback: current tab URL
-    return location.href;
+    return url;
   }
 
   function extractPostImage(element) {
@@ -399,21 +634,67 @@
       if (postContainer.getAttribute("role") === "article") break;
     }
 
-    // Find the first meaningful image (skip small icons, avatars, emojis)
-    const images = postContainer.querySelectorAll("img");
-    for (const img of images) {
-      const w = img.naturalWidth || img.width || 0;
-      const h = img.naturalHeight || img.height || 0;
-      const src = img.src || "";
-      // Skip tiny images (avatars, icons, emojis), data URIs, and tracker pixels
-      if (w < 100 && h < 100) continue;
-      if (src.startsWith("data:")) continue;
-      if (src.includes("emoji") || src.includes("static")) continue;
-      if (src.includes("profile") || src.includes("avatar")) continue;
-      if (src) return src;
+    if (SITE === "facebook") {
+      // Strategy: Facebook post images are inside specific containers
+      // They are NOT inside the header area (which contains avatar + author name)
+      // Post images are typically in a sibling/descendant of the text content area
+
+      // 1. Look for images inside photo/video link containers
+      const photoLinks = postContainer.querySelectorAll(
+        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]'
+      );
+      for (const link of photoLinks) {
+        const img = link.querySelector("img");
+        if (img && img.src && !img.src.startsWith("data:")) {
+          const w = img.naturalWidth || img.width || 0;
+          if (w >= 100) return img.src;
+        }
+      }
+
+      // 2. Look for large images (>300px wide) that are NOT circular (avatar)
+      const allImgs = postContainer.querySelectorAll("img");
+      for (const img of allImgs) {
+        const src = img.src || "";
+        if (!src || src.startsWith("data:")) continue;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        // Must be large enough to be a content image
+        if (w < 300 && h < 300) continue;
+        // Skip circular (avatar)
+        try {
+          const style = getComputedStyle(img);
+          if (style.borderRadius === "50%") continue;
+        } catch (_) {}
+        // Skip if inside a link to user profile
+        const parentLink = img.closest("a");
+        if (parentLink) {
+          const href = parentLink.href || "";
+          if (href && !href.includes("/photo") && !href.includes("/video") && !href.includes("fbid")) {
+            // Link doesn't point to photo/video — likely avatar or other UI element
+            if (w < 500) continue;
+          }
+        }
+        return src;
+      }
+    } else {
+      // Non-Facebook: original logic
+      const images = postContainer.querySelectorAll("img");
+      for (const img of images) {
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        const src = img.src || "";
+        if (!src || src.startsWith("data:")) continue;
+        if (w < 200 && h < 200) continue;
+        if (src.includes("emoji") || src.includes("static")) continue;
+        if (src.includes("profile") || src.includes("avatar")) continue;
+        try {
+          if (getComputedStyle(img).borderRadius === "50%") continue;
+        } catch (_) {}
+        return src;
+      }
     }
 
-    // Try og:image or meta tags (useful when on single post page)
+    // Fallback: og:image
     const ogImage = document.querySelector('meta[property="og:image"]');
     if (ogImage && ogImage.content) return ogImage.content;
 
@@ -423,7 +704,6 @@
   function extractPostAuthor(element) {
     if (!element) return "";
 
-    // Walk up to post container
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
       if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
@@ -431,17 +711,28 @@
       if (postContainer.getAttribute("role") === "article") break;
     }
 
-    // Facebook: author name is usually in a strong > a or h2/h3/h4 link near the top
-    const headerLinks = postContainer.querySelectorAll("h2 a, h3 a, h4 a, strong a");
-    for (const a of headerLinks) {
-      const name = (a.textContent || "").trim();
-      // Filter out generic links, keep author names (at least 2 chars, not a "See More" keyword)
-      if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase())) {
-        return name;
+    if (SITE === "facebook") {
+      // Facebook: author is the FIRST <a> inside h2/h3/h4 (header area)
+      // This is always the author name, not group/page name
+      const headers = postContainer.querySelectorAll("h2, h3, h4");
+      for (const h of headers) {
+        const firstLink = h.querySelector("a");
+        if (firstLink) {
+          const name = (firstLink.textContent || "").trim();
+          if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase())) {
+            return name;
+          }
+        }
+      }
+      // Fallback: strong > a (but only first one)
+      const strongLink = postContainer.querySelector("strong a");
+      if (strongLink) {
+        const name = (strongLink.textContent || "").trim();
+        if (name.length >= 2 && name.length < 80) return name;
       }
     }
 
-    // X/Threads: look for display name
+    // X/Threads
     const nameEl = postContainer.querySelector('[data-testid="User-Name"], [data-testid="tweetAuthorName"]');
     if (nameEl) return (nameEl.textContent || "").split("@")[0].trim();
 
@@ -452,6 +743,42 @@
     // Reddit
     const redditAuthor = postContainer.querySelector('[data-testid="post_author_link"], a[href*="/user/"]');
     if (redditAuthor) return (redditAuthor.textContent || "").trim();
+
+    return "";
+  }
+
+  function extractPostSource(element) {
+    if (!element) return "";
+
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
+    }
+
+    if (SITE === "facebook") {
+      // Chỉ trả về group name nếu thực sự đang xem trong group
+      // Kiểm tra URL trang hoặc pattern "Author › Group" trong header
+      const isInGroup = location.href.includes("/groups/");
+      if (isInGroup) {
+        // Tìm group name: thường là link thứ 2 trong header (sau author)
+        const headers = postContainer.querySelectorAll("h2, h3, h4");
+        for (const h of headers) {
+          const links = h.querySelectorAll("a");
+          if (links.length >= 2) {
+            const name = (links[1].textContent || "").trim();
+            if (name.length >= 3 && name.length < 100) return name;
+          }
+        }
+        // Fallback: lấy từ group link
+        const groupLink = postContainer.querySelector('a[href*="/groups/"]');
+        if (groupLink) {
+          const name = (groupLink.textContent || "").trim();
+          if (name.length >= 3 && name.length < 100) return name;
+        }
+      }
+    }
 
     return "";
   }
@@ -516,11 +843,15 @@
 
     lastSummarizeParams = { text, type, _element: contextElement };
     isSummarizing = true;
-    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : "Đang tóm tắt...";
+    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : type === "status_share" ? "Đang viết Status..." : "Đang tóm tắt...";
     openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
 
     // Wake SW before connecting port (MV3 SW dies after ~30s idle)
     await wakeServiceWorker();
+    if (!isContextValid()) {
+      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      return;
+    }
     currentPort = chrome.runtime.connect({ name: "summarize-stream" });
     // Extract post metadata for enriched history
     const _el = lastSummarizeParams._element;
@@ -528,7 +859,8 @@
     const _imageUrl = extractPostImage(_el);
     const _author = extractPostAuthor(_el);
     const _title = extractPostTitle(_el);
-    currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title });
+    const _source = extractPostSource(_el);
+    currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title, postSource: _source });
 
     let first = true;
     currentPort.onMessage.addListener((msg) => {
@@ -544,7 +876,7 @@
           const issueClass = msg.quality === "warn" ? "fbs-quality-warn" : "fbs-quality-info";
           qualityHtml = '<div class="' + issueClass + '">' + msg.issues.map(i => esc(i)).join("<br>") + '</div>';
         }
-        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '</div>' + qualityHtml, false);
+        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '</div>' + qualityHtml, false, type);
         try { currentPort.disconnect(); } catch (_) { } currentPort = null;
       } else if (msg.action === "error") {
         isSummarizing = false;
@@ -567,7 +899,9 @@
 
   // === MESSAGES (CONTEXT MENU, SHORTCUTS & UNSHORTEN) ===
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === "summarize-selection" && msg.text) summarizeText(msg.text, msg.type);
+    if (msg.action === "summarize-selection" && msg.text) {
+      summarizeText(msg.text, msg.type);
+    }
     if (msg.action === "shortcut-summarize-shortcut") {
       const text = window.getSelection().toString();
       if (text) summarizeText(text, "summary");
@@ -674,7 +1008,8 @@
     if (floatingToolbar) return;
     floatingToolbar = document.createElement("div");
     floatingToolbar.className = "fbs-floating-toolbar";
-    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' + ICON_BASE64 + '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button><button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
+    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' + ICON_BASE64 + '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button>' +
+      '<button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
     document.body.appendChild(floatingToolbar);
 
     floatingToolbar.addEventListener("mousedown", (e) => e.preventDefault());
@@ -769,14 +1104,12 @@
 
   function debouncedScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 50);
+    scanTimer = setTimeout(scan, 200);
   }
 
   scan();
-  setTimeout(scan, 300);
-  setTimeout(scan, 700);
-  setTimeout(scan, 1200);
-  setTimeout(scan, 2000);
+  setTimeout(scan, 500);
+  setTimeout(scan, 1500);
   new MutationObserver(() => debouncedScan()).observe(document.body, { childList: true, subtree: true });
-  setInterval(scan, 2500);
+  setInterval(scan, 5000);
 })();

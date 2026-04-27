@@ -114,6 +114,21 @@
   animation: fbsOverlayIn 0.3s ease-out;
 }
 
+/* Panel dịch sang phải khi đăng status — nhường chỗ cho Facebook composer bên trái */
+.fbs-panel.fbs-panel-left {
+  left: auto;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 380px;
+  max-height: 80vh;
+  transition: left 0.3s ease, right 0.3s ease, transform 0.3s ease, width 0.3s ease;
+}
+
+.fbs-panel.fbs-panel-left.fbs-visible {
+  animation: none;
+}
+
 .fbs-backdrop {
   display: none;
   position: fixed;
@@ -515,32 +530,6 @@
   border-color: #ff6b6b;
 }
 
-/* TTS button */
-.fbs-tts-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #b0b3b8;
-  cursor: pointer;
-  transition: background 0.15s;
-  margin-right: auto;
-  padding: 0;
-}
-
-.fbs-tts-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.fbs-tts-btn.fbs-playing {
-  color: #a855f7;
-  background: rgba(168, 85, 247, 0.15);
-}
-
 /* Streaming cursor */
 .fbs-cursor {
   display: inline-block;
@@ -658,3 +647,404 @@
 .fbs-floating-btn.fbs-btn-highlight {
   color: #a855f7;
 }
+
+/* === Đăng Status Button === */
+.fbs-post-status-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgba(24, 119, 242, 0.4);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.15), rgba(66, 133, 244, 0.15));
+  color: #4599ff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin-right: 6px;
+}
+
+.fbs-post-status-btn:hover {
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.25), rgba(66, 133, 244, 0.25));
+  border-color: #1877f2;
+  color: #fff;
+}
+
+.fbs-post-status-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fbs-post-status-btn svg {
+  flex-shrink: 0;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-post-status-btn {
+  color: #1877f2;
+  border-color: rgba(24, 119, 242, 0.3);
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.08), rgba(66, 133, 244, 0.08));
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-post-status-btn:hover {
+  background: linear-gradient(135deg, rgba(24, 119, 242, 0.15), rgba(66, 133, 244, 0.15));
+  color: #1360c7;
+}
+
+/* === Status Preview Panel === */
+.fbs-status-preview {
+  margin-top: 14px;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+  animation: fbsNoticeIn 0.3s ease-out;
+}
+
+@keyframes fbsNoticeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fbs-sp-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b0b3b8;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fbs-sp-charcount {
+  font-size: 10px;
+  font-weight: 400;
+  color: #888;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.fbs-sp-image {
+  position: relative;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.fbs-sp-image img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+}
+
+.fbs-sp-copy-img {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.fbs-sp-copy-img:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.fbs-sp-text {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #e4e6eb;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.fbs-sp-link-input {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: center;
+}
+
+.fbs-sp-link-field {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e4e6eb;
+  font-size: 11px;
+  font-family: monospace;
+  outline: none;
+}
+
+.fbs-sp-link-field:focus {
+  border-color: rgba(168, 85, 247, 0.5);
+}
+
+.fbs-sp-link-field::placeholder {
+  color: #666;
+}
+
+.fbs-sp-shorten-btn,
+.fbs-sp-copy-link {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: transparent;
+  color: #b0b3b8;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.fbs-sp-shorten-btn:hover,
+.fbs-sp-copy-link:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.fbs-sp-shorten-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fbs-sp-comment {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.fbs-sp-comment-label {
+  font-size: 10px;
+  color: #888;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.fbs-sp-comment-text {
+  font-size: 12px;
+  color: #e4e6eb;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  word-break: break-all;
+  margin-bottom: 6px;
+}
+
+.fbs-sp-copy-comment {
+  padding: 5px 12px;
+  border: 1px solid rgba(46, 213, 115, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: #2ed573;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.fbs-sp-copy-comment:hover {
+  background: rgba(46, 213, 115, 0.1);
+  border-color: #2ed573;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-comment {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-comment-text {
+  color: #1c1e21;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-comment {
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.3);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-comment:hover {
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.fbs-sp-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.fbs-sp-link {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #b0b3b8;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fbs-sp-link code {
+  font-size: 10px;
+  color: #8b8fa3;
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+.fbs-sp-copy-link {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: transparent;
+  color: #b0b3b8;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  flex-shrink: 0;
+}
+
+.fbs-sp-copy-link:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.fbs-sp-copy-text,
+.fbs-sp-open-fb {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.fbs-sp-copy-text {
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+  border: none;
+}
+
+.fbs-sp-copy-text:hover {
+  opacity: 0.9;
+}
+
+.fbs-sp-open-fb {
+  background: transparent;
+  color: #b0b3b8;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.fbs-sp-open-fb:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+/* Light theme */
+.fbs-panel[data-fbs-theme="light"] .fbs-status-preview {
+  border-color: rgba(108, 92, 231, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-header {
+  color: #65676b;
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-image {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-text {
+  color: #1c1e21;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-actions {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-link-input {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-link-field {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #1c1e21;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-shorten-btn,
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-link {
+  color: #65676b;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-shorten-btn:hover,
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-link:hover {
+  color: #1c1e21;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-link {
+  color: #65676b;
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-link code {
+  color: #888;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-link {
+  color: #65676b;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-link:hover {
+  color: #1c1e21;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-open-fb {
+  color: #65676b;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-open-fb:hover {
+  color: #1c1e21;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-img {
+  background: rgba(255, 255, 255, 0.85);
+  color: #1c1e21;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-img:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+

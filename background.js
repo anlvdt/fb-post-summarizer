@@ -149,12 +149,15 @@ FORMAT OUTPUT:
 YÊU CẦU:
 - Tiêu đề PHẢI ở dòng đầu, bọc trong **...**
 - Tối đa 5 câu liền mạch hoặc 5 bullet points cho phần tóm tắt
+- NẾU bài gốc là HƯỚNG DẪN/TUTORIAL: giữ nguyên các bước (Bước 1, Bước 2...) dạng list ngắn gọn. Mỗi bước tối đa 1-2 câu. Người đọc phải biết cách làm ngay.
+- NẾU bài gốc là TIN TỨC/PHÂN TÍCH: viết đoạn văn liền mạch 3-5 câu.
 - Giọng tự nhiên, dễ hiểu như đang kể cho bạn bè
 - Giữ thông tin có giá trị thực, dữ liệu, kết luận
 - Bỏ ví dụ dài, chi tiết lan man, rào đón
 - CHỈ dùng thông tin CÓ TRONG bài gốc, KHÔNG bịa thêm số liệu/thông số/phiên bản
 - CẤM tiêu đề nhạt không có thông tin: "Tin mới", "Có một điều thú vị..."
 - CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây..."
+- CẤM lạm dụng sở hữu "của bạn", "của mình", "của chúng ta". Viết trực tiếp: "iPhone báo đầy bộ nhớ" thay vì "iPhone của bạn báo đầy bộ nhớ". Chỉ dùng khi thật sự cần phân biệt sở hữu.
 - Trả lời bằng tiếng Việt`;
 
 // TÓM TẮT NGẮN - Quick overview
@@ -202,12 +205,22 @@ CẤM MỞ ĐẦU BẰNG CÂU DẪN DẮT RỖNG:
 - VD SAI: "Mình vừa đọc được tin tức về giá điện thoại cao cấp..."
 - VD ĐÚNG: "Huawei thay đổi chiến lược: bản Pro Max giá ngang Xiaomi Ultra."
 
+HẠN CHẾ SỞ HỮU THỪA:
+- KHÔNG lạm dụng "của bạn", "của mình", "của chúng ta", "của Apple", "của Google" khi không cần thiết.
+- Viết trực tiếp: "iPhone báo đầy bộ nhớ" thay vì "iPhone của bạn báo đầy bộ nhớ".
+- "Cập nhật iOS" thay vì "Cập nhật iOS của bạn". "Tài khoản Google" thay vì "Tài khoản Google của bạn".
+- Chỉ dùng sở hữu khi thật sự cần phân biệt (VD: "ảnh của bạn" vs "ảnh của người khác").
+
 TIỀN VIỆT NAM:
 - Viết gọn bằng đơn vị triệu/tỷ: "45 triệu đồng", "1,2 tỷ đồng"
 - KHÔNG viết dạng đầy đủ: "44.990.000 đồng" → viết "gần 45 triệu đồng" hoặc "44,99 triệu đồng"
 
 KHÔNG LẶP CẢM XÚC:
 - Mỗi cảm xúc/nhận xét chỉ nói MỘT lần. Không lặp "thật sự ngạc nhiên", "thật sự không hiểu", "quá đắt đỏ" trong cùng bài.
+
+CẤM EMOJI:
+- TUYỆT ĐỐI KHÔNG dùng emoji, icon, hay ký tự đặc biệt Unicode trong output (📌🔗✅⚠️🔥💡⚡🎯🚀❌👍...).
+- Dùng text thuần: "Nguồn:" thay vì "📌 Nguồn:", "Link:" thay vì "🔗".
 
 CHỐNG BỊA THÔNG TIN (HALLUCINATION):
 - TUYỆT ĐỐI KHÔNG bịa số liệu, tên sản phẩm, phiên bản, thông số kỹ thuật, giá cả mà KHÔNG có trong bài gốc.
@@ -382,7 +395,7 @@ function parseRetryAfter(errorMessage) {
 const MAX_INPUT_CHARS = 8000;
 const MAX_OUTPUT_TOKENS = 1024;
 
-async function getSystemPrompt(type, site) {
+async function getSystemPrompt(type, site, author, sourceUrl, postTitle, postSource) {
   const data = await chrome.storage.sync.get([
     "customSummaryPrompt", "customAffPrompt",
     "outputLang", "promptStyle", "summaryLength", "customInstructions"
@@ -462,9 +475,9 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     if (msg.action !== "summarize") return;
     try {
-      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type, msg.sourceUrl, msg.imageUrl, msg.author, msg.postTitle);
+      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type, msg.sourceUrl, msg.imageUrl, msg.author, msg.postTitle, msg.postSource);
       if (result && result.error) port.postMessage({ action: "error", error: result.error });
-      else if (result && result.summary) port.postMessage({ action: "done", full: result.summary, quality: result.quality, issues: result.issues });
+      else if (result && result.summary) port.postMessage({ action: "done", full: result.summary, quality: result.quality, issues: result.issues, imageUrl: msg.imageUrl || "" });
     } catch (e) {
       if (e.name !== "AbortError") {
         try { port.postMessage({ action: "error", error: e.message }); } catch (_) { }
@@ -636,6 +649,7 @@ function cleanInputText(text) {
   return text.replace(/\s+/g, " ").trim();
 }
 
+
 // ============================================================
 // === POST-PROCESSING GUARDRAILS (Validator Sandwich Pattern)
 // ============================================================
@@ -729,11 +743,14 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 3. Copy detection (n-gram overlap)
+  // 3. Copy detection (n-gram overlap) — only for Vietnamese content
   if (sourceText && sourceText.length > 50) {
-    const overlap = computeNgramOverlap(sourceText, processed, 4);
-    if (overlap > 0.6) {
-      issues.push("⚠️ Output copy nhiều từ bài gốc (" + Math.round(overlap * 100) + "%).");
+    const isVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(sourceText);
+    if (isVietnamese) {
+      const overlap = computeNgramOverlap(sourceText, processed, 4);
+      if (overlap > 0.6) {
+        issues.push("[!] Output copy nhiều từ bài gốc (" + Math.round(overlap * 100) + "%).");
+      }
     }
   }
 
@@ -808,34 +825,43 @@ function postProcessOutput(output, sourceText, type) {
     const outputNums = (processed.match(/\d[\d.,]*\d|\d+/g) || []).map(n => n.replace(/[.,]/g, ""));
     const fabricated = outputNums.filter(n => n.length >= 2 && !sourceNums.has(n));
     if (fabricated.length >= 2) {
-      issues.push("⚠️ Output có thể chứa số liệu bịa (" + fabricated.slice(0, 3).join(", ") + ") — không tìm thấy trong bài gốc.");
+      issues.push("[!] Output có thể chứa số liệu bịa (" + fabricated.slice(0, 3).join(", ") + ") — không tìm thấy trong bài gốc.");
     }
   }
 
   // 10. Detect "nói xạo" - writing as if personally experienced when sharing others' content
   const fakeExperiencePatterns = [
-    /\b(?:mình|tôi)\s+(?:vừa|đã|mới)\s+(?:thử|test|dùng|tạo|làm)\b/i,
+    /\b(?:mình|tôi)\s+(?:vừa|đã|mới)\s+(?:thử|test|dùng|tạo|làm|mua|cài|nâng cấp|update)\b/i,
     /\b(?:mình|tôi)\s+(?:thử|test|dùng)\s+(?:rồi|xong|thấy)\b/i,
     /\b(?:mình|tôi)\s+(?:đã\s+)?(?:tạo|làm)\s+(?:được|ra|xong)\b/i,
     /\bthật\s+sự\s+(?:choáng|sốc|bất ngờ|ngạc nhiên)\b/i,
+    /\b(?:mình|tôi)\s+(?:rất|cực kỳ|vô cùng)\s+(?:thích|hài lòng|ấn tượng|ngạc nhiên)\b/i,
+    /\bsau khi (?:mình|tôi)\s+(?:dùng|thử|test|cài)\b/i,
+    /\b(?:mình|tôi)\s+(?:khuyên|recommend|đề xuất)\b/i,
   ];
   for (const pat of fakeExperiencePatterns) {
     if (pat.test(processed)) {
-      issues.push("⚠️ Output viết như người trải nghiệm trực tiếp — có thể không chính xác nếu đây là nội dung chia sẻ lại.");
+      issues.push("[!] Output viết như người trải nghiệm trực tiếp — có thể không chính xác nếu đây là nội dung chia sẻ lại.");
       break;
     }
   }
 
-  // 11. Quality score
+  // 11. Detect excessive possessive "của bạn/mình/chúng ta"
+  const possessiveMatches = (processed.match(/của\s+(?:bạn|mình|chúng ta)/gi) || []);
+  if (possessiveMatches.length >= 3) {
+    issues.push("Output dùng \"của bạn/mình\" " + possessiveMatches.length + " lần — nên viết trực tiếp hơn.");
+  }
+
+  // 12. Quality score
   let quality = "good";
   if (issues.some(i => i.includes("fail") || i.includes("trống"))) quality = "fail";
-  else if (issues.some(i => i.includes("⚠️") || i.includes("copy"))) quality = "warn";
+  else if (issues.some(i => i.includes("[!]") || i.includes("copy"))) quality = "warn";
   else if (issues.length > 0) quality = "info";
 
   return { text: processed, quality, issues };
 }
 
-async function handleStream(text, site, port, signal, type = "summary", sourceUrl = "", imageUrl = "", author = "", postTitle = "") {
+async function handleStream(text, site, port, signal, type = "summary", sourceUrl = "", imageUrl = "", author = "", postTitle = "", postSource = "") {
   // === INPUT GUARDRAILS ===
   const inputCheck = validateInput(text);
   if (!inputCheck.valid) return { error: inputCheck.error };
@@ -849,7 +875,7 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
     ? cleanedText.substring(0, MAX_INPUT_CHARS) + "\n[...bài viết đã được cắt ngắn]"
     : cleanedText;
 
-  const systemPrompt = await getSystemPrompt(type, site);
+  const systemPrompt = await getSystemPrompt(type, site, author, sourceUrl, postTitle, postSource);
   const streamFns = {
     groq: callGroqStream,
     gemini: callGeminiStream,

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FeedWriter",
-  "version": "2.1.0",
-  "description": "Tóm tắt bài viết bằng AI với tiêu đề hook mạnh, chỉnh sửa & copy thành status. Chế bài affiliate. Dịch từ Anh-Việt.",
+  "version": "2.2.0",
+  "description": "Tóm tắt bài viết bằng AI với tiêu đề hook mạnh, chỉnh sửa & copy thành status. Viết Status tối ưu reach. Chế bài affiliate. Dịch từ Anh-Việt.",
   "author": "Le An (anlvdt)",
   "homepage_url": "https://github.com/anlvdt/fb-post-summarizer",
   "permissions": [
