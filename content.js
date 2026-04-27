@@ -701,9 +701,112 @@
     return "";
   }
 
+  // === FACEBOOK AUTHOR HELPERS ===
+
+  // Extract a valid author name from the first <a> inside a header element.
+  function _fbNameFromHeader(header) {
+    const link = header.querySelector("a");
+    if (!link) return "";
+    const name = (link.textContent || "").trim();
+    if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase())) return name;
+    return "";
+  }
+
+  // Check if a DOM element sits inside the comment section of a post.
+  // Facebook comments live inside a form (comment composer area) or after
+  // a "comment" / "bình luận" section. We detect this by checking if the
+  // element is preceded by the main post text content — shared-post articles
+  // appear BEFORE the text or embedded within it, while comments appear AFTER.
+  //
+  // Heuristic: a nested article is a COMMENT if:
+  //   (a) it does NOT contain a profile-link header (h2/h3/h4 with <a>), OR
+  //   (b) it sits inside a container whose role is "list" or that has
+  //       ul/[role="list"] ancestor (Facebook wraps comments in list roles), OR
+  //   (c) it is a sibling/descendant of a form element (comment input area).
+  function _fbIsCommentArticle(nested, postContainer) {
+    // (b) Inside a list-like container → comment
+    let el = nested.parentElement;
+    for (let i = 0; i < 10 && el && el !== postContainer; i++) {
+      const role = (el.getAttribute("role") || "").toLowerCase();
+      if (role === "list" || role === "listitem" || el.tagName === "UL") return true;
+      el = el.parentElement;
+    }
+    // (c) Inside or adjacent to a form → comment
+    if (nested.closest("form")) return true;
+    el = nested.parentElement;
+    for (let i = 0; i < 5 && el && el !== postContainer; i++) {
+      if (el.querySelector(":scope > form")) return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
+  // Find the original author of a shared post.
+  // Returns "" if the post is NOT a shared post.
+  //
+  // Facebook DOM for shared posts (all 3 cases):
+  //   1. Personal share:  [article sharer] > ... > [article original-author]
+  //   2. Group share:     [article sharer] > ... > [article original-author]
+  //   3. Page share:      [article page]   > ... > [article original-author]
+  //
+  // The inner article of a shared post:
+  //   - Has its own h2/h3/h4 header with a profile <a> link
+  //   - Is NOT inside a comment list/form area
+  //   - Is a direct child article of the post (not nested deeper in comment replies)
+  function _fbFindOriginalAuthor(postContainer) {
+    const nestedArticles = postContainer.querySelectorAll('[role="article"]');
+    for (const nested of nestedArticles) {
+      if (nested === postContainer) continue;
+
+      // Must be a direct child article of postContainer (not nested inside another nested article)
+      const parentArticle = nested.parentElement?.closest('[role="article"]');
+      if (parentArticle && parentArticle !== postContainer) continue;
+
+      // Skip comment articles
+      if (_fbIsCommentArticle(nested, postContainer)) continue;
+
+      // Must have its own header with a profile link — this is the shared post's author
+      const headers = nested.querySelectorAll("h2, h3, h4");
+      for (const h of headers) {
+        // Header must belong to THIS nested article, not a deeper one
+        if (h.closest('[role="article"]') !== nested) continue;
+        const name = _fbNameFromHeader(h);
+        if (name) return name;
+      }
+
+      // Fallback: strong > a directly inside this nested article (some shared post layouts)
+      const strongs = nested.querySelectorAll("strong a");
+      for (const s of strongs) {
+        if (s.closest('[role="article"]') !== nested) continue;
+        const name = (s.textContent || "").trim();
+        if (name.length >= 2 && name.length < 80) return name;
+      }
+    }
+    return "";
+  }
+
+  // Extract author from a non-shared post container (the simple case).
+  function _fbExtractAuthorFromContainer(container) {
+    const headers = container.querySelectorAll("h2, h3, h4");
+    for (const h of headers) {
+      if (h.closest('[role="article"]') !== container) continue;
+      const name = _fbNameFromHeader(h);
+      if (name) return name;
+    }
+    // Fallback: strong > a
+    const strongs = container.querySelectorAll("strong a");
+    for (const s of strongs) {
+      if (s.closest('[role="article"]') !== container) continue;
+      const name = (s.textContent || "").trim();
+      if (name.length >= 2 && name.length < 80) return name;
+    }
+    return "";
+  }
+
   function extractPostAuthor(element) {
     if (!element) return "";
 
+    // Walk up to the outermost post article
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
       if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
@@ -712,24 +815,15 @@
     }
 
     if (SITE === "facebook") {
-      // Facebook: author is the FIRST <a> inside h2/h3/h4 (header area)
-      // This is always the author name, not group/page name
-      const headers = postContainer.querySelectorAll("h2, h3, h4");
-      for (const h of headers) {
-        const firstLink = h.querySelector("a");
-        if (firstLink) {
-          const name = (firstLink.textContent || "").trim();
-          if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase())) {
-            return name;
-          }
-        }
-      }
-      // Fallback: strong > a (but only first one)
-      const strongLink = postContainer.querySelector("strong a");
-      if (strongLink) {
-        const name = (strongLink.textContent || "").trim();
-        if (name.length >= 2 && name.length < 80) return name;
-      }
+      // 1. Try to find original author from a shared/embedded post inside this article.
+      //    This handles: personal share, group share, page share — all cases where
+      //    someone shares another person's post. The outer header = sharer, inner = author.
+      const originalAuthor = _fbFindOriginalAuthor(postContainer);
+      if (originalAuthor) return originalAuthor;
+
+      // 2. Not a shared post → author is in this article's own header.
+      //    This handles: personal post, page post, group post (original, not shared).
+      return _fbExtractAuthorFromContainer(postContainer);
     }
 
     // X/Threads
