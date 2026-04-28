@@ -253,7 +253,25 @@
       else if (type === "status_share") titleText.textContent = "Viết Status";
       else titleText.textContent = "Tóm tắt nội dung";
     }
-    panelBody.innerHTML = html;
+
+    // Streaming: chỉ update nội dung result, không rebuild toàn bộ DOM
+    if (streaming) {
+      const existingResult = panelBody.querySelector(".fbs-result");
+      if (existingResult) {
+        // Extract nội dung mới từ html
+        const temp = document.createElement("div");
+        temp.innerHTML = html;
+        const newResult = temp.querySelector(".fbs-result");
+        if (newResult) {
+          existingResult.innerHTML = newResult.innerHTML;
+        }
+      } else {
+        panelBody.innerHTML = html;
+      }
+    } else {
+      panelBody.innerHTML = html;
+    }
+
     // Clear edited text cache when new content loads
     delete panelBody.dataset.editedText;
     backdrop.classList.add("fbs-visible");
@@ -284,7 +302,7 @@
     isSummarizing = false;
     if (currentPort) { try { currentPort.disconnect(); } catch (_) { } currentPort = null; }
     if (panelBody) {
-      openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, "") +
+      openOverlay(panelBody.innerHTML +
         '<div class="fbs-error">Đã dừng.</div>', false);
     }
   }
@@ -981,11 +999,33 @@
     currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title, postSource: _source });
 
     let first = true;
+    let streamBuffer = "";
+    let streamRafId = null;
+
+    function renderStream() {
+      streamRafId = null;
+      const existingResult = panelBody.querySelector(".fbs-result");
+      if (existingResult) {
+        existingResult.innerHTML = fmt(streamBuffer);
+      } else {
+        openOverlay('<div class="fbs-result">' + fmt(streamBuffer) + '</div>', true);
+      }
+      if (panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
+    }
+
     currentPort.onMessage.addListener((msg) => {
       if (msg.action === "chunk") {
-        if (first) { first = false; }
-        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '<span class="fbs-cursor"></span></div>', true);
+        if (first) {
+          first = false;
+          openOverlay('<div class="fbs-result"></div>', true);
+        }
+        streamBuffer = msg.full;
+        // Throttle DOM updates to 1 per animation frame
+        if (!streamRafId) {
+          streamRafId = requestAnimationFrame(renderStream);
+        }
       } else if (msg.action === "done") {
+        if (streamRafId) { cancelAnimationFrame(streamRafId); streamRafId = null; }
         isSummarizing = false;
         summaryCache.set(cacheKey, msg.full);
         // Show quality warnings from post-processing guardrails
@@ -1009,7 +1049,7 @@
         if (panelBody && !panelBody.innerHTML.includes("fbs-result")) {
           openOverlay('<div class="fbs-error">Kết nối bị ngắt.</div>', false, type);
         } else if (panelBody) {
-          openOverlay(panelBody.innerHTML.replace(/<span class="fbs-cursor"><\/span>/g, ""), false, type);
+          openOverlay(panelBody.innerHTML, false, type);
         }
       }
     });

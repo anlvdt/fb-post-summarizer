@@ -530,21 +530,14 @@
   border-color: #ff6b6b;
 }
 
-/* Streaming cursor */
-.fbs-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  background: currentColor;
-  vertical-align: text-bottom;
-  margin-left: 2px;
-  animation: fbsBlink 1s step-end infinite;
+/* Streaming indicator — subtle opacity pulse on panel header */
+.fbs-panel.fbs-streaming .fbs-panel-head {
+  animation: fbsStreamPulse 1.5s ease-in-out infinite;
 }
 
-@keyframes fbsBlink {
-  50% {
-    opacity: 0;
-  }
+@keyframes fbsStreamPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
 
 /* Light mode overrides — scoped to our own elements */
