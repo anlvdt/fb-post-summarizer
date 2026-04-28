@@ -329,19 +329,7 @@
       const source = _element ? extractPostSource(_element) : "";
       const imageUrl = _element ? extractPostImage(_element) : "";
 
-      // Append nguồn nếu chưa có — dùng template từ settings
-      if (!text.includes("Nguồn:") && !text.includes("nguồn:") && !text.includes("Credit:")) {
-        const authorText = author || "không rõ";
-        const platform = SITE === "facebook" ? "FB" : SITE === "x" ? "X" : SITE === "linkedin" ? "LinkedIn" : SITE === "threads" ? "Threads" : SITE === "reddit" ? "Reddit" : "";
-        let settings;
-        try { settings = await new Promise(r => chrome.storage.sync.get("sourceTemplate", r)); } catch (_) { settings = {}; }
-        const template = settings.sourceTemplate || "Nguồn: {platform} {author} (Link full dưới cmt)";
-        const sourceLine = template
-          .replace(/\{author\}/g, authorText)
-          .replace(/\{platform\}/g, platform)
-          .replace(/\{source\}/g, source || "");
-        text += "\n\n" + sourceLine.replace(/\s+/g, " ").trim();
-      }
+      // Không append nguồn vào text — nguồn sẽ ghi ở comment đầu tiên
 
       // Normalize link (strip tracking params, clean Facebook URL)
       let cleanUrl = rawUrl;
@@ -374,44 +362,47 @@
       // Dịch panel sang phải, ẩn backdrop
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
-      openFacebookComposer(text, cleanUrl, imageUrl);
+      openFacebookComposer(text, cleanUrl, imageUrl, author, source);
     } catch (_) {
       // Fallback
       const resultEl = panelBody?.querySelector(".fbs-result");
       const text = resultEl ? resultEl.innerText : (panelBody?.innerText || "");
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
-      openFacebookComposer(text.trim(), "", "");
+      openFacebookComposer(text.trim(), "", "", "", "");
     }
   }
 
-  function openFacebookComposer(text, sourceUrl, imageUrl) {
-    const pasteKey = navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl';
-
+  function openFacebookComposer(text, sourceUrl, imageUrl, author, source) {
     const preview = document.createElement("div");
     preview.className = "fbs-status-preview";
 
+    // Validate author/source — bỏ nếu chứa ký tự rác (FB anti-scraping)
+    const isValidName = (n) => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n) && n.split(/\s+/).length <= 10;
+    const cleanAuthor = isValidName(author) ? author : "";
+    const cleanSource = isValidName(source) ? source : "";
+
     // Ảnh preview (nếu có)
     const imgHtml = imageUrl
-      ? '<div class="fbs-sp-image"><img src="' + esc(imageUrl) + '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img">Copy ảnh</button></div>'
+      ? '<div class="fbs-sp-image"><img src="' + esc(imageUrl) + '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh</button></div>'
       : '';
 
     preview.innerHTML =
-      '<div class="fbs-sp-header">Preview Status <span class="fbs-sp-charcount">' + text.length + ' ký tự</span></div>' +
+      '<div class="fbs-sp-header"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Preview Status <span class="fbs-sp-charcount">' + text.length + ' ký tự</span></div>' +
       imgHtml +
       '<div class="fbs-sp-text">' + esc(text).replace(/\n/g, "<br>") + '</div>' +
       '<div class="fbs-sp-link-input">' +
-      '<input type="text" class="fbs-sp-link-field" placeholder="Click phải vào thời gian bài viết > Copy link > Paste vào đây" value="' + esc(sourceUrl || "") + '">' +
-      '<button class="fbs-sp-shorten-btn">Làm sạch</button>' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
+      '<input type="text" class="fbs-sp-link-field" placeholder="Paste link bài gốc (ghi nguồn ở comment đầu)" value="' + esc(sourceUrl || "") + '">' +
       '</div>' +
+      (cleanAuthor ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + esc(cleanAuthor) + (cleanSource && cleanSource !== cleanAuthor ? ' <span class="fbs-sp-source-group">(' + esc(cleanSource) + ')</span>' : '') + '</div>' : '') +
       '<div class="fbs-sp-comment" style="display:none">' +
-      '<div class="fbs-sp-comment-label">Comment đầu tiên:</div>' +
+      '<div class="fbs-sp-comment-label">Comment đầu tiên (ghi nguồn):</div>' +
       '<div class="fbs-sp-comment-text"></div>' +
-      '<button class="fbs-sp-copy-comment">Copy comment</button>' +
+      '<button class="fbs-sp-copy-comment"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn</button>' +
       '</div>' +
       '<div class="fbs-sp-actions">' +
-      '<button class="fbs-sp-copy-text">Copy text</button>' +
-      '<button class="fbs-sp-open-fb">Đăng status</button>' +
+      '<button class="fbs-sp-open-fb"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status</button>' +
       '</div>';
 
     panelBody.appendChild(preview);
@@ -424,14 +415,25 @@
     const commentSection = preview.querySelector(".fbs-sp-comment");
     const commentText = preview.querySelector(".fbs-sp-comment-text");
 
-    // Generate comment content từ link
+    // Generate comment content từ link — ghi nguồn kèm tên tác giả nếu có
     function updateComment(url) {
       if (!url) {
         commentSection.style.display = "none";
         return;
       }
       commentSection.style.display = "block";
-      commentText.textContent = "Link bài gốc: " + url;
+      // Build source line: "Nguồn: Tên tác giả — link" hoặc "Nguồn: link"
+      let sourceLine = "Nguồn: ";
+      if (cleanAuthor) {
+        sourceLine += cleanAuthor;
+        if (cleanSource && cleanSource !== cleanAuthor) sourceLine += " (" + cleanSource + ")";
+        sourceLine += "\n" + url;
+      } else if (cleanSource) {
+        sourceLine += cleanSource + "\n" + url;
+      } else {
+        sourceLine += url;
+      }
+      commentText.textContent = sourceLine;
     }
 
     // Nếu đã có link sẵn
@@ -478,34 +480,16 @@
       updateComment(url);
     });
 
-    // Copy text
-    preview.querySelector(".fbs-sp-copy-text").addEventListener("click", async () => {
-      const btn = preview.querySelector(".fbs-sp-copy-text");
-      await navigator.clipboard.writeText(text);
-      btn.textContent = "Đã copy! " + pasteKey + "+V";
-      setTimeout(() => { btn.textContent = "Copy text"; }, 2500);
-    });
 
-    // Làm sạch link
-    preview.querySelector(".fbs-sp-shorten-btn").addEventListener("click", () => {
-      const btn = preview.querySelector(".fbs-sp-shorten-btn");
-      const url = linkField.value.trim();
-      if (!url) return;
-      const clean = normalizeFbUrl(url);
-      linkField.value = clean;
-      updateComment(clean);
-      btn.textContent = "OK!";
-      setTimeout(() => { btn.textContent = "Làm sạch"; }, 2000);
-    });
 
-    // Copy comment (link bài gốc)
+    // Copy comment (ghi nguồn)
     preview.querySelector(".fbs-sp-copy-comment").addEventListener("click", async () => {
       const btn = preview.querySelector(".fbs-sp-copy-comment");
       const content = commentText.textContent;
       if (!content) return;
       await navigator.clipboard.writeText(content);
-      btn.textContent = "Đã copy! Paste vào comment";
-      setTimeout(() => { btn.textContent = "Copy comment"; }, 2500);
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
+      setTimeout(() => { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn'; }, 2500);
     });
 
     // Copy ảnh
@@ -513,7 +497,7 @@
     if (copyImgBtn) {
       copyImgBtn.addEventListener("click", async () => {
         try {
-          copyImgBtn.textContent = "...";
+          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
           const imgEl = preview.querySelector(".fbs-sp-image img");
           const canvas = document.createElement("canvas");
           canvas.width = imgEl.naturalWidth;
@@ -521,12 +505,12 @@
           canvas.getContext("2d").drawImage(imgEl, 0, 0);
           const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
           await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-          copyImgBtn.textContent = "Đã copy!";
-          setTimeout(() => { copyImgBtn.textContent = "Copy ảnh"; }, 2500);
+          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
+          setTimeout(() => { copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh'; }, 2500);
         } catch (_) {
           window.open(imageUrl, "_blank");
-          copyImgBtn.textContent = "Mở tab mới";
-          setTimeout(() => { copyImgBtn.textContent = "Copy ảnh"; }, 2000);
+          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Mở tab mới';
+          setTimeout(() => { copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh'; }, 2000);
         }
       });
     }
@@ -535,7 +519,7 @@
     preview.querySelector(".fbs-sp-open-fb").addEventListener("click", async () => {
       const btn = preview.querySelector(".fbs-sp-open-fb");
       await navigator.clipboard.writeText(text);
-      btn.textContent = "Đã copy! Đang mở...";
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy! Đang mở...';
       if (SITE === "facebook") {
         setTimeout(() => {
           const allButtons = document.querySelectorAll('div[role="main"] div[role="button"]');
@@ -543,12 +527,12 @@
             const t = (b.textContent || "").toLowerCase();
             if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something")) {
               b.click();
-              btn.textContent = "Đăng status";
+              btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
               return;
             }
           }
           window.scrollTo({ top: 0, behavior: "smooth" });
-          btn.textContent = "Đăng status";
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
         }, 200);
       }
     });
@@ -597,7 +581,42 @@
     const url = location.href;
     if (SITE === "facebook") {
       if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks/.test(url)) return url;
-      return ""; // Đang ở newsfeed → không biết link bài nào → để user paste
+      // Đang ở newsfeed → tìm permalink từ timestamp link trong post container
+      if (element) {
+        let postContainer = element;
+        for (let i = 0; i < 20; i++) {
+          if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+          postContainer = postContainer.parentElement;
+          if (postContainer.getAttribute("role") === "article") break;
+        }
+        // Facebook timestamp links thường chứa /posts/, /permalink/, /videos/, /photos/, story_fbid
+        const timeLinks = postContainer.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="multi_permalinks"]');
+        for (const link of timeLinks) {
+          if (link.href && !link.href.includes("/photo")) {
+            try {
+              const u = new URL(link.href);
+              // Strip tracking params
+              for (const k of [...u.searchParams.keys()]) {
+                if (k.startsWith("__") || ["fbclid", "ref", "comment_id", "reply_comment_id"].includes(k)) u.searchParams.delete(k);
+              }
+              return u.origin + u.pathname;
+            } catch (_) { }
+          }
+        }
+        // Fallback: tìm link có aria-label chứa thời gian (giờ, phút, ngày)
+        const allLinks = postContainer.querySelectorAll('a[role="link"][href*="facebook.com"]');
+        for (const link of allLinks) {
+          const ariaLabel = (link.getAttribute("aria-label") || "").toLowerCase();
+          const text = (link.textContent || "").toLowerCase();
+          if (/\d+\s*(giờ|phút|ngày|giây|tháng|năm|hour|minute|day|second|month|year|h |m |d )/i.test(ariaLabel) ||
+              /\d+\s*(giờ|phút|ngày|giây|tháng|năm|hour|minute|day|second|month|year|h |m |d )/i.test(text)) {
+            if (link.href && (link.href.includes("/posts/") || link.href.includes("/permalink/") || link.href.includes("story_fbid"))) {
+              try { return new URL(link.href).origin + new URL(link.href).pathname; } catch (_) { }
+            }
+          }
+        }
+      }
+      return "";
     }
     // Non-Facebook: thử tìm trong DOM
     if (!element) return url;
@@ -707,8 +726,13 @@
   function _fbNameFromHeader(header) {
     const link = header.querySelector("a");
     if (!link) return "";
-    const name = (link.textContent || "").trim();
-    if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase())) return name;
+    // Ưu tiên aria-label (Facebook thường set đúng tên ở đây)
+    const ariaLabel = (link.getAttribute("aria-label") || "").trim();
+    if (ariaLabel.length >= 2 && ariaLabel.length < 80) return ariaLabel;
+    // Fallback: innerText (tránh textContent vì FB chèn ký tự rác anti-scraping)
+    const name = (link.innerText || link.textContent || "").trim();
+    // Validate: tên hợp lệ không chứa quá nhiều số/ký tự lạ
+    if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase()) && !/[\d]{8,}/.test(name) && !/[a-f0-9]{10,}/i.test(name)) return name;
     return "";
   }
 
@@ -778,8 +802,8 @@
       const strongs = nested.querySelectorAll("strong a");
       for (const s of strongs) {
         if (s.closest('[role="article"]') !== nested) continue;
-        const name = (s.textContent || "").trim();
-        if (name.length >= 2 && name.length < 80) return name;
+        const name = (s.innerText || s.textContent || "").trim();
+        if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name)) return name;
       }
     }
     return "";
@@ -797,8 +821,8 @@
     const strongs = container.querySelectorAll("strong a");
     for (const s of strongs) {
       if (s.closest('[role="article"]') !== container) continue;
-      const name = (s.textContent || "").trim();
-      if (name.length >= 2 && name.length < 80) return name;
+      const name = (s.innerText || s.textContent || "").trim();
+      if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name)) return name;
     }
     return "";
   }

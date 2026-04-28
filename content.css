@@ -718,6 +718,12 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
+}
+
+.fbs-sp-header svg {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .fbs-sp-charcount {
@@ -755,6 +761,13 @@
   cursor: pointer;
   transition: background 0.15s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fbs-sp-copy-img svg {
+  flex-shrink: 0;
 }
 
 .fbs-sp-copy-img:hover {
@@ -833,6 +846,36 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.fbs-sp-detected-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #74b9ff;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.fbs-sp-detected-source svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.fbs-sp-source-group {
+  color: #888;
+  font-weight: 400;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-detected-source {
+  color: #1976d2;
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-sp-source-group {
+  color: #666;
+}
+
 .fbs-sp-comment-label {
   font-size: 10px;
   color: #888;
@@ -862,6 +905,13 @@
   cursor: pointer;
   transition: all 0.15s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fbs-sp-copy-comment svg {
+  flex-shrink: 0;
 }
 
 .fbs-sp-copy-comment:hover {
@@ -942,6 +992,10 @@
   cursor: pointer;
   transition: all 0.15s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .fbs-sp-copy-text {
@@ -955,14 +1009,19 @@
 }
 
 .fbs-sp-open-fb {
-  background: transparent;
-  color: #b0b3b8;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+  border: none;
+}
+
+.fbs-sp-open-fb svg {
+  flex-shrink: 0;
 }
 
 .fbs-sp-open-fb:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.4);
 }
 
 /* Light theme */
@@ -1030,13 +1089,13 @@
 }
 
 .fbs-panel[data-fbs-theme="light"] .fbs-sp-open-fb {
-  color: #65676b;
-  border-color: rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
 }
 
 .fbs-panel[data-fbs-theme="light"] .fbs-sp-open-fb:hover {
-  color: #1c1e21;
-  border-color: rgba(0, 0, 0, 0.3);
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .fbs-panel[data-fbs-theme="light"] .fbs-sp-copy-img {
