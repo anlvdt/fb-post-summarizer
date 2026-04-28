@@ -2,6 +2,8 @@
 // https://github.com/anlvdt/fb-post-summarizer
 // Author: Le An (anlvdt)
 
+try { importScripts('env.js'); } catch (e) { console.warn("No env.js found"); }
+
 async function injectAndSend(tabId, message) {
   try {
     await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
@@ -328,9 +330,47 @@ const PROVIDER_PRIORITY = ["groq", "cerebras", "sambanova", "gemini", "openroute
 
 // Get the best available key across ALL providers
 async function getAvailableKey() {
-  const data = await chrome.storage.sync.get(["apiKeys"]);
-  const apiKeys = data.apiKeys || {};
-  const localData = await chrome.storage.local.get(["keyStatus", "keyRotationIndex"]);
+  const data = await chrome.storage.sync.get(["apiKeys", "apiKey", "provider"]);
+  const localData = await chrome.storage.local.get(["keyStatus", "keyRotationIndex", "backupApiKeys"]);
+  
+  let apiKeys = data.apiKeys;
+  let hasAnyKey = false;
+  if (apiKeys) {
+    for (const p in apiKeys) { if (apiKeys[p] && apiKeys[p].length > 0) hasAnyKey = true; }
+  }
+
+  // 1. Fallback for sync wipe -> use local backup
+  if (!hasAnyKey && localData.backupApiKeys) {
+    apiKeys = localData.backupApiKeys;
+    hasAnyKey = true;
+    chrome.storage.sync.set({ apiKeys });
+  }
+
+  if (!apiKeys) apiKeys = { groq: [], gemini: [], cerebras: [], sambanova: [], openrouter: [] };
+
+  // 2. Fallback to ENV file (Hardcoded keys)
+  if (typeof ENV_API_KEYS !== "undefined") {
+    for (const p in ENV_API_KEYS) {
+      if (ENV_API_KEYS[p] && ENV_API_KEYS[p].length > 0) {
+        if (!apiKeys[p]) apiKeys[p] = [];
+        const newKeys = ENV_API_KEYS[p].filter(k => !apiKeys[p].includes(k));
+        if (newKeys.length > 0) {
+          apiKeys[p].push(...newKeys);
+          hasAnyKey = true;
+        }
+      }
+    }
+  }
+
+  // 3. Fallback to legacy single key
+  if (!hasAnyKey && data.apiKey) {
+    const provider = data.provider || "groq";
+    if (!apiKeys[provider]) apiKeys[provider] = [];
+    if (!apiKeys[provider].includes(data.apiKey)) {
+      apiKeys[provider].push(data.apiKey);
+    }
+  }
+
   const keyStatus = localData.keyStatus || {};
   const rotationIndex = localData.keyRotationIndex || {};
   const now = Date.now();
@@ -475,9 +515,9 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     if (msg.action !== "summarize") return;
     try {
-      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type, msg.sourceUrl, msg.imageUrl, msg.author, msg.postTitle, msg.postSource);
+      const result = await handleStream(msg.text, msg.site, port, controller.signal, msg.type, msg.sourceUrl, msg.imageUrl, msg.author, msg.postTitle, msg.postSource, msg.agentMode);
       if (result && result.error) port.postMessage({ action: "error", error: result.error });
-      else if (result && result.summary) port.postMessage({ action: "done", full: result.summary, quality: result.quality, issues: result.issues, imageUrl: msg.imageUrl || "" });
+      else if (result && result.summary) port.postMessage({ action: "done", full: result.summary, quality: result.quality, issues: result.issues, imageUrl: msg.imageUrl || "", agentScore: result.agentScore });
     } catch (e) {
       if (e.name !== "AbortError") {
         try { port.postMessage({ action: "error", error: e.message }); } catch (_) { }
@@ -589,7 +629,156 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(e => sendResponse({ error: e.message }));
     return true;
   }
+  // === AUTO-PILOT AGENT EVALUATION ===
+  if (request.action === "agent_eval") {
+    evaluatePostForAgent(request.payload, sender.tab.id);
+    return true;
+  }
+  // === AUTO-PILOT EVALUATE GENERATED SUMMARY ===
+  if (request.action === "agent_eval_summary") {
+    evaluateSummaryForAgent(request.payload, sender.tab.id);
+    return true;
+  }
+  // === FETCH IMAGE AS BASE64 (CORS Bypass) ===
+  if (request.action === "fetch-image") {
+    fetch(request.url)
+      .then(res => res.blob())
+      .then(blob => {
+        const reader = new FileReader();
+        reader.onloadend = () => sendResponse({ base64: reader.result });
+        reader.readAsDataURL(blob);
+      })
+      .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
 });
+
+// === AUTO-PILOT EVALUATE SUMMARY LOGIC ===
+async function evaluateSummaryForAgent(payload, tabId) {
+  const prompt = `Đánh giá bài viết sau có hữu ích để chia sẻ không.
+
+ĐĂNG (score 7-9) nếu bài thuộc 1 trong các loại:
+- Công nghệ, AI, ML, LLM, tool mới, app mới, GitHub repo
+- Bảo mật, lập trình, hướng dẫn kỹ thuật
+- Tin tức tech, review sản phẩm công nghệ
+- Tips/tricks hữu ích, automation
+
+BỎ QUA (score 1-3) nếu:
+- Status cá nhân, tâm sự, drama
+- Quảng cáo, bán hàng, affiliate
+- Tin rác, spam, clickbait vô nghĩa
+
+Trả về JSON: {"score": 7}`;
+
+  const nonStreamFns = {
+    groq: callGroqNonStream,
+    gemini: callGeminiNonStream,
+    cerebras: callCerebrasNonStream,
+    sambanova: callSambanovaNonStream,
+    openrouter: callOpenrouterNonStream,
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const keyInfo = await getAvailableKey();
+    console.log("[Agent Eval] Attempt", attempt, "key:", keyInfo.key ? keyInfo.provider + ":***" : "NONE", "noKeys:", keyInfo.noKeys, "allLimited:", keyInfo.allLimited);
+    if (!keyInfo.key) {
+      // Không có key — giải phóng agent ngay, không thể eval
+      chrome.tabs.sendMessage(tabId, { action: "agent_decision", score: 0 }).catch(() => {});
+      return;
+    }
+
+    const callFn = nonStreamFns[keyInfo.provider] || callGroqNonStream;
+    try {
+      const result = await callFn(keyInfo.key, prompt + "\n\nTóm tắt:\n" + payload.text, "You are a JSON-only API. Only output valid JSON.");
+      // Robust JSON extraction
+      let data = { score: 0 };
+      const match = result.match(/\{[\s\S]*"score"\s*:\s*\d+[\s\S]*\}/i);
+      if (match) {
+        try { data = JSON.parse(match[0]); } catch (e) {}
+      } else {
+        let cleanResult = (result || "").trim();
+        if (cleanResult.startsWith("```json")) {
+          cleanResult = cleanResult.replace(/^```json\n?/, "").replace(/\n?```$/, "");
+        }
+        try { data = JSON.parse(cleanResult); } catch (e) {}
+      }
+
+      console.log("[Agent] Summary Score:", data.score);
+      chrome.tabs.sendMessage(tabId, { action: "agent_decision", score: data.score }).catch(() => {});
+      return;
+    } catch (e) {
+      if (e.message && (e.message.includes("429") || e.message.toLowerCase().includes("rate") || e.message.toLowerCase().includes("limit"))) {
+        await markKeyRateLimited(keyInfo.key, parseRetryAfter(e.message));
+      } else {
+        // Lỗi thông thường (API down, sai key...) → mark key bị lỗi, thử provider tiếp theo
+        const localData = await chrome.storage.local.get(["keyStatus"]);
+        const keyStatus = localData.keyStatus || {};
+        keyStatus[keyInfo.key] = { ...(keyStatus[keyInfo.key] || {}), rateLimitedUntil: Date.now() + 5 * 60 * 1000 }; // Tạm skip 5 phút
+        await chrome.storage.local.set({ keyStatus });
+        console.warn("[Agent Eval] Provider", keyInfo.provider, "failed, trying next. Error:", e.message);
+      }
+      continue; // Luôn thử provider tiếp theo
+    }
+  }
+  
+  // Trả về 0 nếu fail cả 3 lần để giải phóng Agent khỏi trạng thái WAITING_EVAL
+  console.log("[Agent] Eval failed 3 times, sending score 0");
+  chrome.tabs.sendMessage(tabId, { action: "agent_decision", score: 0 }).catch(() => {});
+}
+
+// === AUTO-PILOT EVALUATION LOGIC ===
+async function evaluatePostForAgent(payload, tabId) {
+  const prompt = `Bạn là một AI phân tích nội dung mạng xã hội.
+Hãy đọc bài viết sau và chấm điểm độ thu hút từ 1-10 (ưu tiên bài có thông tin hữu ích, tin tức công nghệ, bài học).
+Nếu điểm >= 8, hãy tóm tắt và viết lại thành 1 status Facebook mang phong cách cá nhân của bạn, ngắn gọn, hấp dẫn.
+Nếu bài có gắn link, yêu cầu người đọc xem link ở dưới comment.
+Luôn trả về ĐÚNG ĐỊNH DẠNG JSON (không có markdown code block):
+{"score": 9, "status": "nội dung status..."}`;
+
+  const nonStreamFns = {
+    groq: callGroqNonStream,
+    gemini: callGeminiNonStream,
+    cerebras: callCerebrasNonStream,
+    sambanova: callSambanovaNonStream,
+    openrouter: callOpenrouterNonStream,
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const keyInfo = await getAvailableKey();
+    if (!keyInfo.key) return;
+
+    const callFn = nonStreamFns[keyInfo.provider] || callGroqNonStream;
+    try {
+      const result = await callFn(keyInfo.key, prompt, "You are a JSON-only API. Only output valid JSON.");
+      let cleanResult = (result || "").trim();
+      if (cleanResult.startsWith("\`\`\`json")) {
+        cleanResult = cleanResult.replace(/^\`\`\`json\n/, "").replace(/\n\`\`\`$/, "");
+      }
+      try {
+        const data = JSON.parse(cleanResult);
+        console.log("[Agent] AI Score:", data.score);
+        if (data.score >= 5 && data.status) {
+          chrome.tabs.sendMessage(tabId, {
+            action: "agent_execute",
+            status: data.status,
+            source: payload.source,
+            image: payload.image
+          }).catch(() => {});
+        }
+        return;
+      } catch (pe) {
+        console.error("[Agent] JSON parse error:", pe);
+      }
+    } catch (e) {
+      if (e.message && (e.message.includes("429") || e.message.toLowerCase().includes("rate") || e.message.toLowerCase().includes("limit"))) {
+        await markKeyRateLimited(keyInfo.key, parseRetryAfter(e.message));
+        continue;
+      }
+      return;
+    }
+  }
+}
+
 
 // === TRANSLATE: Quick dictionary lookup via AI ===
 const translateCache = new Map();
@@ -861,7 +1050,7 @@ function postProcessOutput(output, sourceText, type) {
   return { text: processed, quality, issues };
 }
 
-async function handleStream(text, site, port, signal, type = "summary", sourceUrl = "", imageUrl = "", author = "", postTitle = "", postSource = "") {
+async function handleStream(text, site, port, signal, type = "summary", sourceUrl = "", imageUrl = "", author = "", postTitle = "", postSource = "", agentMode = false) {
   // === INPUT GUARDRAILS ===
   const inputCheck = validateInput(text);
   if (!inputCheck.valid) return { error: inputCheck.error };
@@ -875,7 +1064,12 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
     ? cleanedText.substring(0, MAX_INPUT_CHARS) + "\n[...bài viết đã được cắt ngắn]"
     : cleanedText;
 
-  const systemPrompt = await getSystemPrompt(type, site, author, sourceUrl, postTitle, postSource);
+  let systemPrompt = await getSystemPrompt(type, site, author, sourceUrl, postTitle, postSource);
+
+  // Agent mode: yêu cầu AI tự chấm điểm trong cùng lần gọi — tránh round-trip eval riêng
+  if (agentMode) {
+    systemPrompt += "\n\nAGENT MODE: Trước khi viết tóm tắt, hãy tự đánh giá bài có đáng chia sẻ không (công nghệ/AI/tips hữu ích = 7-9, status cá nhân/drama/spam = 1-3). Đặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là số 1-9), sau đó xuống dòng và viết tóm tắt bình thường. Ví dụ:\n[SCORE:8]\n**Tiêu đề hook**\nNội dung tóm tắt...";
+  }
   const streamFns = {
     groq: callGroqStream,
     gemini: callGeminiStream,
@@ -906,11 +1100,30 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
     if (result.rateLimited) {
       const retryMs = parseRetryAfter(result.rateLimitError || "");
       await markKeyRateLimited(keyInfo.key, retryMs);
-      // Loop will automatically try next available key/provider
+      continue; // Thử provider tiếp theo
+    }
+
+    if (result.error) {
+      // Provider lỗi (API down, sai key, model lỗi...) → skip key này 5 phút, thử tiếp
+      console.warn("[Stream] Provider", keyInfo.provider, "error:", result.error, "→ trying next");
+      const localData = await chrome.storage.local.get(["keyStatus"]);
+      const ks = localData.keyStatus || {};
+      ks[keyInfo.key] = { ...(ks[keyInfo.key] || {}), rateLimitedUntil: Date.now() + 5 * 60 * 1000 };
+      await chrome.storage.local.set({ keyStatus: ks });
       continue;
     }
 
     if (result.summary) {
+      // Agent mode: parse [SCORE:N] tag từ dòng đầu, strip khỏi text hiển thị
+      let agentScore = undefined;
+      if (agentMode) {
+        const scoreMatch = result.summary.match(/^\[SCORE:(\d+)\]\s*\n?/);
+        if (scoreMatch) {
+          agentScore = parseInt(scoreMatch[1], 10);
+          result.summary = result.summary.replace(/^\[SCORE:\d+\]\s*\n?/, "").trim();
+        }
+        result.agentScore = agentScore;
+      }
       const postResult = postProcessOutput(result.summary, text, type);
       result.summary = postResult.text;
       result.quality = postResult.quality;
@@ -920,7 +1133,7 @@ async function handleStream(text, site, port, signal, type = "summary", sourceUr
     }
     return result;
   }
-  return { error: "Tất cả API đều quá tải. Thử lại sau hoặc thêm key mới." };
+  return { error: "Tất cả API đều lỗi hoặc quá tải. Thử lại sau hoặc kiểm tra API Key." };
 }
 // === HISTORY ===
 async function saveHistory(text, summary, site, type, sourceUrl, imageUrl, author, postTitle) {
@@ -1235,7 +1448,7 @@ async function callCerebrasStream(apiKey, text, systemPrompt, port, signal, maxT
     headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
     signal,
     body: JSON.stringify({
-      model: "llama3.3-70b",
+      model: "llama-3.3-70b",
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
@@ -1261,7 +1474,7 @@ async function callCerebrasNonStream(apiKey, userMessage, systemPrompt) {
     "https://api.cerebras.ai/v1/chat/completions",
     { "Authorization": "Bearer " + apiKey },
     {
-      model: "llama3.3-70b",
+      model: "llama-3.3-70b",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
@@ -1330,7 +1543,7 @@ async function callOpenrouterStream(apiKey, text, systemPrompt, port, signal, ma
     },
     signal,
     body: JSON.stringify({
-      model: "meta-llama/llama-3.3-70b-instruct:free",
+      model: "meta-llama/llama-3.3-70b-instruct",
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
@@ -1360,7 +1573,7 @@ async function callOpenrouterNonStream(apiKey, userMessage, systemPrompt) {
       "X-Title": "FeedWriter",
     },
     {
-      model: "meta-llama/llama-3.3-70b-instruct:free",
+      model: "meta-llama/llama-3.3-70b-instruct",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },

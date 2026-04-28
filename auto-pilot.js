@@ -173,24 +173,12 @@
             return;
           }
 
-          // Gửi summary lên background để AI đánh giá
+          // Score đã được tính trong lần tóm tắt — chờ agent_decision_inline từ done message
           state = "WAITING_EVAL";
           stateEnteredAt = Date.now();
           updateStatus("EVAL", "#fdcb6e");
-          console.log("[Agent] Gửi summary để AI đánh giá...");
-
-          try {
-            chrome.runtime.sendMessage({
-              action: "agent_eval_summary",
-              payload: { text: summaryText }
-            });
-          } catch(e) {
-            console.warn("[Agent] Lỗi gửi eval:", e);
-            // Fallback: post luôn nếu không gửi được
-            state = "EXECUTING";
-            executePost(summaryText);
-          }
-          
+          console.log("[Agent] Chờ score từ streaming done...");
+          // Không gửi request AI riêng — score đến qua agent_decision_inline
           return;
         } else {
           // Panel mở nhưng chưa có result → chờ thêm
@@ -247,6 +235,7 @@
   function startAgent() {
     if (loopTimer) clearTimeout(loopTimer);
     state = "SCANNING";
+    window._fbsAgentMode = true; // Báo cho summarizeText biết đang ở agent mode
     chrome.storage.local.get(["agentPostedUrls"], (data) => {
       if (data.agentPostedUrls && Array.isArray(data.agentPostedUrls)) {
         data.agentPostedUrls.forEach(url => postedUrls.add(url));
@@ -259,20 +248,20 @@
     if (loopTimer) clearTimeout(loopTimer);
     loopTimer = null;
     state = "OFF";
+    window._fbsAgentMode = false;
   }
 
-  // Handle AI evaluation result from background
-  chrome.runtime.onMessage.addListener(async (msg) => {
-    try { if (!chrome.runtime.id) return; } catch (e) { return; }
+  // Handle AI evaluation result — 2 nguồn:
+  // 1. fbs_agent_decision (window event): score từ streaming done, cùng tab, không qua background
+  // 2. agent_decision (chrome.runtime): fallback từ evaluateSummaryForAgent nếu cần
+  function handleAgentDecision(score) {
+    if (!isAgentRunning || state !== "WAITING_EVAL") return;
+    console.log("[Agent] Score:", score);
 
-    if (msg.action === "agent_decision" && isAgentRunning && state === "WAITING_EVAL") {
-      console.log("[Agent] AI decision score:", msg.score);
-
-      if (msg.score >= 5) {
-        // Lấy summary text từ panel
+    (async () => {
+      if (score >= 5) {
         const resultEl = document.querySelector(".fbs-result");
         const summaryText = resultEl ? resultEl.innerText.trim() : "";
-
         if (summaryText) {
           state = "EXECUTING";
           await executePost(summaryText);
@@ -285,8 +274,7 @@
           loopTimer = setTimeout(runAgentLoop, 2000);
         }
       } else {
-        // Điểm thấp → bỏ qua bài này
-        console.log("[Agent] Bỏ qua bài (score=" + msg.score + ")");
+        console.log("[Agent] Bỏ qua bài (score=" + score + ")");
         updateStatus("SKIP", "#b2bec3");
         await new Promise(r => setTimeout(r, 1000));
         document.querySelector(".fbs-close")?.click();
@@ -295,7 +283,16 @@
         if (loopTimer) clearTimeout(loopTimer);
         loopTimer = setTimeout(runAgentLoop, 2000 + Math.random() * 2000);
       }
-    }
+    })();
+  }
+
+  // Nguồn 1: window event từ content.js (cùng tab, zero latency)
+  window.addEventListener("fbs_agent_decision", (e) => handleAgentDecision(e.detail.score));
+
+  // Nguồn 2: chrome.runtime message từ background (fallback)
+  chrome.runtime.onMessage.addListener((msg) => {
+    try { if (!chrome.runtime.id) return; } catch (e) { return; }
+    if (msg.action === "agent_decision") handleAgentDecision(msg.score);
   });
 
   // Init: hiện UI trên Facebook feed, groups, pages

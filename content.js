@@ -1281,7 +1281,7 @@
     const _author = extractPostAuthor(_el);
     const _title = extractPostTitle(_el);
     const _source = extractPostSource(_el);
-    currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title, postSource: _source });
+    currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title, postSource: _source, agentMode: !!window._fbsAgentMode });
 
     let first = true;
     let streamBuffer = "";
@@ -1320,6 +1320,10 @@
           qualityHtml = '<div class="' + issueClass + '">' + msg.issues.map(i => esc(i)).join("<br>") + '</div>';
         }
         openOverlay('<div class="fbs-result">' + fmt(msg.full) + '</div>' + qualityHtml, false, type);
+        // Agent mode: score đã được tính trong cùng lần gọi AI → gửi decision ngay, không cần eval riêng
+        if (window._fbsAgentMode && typeof msg.agentScore === "number") {
+          window.dispatchEvent(new CustomEvent("fbs_agent_decision", { detail: { score: msg.agentScore } }));
+        }
         try { currentPort.disconnect(); } catch (_) { } currentPort = null;
       } else if (msg.action === "error") {
         isSummarizing = false;
