@@ -498,7 +498,17 @@
       updateComment(url);
     });
 
-
+    function autoPasteToLexical(element, text, file = null) {
+      element.focus();
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/plain', text);
+      if (file) dataTransfer.items.add(file);
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: dataTransfer,
+        bubbles: true,
+        cancelable: true
+      }));
+    }
 
     // Copy comment (ghi nguồn)
     preview.querySelector(".fbs-sp-copy-comment").addEventListener("click", async () => {
@@ -506,7 +516,40 @@
       const content = commentText.textContent;
       if (!content) return;
       await navigator.clipboard.writeText(content);
-      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
+      
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
+      
+      let posted = false;
+      if (SITE === "facebook") {
+        const commentBoxes = Array.from(document.querySelectorAll('div[role="textbox"][contenteditable="true"]'))
+          .filter(el => {
+            const label = (el.getAttribute("aria-label") || "").toLowerCase();
+            return label.includes("viết bình luận") || label.includes("comment") || label.includes("trả lời");
+          });
+        
+        let targetBox = commentBoxes[0];
+        if (lastSummarizeParams && lastSummarizeParams._element) {
+           const postEl = lastSummarizeParams._element.closest('[role="article"]');
+           if (postEl) {
+             const boxInPost = postEl.querySelector('div[role="textbox"][contenteditable="true"]');
+             if (boxInPost) targetBox = boxInPost;
+           }
+        }
+
+        if (targetBox) {
+           autoPasteToLexical(targetBox, content);
+           setTimeout(() => {
+              targetBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+           }, 500);
+           posted = true;
+        }
+      }
+      
+      if (posted) {
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã tự cmt!';
+      } else {
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
+      }
       setTimeout(() => { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn'; }, 2500);
     });
 
@@ -537,7 +580,7 @@
     preview.querySelector(".fbs-sp-open-fb").addEventListener("click", async () => {
       const btn = preview.querySelector(".fbs-sp-open-fb");
       await navigator.clipboard.writeText(text);
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy! Đang mở...';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
       if (SITE === "facebook") {
         setTimeout(() => {
           const allButtons = document.querySelectorAll('div[role="main"] div[role="button"]');
@@ -545,7 +588,23 @@
             const t = (b.textContent || "").toLowerCase();
             if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something")) {
               b.click();
-              btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
+              setTimeout(async () => {
+                const editor = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]');
+                let imgFile = null;
+                const imgEl = preview.querySelector(".fbs-sp-image img");
+                if (imgEl && imgEl.naturalWidth > 0) {
+                  try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = imgEl.naturalWidth;
+                    canvas.height = imgEl.naturalHeight;
+                    canvas.getContext("2d").drawImage(imgEl, 0, 0);
+                    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+                    if (blob) imgFile = new File([blob], "image.png", { type: "image/png" });
+                  } catch (e) { console.warn("Image paste failed", e); }
+                }
+                if (editor) autoPasteToLexical(editor, text, imgFile);
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
+              }, 800);
               return;
             }
           }
@@ -557,6 +616,232 @@
   }
 
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
+
+  // ============================================================
+  // AGENT POST API — Bypasses UI, called directly by auto-pilot
+  // ============================================================
+  function cleanSourceUrl(rawUrl) {
+    if (!rawUrl) return "";
+    try {
+      const u = new URL(rawUrl);
+      if (u.hostname.includes("facebook.com")) {
+        const mp = u.searchParams.get("multi_permalinks");
+        if (mp && u.pathname.includes("/groups/")) return u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+        const sfid = u.searchParams.get("story_fbid");
+        const uid = u.searchParams.get("id");
+        if (sfid && uid) return u.origin + "/" + uid + "/posts/" + sfid + "/";
+        return u.origin + u.pathname;
+      }
+      for (const k of [...u.searchParams.keys()]) {
+        if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref","comment_id","reply_comment_id"].includes(k)) u.searchParams.delete(k);
+      }
+      return u.toString().replace(/\?$/, "");
+    } catch (_) { return rawUrl; }
+  }
+
+  async function fetchImageBlob(imgSrc) {
+    if (!imgSrc) return null;
+    
+    // Attempt 1: Via Canvas (fastest but fails on cross-origin taint)
+    const imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+    if (imgEl && imgEl.naturalWidth > 0) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = imgEl.naturalWidth; canvas.height = imgEl.naturalHeight;
+        canvas.getContext("2d").drawImage(imgEl, 0, 0);
+        const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+        if (blob) return new File([blob], "image.png", { type: "image/png" });
+      } catch (_) {}
+    }
+
+    // Attempt 2: Via Background.js fetch (bypasses CORS)
+    try {
+      const resp = await new Promise(resolve => chrome.runtime.sendMessage({ action: "fetch-image", url: imgSrc }, resolve));
+      if (resp && resp.base64) {
+        const fetchResp = await fetch(resp.base64);
+        const blob = await fetchResp.blob();
+        if (blob) return new File([blob], "image.png", { type: "image/png" });
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  function pasteToLexical(element, text, file = null) {
+    element.focus();
+    const dt = new DataTransfer();
+    dt.setData("text/plain", text);
+    if (file) dt.items.add(file);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  }
+
+  function buildCommentText(cleanUrl, author, source) {
+    let line = "Nguồn: ";
+    const isValidName = n => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n);
+    const a = isValidName(author) ? author : "";
+    const s = isValidName(source) ? source : "";
+    if (a) {
+      line += a;
+      if (s && s !== a) line += " (" + s + ")";
+      line += "\n" + cleanUrl;
+    } else if (s) {
+      line += s + "\n" + cleanUrl;
+    } else {
+      line += cleanUrl;
+    }
+    return line;
+  }
+
+  window.fbsAgentPost = async function(summaryText, imageUrl, rawSourceUrl) {
+    if (SITE !== "facebook") return { ok: false, reason: "not_facebook" };
+
+    const cleanUrl = cleanSourceUrl(rawSourceUrl);
+    // Lấy author từ DOM để ghi vào comment nguồn
+    const postAuthor = currentPost && typeof window.fbsExtractAuthor === "function"
+      ? window.fbsExtractAuthor(currentPost) : "";
+    const commentText = cleanUrl ? buildCommentText(cleanUrl, postAuthor, "") : "";
+
+    // Build final post text
+    let postText = summaryText.trim();
+    if (!postText.includes("Nguồn:") && !postText.includes("nguồn:")) {
+      postText += "\n\n" + (cleanUrl ? "Nguồn dưới cmt đầu" : "");
+    }
+
+    // Step 1: Mở FB Composer (click "Bạn đang nghĩ gì?")
+    const mainArea = document.querySelector('div[role="main"]');
+    if (!mainArea) return { ok: false, reason: "no_main_area" };
+
+    const allButtons = mainArea.querySelectorAll('div[role="button"]');
+    let composerBtn = null;
+    for (const b of allButtons) {
+      const t = (b.textContent || "").toLowerCase();
+      if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something") || t.includes("viết gì đó") || t.includes("chia sẻ điều gì") || t.includes("say something")) {
+        composerBtn = b; break;
+      }
+    }
+    if (!composerBtn) return { ok: false, reason: "no_composer_btn" };
+    composerBtn.click();
+
+    // Step 2: Chờ dialog mở, tìm editor (poll trong 5s)
+    let editor = null;
+    for (let i = 0; i < 25; i++) {
+      editor = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]');
+      if (editor) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (!editor) {
+      console.error("[Agent] Không tìm thấy Editor TextBox.");
+      return { ok: false, reason: "no_editor" };
+    }
+
+    // Kích hoạt Lexical bằng cách click & focus trước khi paste
+    editor.click();
+    editor.focus();
+    await new Promise(r => setTimeout(r, 500));
+
+    // Step 3: Fetch image blob nếu có
+    const imgFile = await fetchImageBlob(imageUrl);
+
+    // Step 4: Paste text (+ image)
+    pasteToLexical(editor, postText, imgFile);
+    await new Promise(r => setTimeout(r, 1500 + Math.random() * 500));
+
+    // Step 5: Chờ nút Tiếp hoặc Đăng native không bị disabled (đợi upload ảnh)
+    let fbPostBtn = null;
+    let isNextBtn = false;
+    for (let i = 0; i < 20; i++) {
+      fbPostBtn = document.querySelector('div[aria-label="Tiếp"][role="button"], div[aria-label="Next"][role="button"], div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]');
+      if (fbPostBtn && fbPostBtn.getAttribute("aria-disabled") !== "true") {
+        const label = fbPostBtn.getAttribute("aria-label");
+        isNextBtn = label === "Tiếp" || label === "Next";
+        break;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!fbPostBtn) {
+      console.error("[Agent] Không tìm thấy nút Đăng/Tiếp.");
+      return { ok: false, reason: "no_post_btn" };
+    }
+    fbPostBtn.click();
+
+    // Nếu phải qua bước "Tiếp" (Next), chờ màn hình tiếp theo và bấm "Đăng"
+    if (isNextBtn) {
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+      let finalPostBtn = null;
+      for (let i = 0; i < 15; i++) {
+        finalPostBtn = document.querySelector('div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]');
+        if (finalPostBtn && finalPostBtn.getAttribute("aria-disabled") !== "true") break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (finalPostBtn) {
+        finalPostBtn.click();
+      } else {
+        console.error("[Agent] Mắc kẹt sau khi bấm Tiếp, không tìm thấy nút Đăng.");
+        return { ok: false, reason: "no_final_post_btn" };
+      }
+    }
+
+    // Step 6: Chờ post xuất hiện trên Feed (~8s)
+    await new Promise(r => setTimeout(r, 8000));
+
+    // Step 7: Auto-comment nguồn vào bài vừa đăng
+    if (commentText) {
+      // Tìm bài vừa đăng: match bằng phần text thuần (strip markdown **) để tránh mismatch
+      const feed = document.querySelector('div[role="feed"]');
+      let firstPost = null;
+      if (feed) {
+        const articles = feed.querySelectorAll('[role="article"]');
+        const rawSnippet = postText.replace(/\*\*/g, "").substring(0, 50).toLowerCase().trim();
+        for (const art of articles) {
+          if ((art.textContent || "").toLowerCase().includes(rawSnippet)) {
+            firstPost = art;
+            break;
+          }
+        }
+        // Fallback: bài đầu tiên trong feed
+        if (!firstPost) firstPost = feed.querySelector('[role="article"]');
+      }
+
+      if (firstPost) {
+         // Thử tìm và click nút "Bình luận"
+         const commentBtn = firstPost.querySelector('div[aria-label="Bình luận"], div[aria-label="Comment"]');
+         if (commentBtn) {
+            commentBtn.click();
+            await new Promise(r => setTimeout(r, 1500));
+         }
+      }
+
+      // Tìm ô textbox bình luận đang mở
+      const commentBoxes = Array.from(document.querySelectorAll('div[role="textbox"][contenteditable="true"]'))
+        .filter(el => {
+          const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
+          return lbl.includes("viết bình luận") || lbl.includes("comment") || lbl.includes("trả lời");
+        });
+        
+      if (commentBoxes.length > 0) {
+        const box = commentBoxes[0];
+        box.click();
+        box.focus();
+        await new Promise(r => setTimeout(r, 500));
+        pasteToLexical(box, commentText);
+        await new Promise(r => setTimeout(r, 1500));
+        
+        // Nhấn Enter để gửi comment
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        console.warn("[Agent] Không tìm thấy ô nhập bình luận cho bài mới.");
+      }
+    }
+
+    return { ok: true };
+  };
+
+  // Expose DOM extractors for auto-pilot
+  window.fbsExtractImage     = extractPostImage;
+  window.fbsExtractPermalink = extractPostPermalink;
+  window.fbsExtractAuthor    = extractPostAuthor;
+
 
   // === HELPERS ===
   function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
