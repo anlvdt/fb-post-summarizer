@@ -231,3 +231,7 @@ body.light .btn-primary { background: linear-gradient(135deg, #7c3aed, #a855f7);
 .theme-toggle { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .theme-toggle label { margin-bottom: 0; font-size: 12px; }
 .theme-toggle select { width: auto; padding: 4px 8px; font-size: 11px; }
+
+/* Checkbox label for toggle settings */
+.checkbox-label { display: flex !important; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--text); font-weight: 500; }
+.checkbox-label input[type="checkbox"] { width: auto; margin: 0; flex-shrink: 0; accent-color: var(--primary, #6c5ce7); }

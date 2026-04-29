@@ -1,6 +1,10 @@
 // === THEME ===
 const themeSelect = document.getElementById("themeSelect");
 chrome.storage.sync.get("theme", (d) => {
+  if (chrome.runtime.lastError) {
+    console.error("Failed to load theme:", chrome.runtime.lastError);
+    return;
+  }
   const theme = d.theme || "dark";
   if (theme === "light") document.body.classList.add("light");
   themeSelect.value = theme;
@@ -8,14 +12,22 @@ chrome.storage.sync.get("theme", (d) => {
 themeSelect.addEventListener("change", () => {
   const theme = themeSelect.value;
   document.body.classList.toggle("light", theme === "light");
-  chrome.storage.sync.set({ theme });
+  chrome.storage.sync.set({ theme }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("Failed to save theme:", chrome.runtime.lastError);
+    }
+  });
 });
 
 // === TABS ===
-document.querySelectorAll(".tab").forEach(tab => {
+// Cache selectors for better performance
+const allTabs = document.querySelectorAll(".tab");
+const allTabContents = document.querySelectorAll(".tab-content");
+
+allTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    allTabs.forEach((t) => t.classList.remove("active"));
+    allTabContents.forEach((c) => c.classList.remove("active"));
     tab.classList.add("active");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "history") loadHistory();
@@ -33,43 +45,102 @@ const customInstructionsEl = document.getElementById("customInstructions");
 const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const sourceTemplateEl = document.getElementById("sourceTemplate");
+const useHeuristicEvalEl = document.getElementById("useHeuristicEval");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
 
-chrome.storage.sync.get(["minLength","outputLang","summaryLength","promptStyle","customInstructions","customSummaryPrompt","customAffPrompt","sourceTemplate","apiKeys"], (d) => {
-  if (d.minLength) minLengthInput.value = d.minLength;
-  if (d.outputLang) outputLangSel.value = d.outputLang;
-  if (d.summaryLength) summaryLengthSel.value = d.summaryLength;
-  if (d.promptStyle) promptStyleSel.value = d.promptStyle;
-  if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
-  if (d.customSummaryPrompt) customSummaryPromptEl.value = d.customSummaryPrompt;
-  if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
-  if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
-  const total = Object.values(d.apiKeys || {}).reduce((s, a) => s + (a ? a.length : 0), 0);
-  if (total === 0) showStatus('Chưa có API Key. Thêm ở tab "API Keys".', "error");
-});
+chrome.storage.sync.get(
+  [
+    "minLength",
+    "outputLang",
+    "summaryLength",
+    "promptStyle",
+    "customInstructions",
+    "customSummaryPrompt",
+    "customAffPrompt",
+    "sourceTemplate",
+    "useHeuristicEval",
+    "apiKeys",
+  ],
+  (d) => {
+    if (d.minLength) minLengthInput.value = d.minLength;
+    if (d.outputLang) outputLangSel.value = d.outputLang;
+    if (d.summaryLength) summaryLengthSel.value = d.summaryLength;
+    if (d.promptStyle) promptStyleSel.value = d.promptStyle;
+    if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
+    if (d.customSummaryPrompt)
+      customSummaryPromptEl.value = d.customSummaryPrompt;
+    if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
+    if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
+    if (d.useHeuristicEval) useHeuristicEvalEl.checked = true;
+    const total = Object.values(d.apiKeys || {}).reduce(
+      (s, a) => s + (a ? a.length : 0),
+      0,
+    );
+    if (total === 0)
+      showStatus('Chưa có API Key. Thêm ở tab "API Keys".', "error");
+  },
+);
 
 saveBtn.addEventListener("click", () => {
-  chrome.storage.sync.set({
-    minLength: parseInt(minLengthInput.value) || 400,
-    outputLang: outputLangSel.value,
-    summaryLength: summaryLengthSel.value,
-    promptStyle: promptStyleSel.value,
-    customInstructions: customInstructionsEl.value.trim(),
-    customSummaryPrompt: customSummaryPromptEl.value.trim(),
-    customAffPrompt: customAffPromptEl.value.trim(),
-    sourceTemplate: sourceTemplateEl.value.trim(),
-  }, () => showStatus("Đã lưu", "success"));
+  chrome.storage.sync.set(
+    {
+      minLength: parseInt(minLengthInput.value) || 400,
+      outputLang: outputLangSel.value,
+      summaryLength: summaryLengthSel.value,
+      promptStyle: promptStyleSel.value,
+      customInstructions: customInstructionsEl.value.trim(),
+      customSummaryPrompt: customSummaryPromptEl.value.trim(),
+      customAffPrompt: customAffPromptEl.value.trim(),
+      sourceTemplate: sourceTemplateEl.value.trim(),
+      useHeuristicEval: useHeuristicEvalEl.checked,
+    },
+    () => showStatus("Đã lưu", "success"),
+  );
 });
+
+// Enable test mode debug panel
+if (typeof featureFlags !== 'undefined' && featureFlags.testMode) {
+  const debugPanel = document.getElementById('debugPanel');
+  if (debugPanel) {
+    debugPanel.style.display = 'block';
+    updateDebugInfo();
+  }
+}
+
+function updateDebugInfo() {
+  const debugInfo = document.getElementById('debugInfo');
+  if (!debugInfo) return;
+
+  chrome.storage.local.get(['history', 'telemetry'], (data) => {
+    const historyCount = data.history ? data.history.length : 0;
+    const telemetry = data.telemetry || {};
+    const now = Date.now();
+    debugInfo.innerHTML = `
+      <div>📊 History items: ${historyCount}</div>
+      <div>📈 Sessions: ${telemetry.sessions || 0}</div>
+      <div>📝 Summaries: ${telemetry.summaries || 0}</div>
+      <div>❌ Errors: ${telemetry.errors || 0}</div>
+      <div>🔧 Test Mode: Enabled</div>
+      <div>⏰ Last active: ${new Date(now).toLocaleTimeString()}</div>
+    `;
+  });
+}
 
 function showStatus(msg, type) {
   status.textContent = msg;
   status.className = "status " + type;
   status.style.display = "block";
-  setTimeout(() => { status.style.display = "none"; }, 4000);
+  setTimeout(() => {
+    status.style.display = "none";
+  }, 4000);
 }
 
-function esc(s) { const d = document.createElement("span"); d.textContent = s; return d.innerHTML; }
+function esc(s) {
+  const d = document.createElement("span");
+  d.textContent = s;
+  return d.innerHTML;
+}
 
 // === API KEYS ===
 const newApiKeyInput = document.getElementById("newApiKey");
@@ -81,7 +152,9 @@ function showKeyStatus(msg, type) {
   keyStatus.textContent = msg;
   keyStatus.className = "status " + type;
   keyStatus.style.display = "block";
-  setTimeout(() => { keyStatus.style.display = "none"; }, 3500);
+  setTimeout(() => {
+    keyStatus.style.display = "none";
+  }, 3500);
 }
 
 function maskKey(key) {
@@ -113,82 +186,157 @@ async function loadKeyLists() {
     if (wrapper) wrapper.style.display = keys.length > 0 ? "block" : "none";
     renderKeyList(p, keys, ks);
   }
-  if (keyEmptyState) keyEmptyState.style.display = totalKeys === 0 ? "block" : "none";
+  if (keyEmptyState)
+    keyEmptyState.style.display = totalKeys === 0 ? "block" : "none";
 }
 
 function renderKeyList(provider, keys, keyStatusData) {
   const cap = provider.charAt(0).toUpperCase() + provider.slice(1);
   const container = document.getElementById("keyList" + cap + "Items");
-  if (!container || keys.length === 0) { if (container) container.innerHTML = ""; return; }
+  if (!container || keys.length === 0) {
+    if (container) container.innerHTML = "";
+    return;
+  }
 
-  container.innerHTML = keys.map((key, i) => {
-    const info = keyStatusData[key] || {};
-    let cls, txt;
-    if (info.rateLimitedUntil && Date.now() < info.rateLimitedUntil) {
-      cls = "rate-limited";
-      txt = "limit " + Math.ceil((info.rateLimitedUntil - Date.now()) / 60000) + "p";
-    } else if (info.lastUsed && (Date.now() - info.lastUsed) < 60000) {
-      cls = "active"; txt = "vừa dùng";
-    } else {
-      cls = "idle"; txt = "OK";
-    }
-    return '<div class="key-item">' +
-      '<span class="key-item-text">' + esc(maskKey(key)) + '</span>' +
-      '<span class="key-item-status ' + cls + '">' + txt + '</span>' +
-      '<button class="key-item-delete" data-provider="' + provider + '" data-idx="' + i + '" title="Xóa key">&times;</button>' +
-      '</div>';
-  }).join("");
-
-  container.querySelectorAll(".key-item-delete").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const d = await chrome.storage.sync.get(["apiKeys"]);
-      const apiKeys = d.apiKeys || {};
-      if (apiKeys[btn.dataset.provider]) apiKeys[btn.dataset.provider].splice(+btn.dataset.idx, 1);
-      await chrome.storage.sync.set({ apiKeys });
-      loadKeyLists();
-      showKeyStatus("Đã xóa", "success");
-    });
-  });
+  container.innerHTML = keys
+    .map((key, i) => {
+      const info = keyStatusData[key] || {};
+      let cls, txt;
+      if (info.rateLimitedUntil && Date.now() < info.rateLimitedUntil) {
+        cls = "rate-limited";
+        txt =
+          "limit " +
+          Math.ceil((info.rateLimitedUntil - Date.now()) / 60000) +
+          "p";
+      } else if (info.lastUsed && Date.now() - info.lastUsed < 60000) {
+        cls = "active";
+        txt = "vừa dùng";
+      } else {
+        cls = "idle";
+        txt = "OK";
+      }
+      return (
+        '<div class="key-item">' +
+        '<span class="key-item-text">' +
+        esc(maskKey(key)) +
+        "</span>" +
+        '<span class="key-item-status ' +
+        cls +
+        '">' +
+        txt +
+        "</span>" +
+        '<button class="key-item-delete" data-provider="' +
+        provider +
+        '" data-idx="' +
+        i +
+        '" title="Xóa key">&times;</button>' +
+        "</div>"
+      );
+    })
+    .join("");
 }
+
+// Event delegation for key delete buttons
+document.addEventListener("click", async (e) => {
+  if (e.target.classList.contains("key-item-delete")) {
+    const btn = e.target;
+    const d = await chrome.storage.sync.get(["apiKeys"]);
+    const apiKeys = d.apiKeys || {};
+    if (apiKeys[btn.dataset.provider])
+      apiKeys[btn.dataset.provider].splice(+btn.dataset.idx, 1);
+    await chrome.storage.sync.set({ apiKeys });
+    await chrome.storage.local.set({ backupApiKeys: apiKeys });
+    loadKeyLists();
+    showKeyStatus("Đã xóa", "success");
+  }
+});
 
 addKeyBtn.addEventListener("click", async () => {
   const key = newApiKeyInput.value.trim();
-  if (!key) { showKeyStatus("Nhập API Key", "error"); return; }
+  if (!key) {
+    showKeyStatus("Nhập API Key", "error");
+    return;
+  }
   const provider = detectProvider(key);
   const data = await chrome.storage.sync.get(["apiKeys"]);
   const apiKeys = data.apiKeys || {};
-  for (const p of ALL_PROVIDERS) { if (!apiKeys[p]) apiKeys[p] = []; }
-  if (apiKeys[provider].includes(key)) { showKeyStatus("Key đã tồn tại", "error"); return; }
+  for (const p of ALL_PROVIDERS) {
+    if (!apiKeys[p]) apiKeys[p] = [];
+  }
+  if (apiKeys[provider].includes(key)) {
+    showKeyStatus("Key đã tồn tại", "error");
+    return;
+  }
   apiKeys[provider].push(key);
   await chrome.storage.sync.set({ apiKeys });
+  await chrome.storage.local.set({ backupApiKeys: apiKeys });
   newApiKeyInput.value = "";
   loadKeyLists();
-  showKeyStatus("Đã thêm — " + provider.charAt(0).toUpperCase() + provider.slice(1), "success");
+  showKeyStatus(
+    "Đã thêm — " + provider.charAt(0).toUpperCase() + provider.slice(1),
+    "success",
+  );
 });
 
 testBtn.addEventListener("click", async () => {
   const data = await chrome.storage.sync.get(["apiKeys"]);
-  const total = Object.values(data.apiKeys || {}).reduce((s, a) => s + (a ? a.length : 0), 0);
-  if (total === 0) { showKeyStatus("Chưa có API Key", "error"); return; }
+  const total = Object.values(data.apiKeys || {}).reduce(
+    (s, a) => s + (a ? a.length : 0),
+    0,
+  );
+  if (total === 0) {
+    showKeyStatus("Chưa có API Key", "error");
+    return;
+  }
   testBtn.disabled = true;
   testBtn.textContent = "Đang test...";
   try {
     const r = await chrome.runtime.sendMessage({ action: "test-connection" });
-    showKeyStatus(r?.ok ? "OK — " + r.provider : (r?.error || "Lỗi"), r?.ok ? "success" : "error");
-  } catch (e) { showKeyStatus("Lỗi: " + e.message, "error"); }
+    showKeyStatus(
+      r?.ok ? "OK — " + r.provider : r?.error || "Lỗi",
+      r?.ok ? "success" : "error",
+    );
+  } catch (e) {
+    showKeyStatus("Lỗi: " + e.message, "error");
+  }
   testBtn.disabled = false;
   testBtn.textContent = "Test kết nối";
 });
+
+// Clear cache button (test mode)
+const clearCacheBtn = document.getElementById("clearCacheBtn");
+if (clearCacheBtn) {
+  clearCacheBtn.addEventListener("click", async () => {
+    try {
+      // Clear local storage cache
+      await chrome.storage.local.remove(['history', 'telemetry']);
+      // Send message to content script to clear summaryCache
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: "clear-cache" });
+      }
+      showStatus("Đã xóa cache", "success");
+      // Reload history
+      loadHistory();
+    } catch (e) {
+      showStatus("Lỗi xóa cache: " + e.message, "error");
+    }
+  });
+}
 
 // Migrate old single apiKey
 (async () => {
   const data = await chrome.storage.sync.get(["apiKey", "apiKeys", "provider"]);
   const apiKeys = data.apiKeys || {};
-  for (const p of ALL_PROVIDERS) { if (!apiKeys[p]) apiKeys[p] = []; }
+  for (const p of ALL_PROVIDERS) {
+    if (!apiKeys[p]) apiKeys[p] = [];
+  }
   if (data.apiKey) {
     const provider = data.provider || detectProvider(data.apiKey);
-    if (!apiKeys[provider].includes(data.apiKey)) apiKeys[provider].push(data.apiKey);
+    if (!apiKeys[provider].includes(data.apiKey))
+      apiKeys[provider].push(data.apiKey);
     await chrome.storage.sync.set({ apiKeys });
+    await chrome.storage.local.set({ backupApiKeys: apiKeys });
   }
   loadKeyLists();
 })();
@@ -205,26 +353,57 @@ async function loadHistory() {
   detail.style.display = "none";
   list.style.display = "block";
   actions.style.display = historyData.length > 0 ? "block" : "none";
-  if (historyData.length === 0) { list.innerHTML = '<p class="empty">Chưa có lịch sử</p>'; return; }
-  list.innerHTML = historyData.map((h, i) => {
-    const bt = h.type || "summary";
-    return '<div class="history-item" data-idx="' + i + '">' +
-      '<div class="history-date">' + esc(new Date(h.date).toLocaleString("vi")) + ' · ' + esc(h.site || "") +
-      '<span class="history-badge ' + bt + '">' + (bt === "affiliate" ? "Affiliate" : "Tóm tắt") + '</span></div>' +
-      '<div class="history-text">' + esc((h.text || "").substring(0, 80)) + '...</div>' +
-      '<div class="history-summary">' + esc((h.summary || "").substring(0, 120)) + '...</div></div>';
-  }).join("");
-  list.querySelectorAll(".history-item").forEach(item => {
-    item.addEventListener("click", () => showHistoryDetail(+item.dataset.idx));
-  });
+  if (historyData.length === 0) {
+    list.innerHTML = '<p class="empty">Chưa có lịch sử</p>';
+    return;
+  }
+  list.innerHTML = historyData
+    .map((h, i) => {
+      const bt = h.type || "summary";
+      return (
+        '<div class="history-item" data-idx="' +
+        i +
+        '">' +
+        '<div class="history-date">' +
+        esc(new Date(h.date).toLocaleString("vi")) +
+        " · " +
+        esc(h.site || "") +
+        '<span class="history-badge ' +
+        bt +
+        '">' +
+        (bt === "affiliate" ? "Affiliate" : "Tóm tắt") +
+        "</span></div>" +
+        '<div class="history-text">' +
+        esc((h.text || "").substring(0, 80)) +
+        "...</div>" +
+        '<div class="history-summary">' +
+        esc((h.summary || "").substring(0, 120)) +
+        "...</div></div>"
+      );
+    })
+    .join("");
+  // Update debug info
+  if (typeof featureFlags !== 'undefined' && featureFlags.testMode) {
+    updateDebugInfo();
+  }
 }
 
+// Event delegation for history items
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".history-item")) {
+    const item = e.target.closest(".history-item");
+    showHistoryDetail(+item.dataset.idx);
+  }
+});
+
 function showHistoryDetail(idx) {
-  const h = historyData[idx]; if (!h) return;
+  const h = historyData[idx];
+  if (!h) return;
   document.getElementById("historyList").style.display = "none";
   document.getElementById("historyActions").style.display = "none";
   document.getElementById("historyDetail").style.display = "block";
-  document.getElementById("historyDetailDate").textContent = new Date(h.date).toLocaleString("vi") + " · " + (h.site || "");
+  document.getElementById("historyDetailDate").textContent =
+    new Date(h.date).toLocaleString("vi") + " · " + (h.site || "");
   document.getElementById("historyDetailBody").textContent = h.summary || "";
 }
 
@@ -235,35 +414,51 @@ document.getElementById("historyBack").addEventListener("click", () => {
 });
 
 document.getElementById("historyDetailCopy").addEventListener("click", () => {
-  navigator.clipboard.writeText(document.getElementById("historyDetailBody").textContent).then(() => {
-    const btn = document.getElementById("historyDetailCopy");
-    btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-  });
+  navigator.clipboard
+    .writeText(document.getElementById("historyDetailBody").textContent)
+    .then(() => {
+      const btn = document.getElementById("historyDetailCopy");
+      btn.textContent = "Copied";
+      setTimeout(() => {
+        btn.textContent = "Copy";
+      }, 1500);
+    });
 });
 
 document.getElementById("exportBtn").addEventListener("click", async () => {
   const data = await chrome.storage.local.get("history");
-  const blob = new Blob([JSON.stringify(data.history || [], null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob); const a = document.createElement("a");
-  a.href = url; a.download = "feedwriter-history.json"; a.click(); URL.revokeObjectURL(url);
+  const blob = new Blob([JSON.stringify(data.history || [], null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "feedwriter-history.json";
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 document.getElementById("exportMdBtn").addEventListener("click", async () => {
   const data = await chrome.storage.local.get("history");
   const hist = data.history || [];
   let md = "# Lịch sử FeedWriter\n\n";
-  hist.forEach(h => {
+  hist.forEach((h) => {
     md += `## ${new Date(h.date).toLocaleString("vi")} - ${h.site || ""}\n\n`;
     md += `> ${(h.text || "").replace(/\n/g, "\n> ").substring(0, 500)}...\n\n${h.summary}\n\n---\n\n`;
   });
   const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob); const a = document.createElement("a");
-  a.href = url; a.download = "feedwriter-history.md"; a.click(); URL.revokeObjectURL(url);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "feedwriter-history.md";
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
   if (!confirm("Xóa toàn bộ lịch sử?")) return;
-  await chrome.storage.local.remove("history"); loadHistory();
+  await chrome.storage.local.remove("history");
+  loadHistory();
 });
 
 // === REVIEW TAB ===
@@ -275,15 +470,26 @@ function setAlarmButtonState(on) {
 
 async function loadReviewTab() {
   let data = null;
-  try { data = await chrome.runtime.sendMessage({ action: "get-ai-review" }); } catch (_) { }
-  if (data && data.items && data.items.length > 0 && data.date === new Date().toISOString().slice(0, 10)) {
-    reviewItems = data.items; renderReviewResults();
+  try {
+    data = await chrome.runtime.sendMessage({ action: "get-ai-review" });
+  } catch (_) {}
+  if (
+    data &&
+    data.items &&
+    data.items.length > 0 &&
+    data.date === new Date().toISOString().slice(0, 10)
+  ) {
+    reviewItems = data.items;
+    renderReviewResults();
   }
   const alarmData = await chrome.storage.local.get("reviewAlarm");
   const alarm = alarmData.reviewAlarm;
   const alarmEl = document.getElementById("alarmStatus");
   if (alarm && alarm.enabled) {
-    const t = String(alarm.hour).padStart(2, "0") + ":" + String(alarm.minute).padStart(2, "0");
+    const t =
+      String(alarm.hour).padStart(2, "0") +
+      ":" +
+      String(alarm.minute).padStart(2, "0");
     document.getElementById("reviewTime").value = t;
     alarmEl.textContent = "Bật — " + t + " mỗi ngày";
     alarmEl.className = "review-alarm-status alarm-on";
@@ -297,56 +503,129 @@ async function loadReviewTab() {
 
 function renderReviewResults() {
   document.getElementById("reviewResults").style.display = "block";
-  document.getElementById("reviewCount").textContent = reviewItems.length + " tin hay";
+  document.getElementById("reviewCount").textContent =
+    reviewItems.length + " tin hay";
   const list = document.getElementById("reviewList");
-  list.innerHTML = reviewItems.map((item, i) => {
-    const title = esc(item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 80));
-    const img = item.imageUrl ? '<img class="review-item-thumb" src="' + esc(item.imageUrl) + '" onerror="this.style.display=\'none\'">' : '';
-    return '<div class="review-item"><input type="checkbox" class="review-check" data-idx="' + i + '" checked>' +
-      '<div class="review-item-content"><div class="review-item-title">' + title + '</div>' +
-      '<div class="review-item-meta">' + esc(item.author || item.site || "") + ' · ' + esc(item.aiReason || "") + '</div></div>' +
-      (item.aiScore ? '<span class="review-item-score">' + item.aiScore + '</span>' : '') + img + '</div>';
-  }).join("");
+  list.innerHTML = reviewItems
+    .map((item, i) => {
+      const title = esc(
+        item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 80),
+      );
+      const img = item.imageUrl
+        ? '<img class="review-item-thumb" src="' +
+          esc(item.imageUrl) +
+          '" onerror="this.style.display=\'none\'">'
+        : "";
+      return (
+        '<div class="review-item"><input type="checkbox" class="review-check" data-idx="' +
+        i +
+        '" checked>' +
+        '<div class="review-item-content"><div class="review-item-title">' +
+        title +
+        "</div>" +
+        '<div class="review-item-meta">' +
+        esc(item.author || item.site || "") +
+        " · " +
+        esc(item.aiReason || "") +
+        "</div></div>" +
+        (item.aiScore
+          ? '<span class="review-item-score">' + item.aiScore + "</span>"
+          : "") +
+        img +
+        "</div>"
+      );
+    })
+    .join("");
   // Use a single delegated handler instead of re-adding listeners
   const selectAll = document.getElementById("selectAllReview");
   selectAll.checked = true;
   selectAll.onchange = (e) => {
-    list.querySelectorAll(".review-check").forEach(cb => { cb.checked = e.target.checked; });
+    list.querySelectorAll(".review-check").forEach((cb) => {
+      cb.checked = e.target.checked;
+    });
   };
 }
 
 document.getElementById("aiReviewBtn").addEventListener("click", async () => {
   const btn = document.getElementById("aiReviewBtn");
   const st = document.getElementById("reviewStatus");
-  btn.disabled = true; btn.textContent = "Đang phân tích..."; st.style.display = "none";
+  btn.disabled = true;
+  btn.textContent = "Đang phân tích...";
+  st.style.display = "none";
   try {
     const r = await chrome.runtime.sendMessage({ action: "ai-review" });
-    if (r.error) { st.textContent = r.error; st.className = "status error"; st.style.display = "block"; }
-    else if (r.success) { reviewItems = r.items; renderReviewResults(); st.textContent = "Tìm được " + r.count + " tin hay"; st.className = "status success"; st.style.display = "block"; }
-  } catch (e) { st.textContent = "Lỗi: " + e.message; st.className = "status error"; st.style.display = "block"; }
-  btn.disabled = false; btn.textContent = "AI Đề xuất tin hay";
+    if (r.error) {
+      st.textContent = r.error;
+      st.className = "status error";
+      st.style.display = "block";
+    } else if (r.success) {
+      reviewItems = r.items;
+      renderReviewResults();
+      st.textContent = "Tìm được " + r.count + " tin hay";
+      st.className = "status success";
+      st.style.display = "block";
+    }
+  } catch (e) {
+    st.textContent = "Lỗi: " + e.message;
+    st.className = "status error";
+    st.style.display = "block";
+  }
+  btn.disabled = false;
+  btn.textContent = "AI Đề xuất tin hay";
 });
 
 document.getElementById("exportDtcnBtn").addEventListener("click", async () => {
-  const sel = Array.from(document.querySelectorAll(".review-check:checked")).map(cb => reviewItems[+cb.dataset.idx]).filter(Boolean);
-  if (!sel.length) { alert("Chọn ít nhất 1 tin"); return; }
-  const r = await chrome.runtime.sendMessage({ action: "export-dtcn", items: sel });
+  const sel = Array.from(document.querySelectorAll(".review-check:checked"))
+    .map((cb) => reviewItems[+cb.dataset.idx])
+    .filter(Boolean);
+  if (!sel.length) {
+    alert("Chọn ít nhất 1 tin");
+    return;
+  }
+  const r = await chrome.runtime.sendMessage({
+    action: "export-dtcn",
+    items: sel,
+  });
   if (r && r.data) {
-    const blob = new Blob([JSON.stringify({ _scanned_candidates: r.data, source: "feedwriter", exported_at: new Date().toISOString(), count: r.data.length }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = "feedwriter-dtcn-" + new Date().toISOString().slice(0, 10) + ".json"; a.click(); URL.revokeObjectURL(url);
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            _scanned_candidates: r.data,
+            source: "feedwriter",
+            exported_at: new Date().toISOString(),
+            count: r.data.length,
+          },
+          null,
+          2,
+        ),
+      ],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download =
+      "feedwriter-dtcn-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 });
 
 document.getElementById("setAlarmBtn").addEventListener("click", async () => {
-  const t = document.getElementById("reviewTime").value; if (!t) return;
+  const t = document.getElementById("reviewTime").value;
+  if (!t) return;
   const [h, m] = t.split(":").map(Number);
-  await chrome.storage.local.set({ reviewAlarm: { hour: h, minute: m, enabled: true } });
+  await chrome.storage.local.set({
+    reviewAlarm: { hour: h, minute: m, enabled: true },
+  });
   const alarmEl = document.getElementById("alarmStatus");
   alarmEl.textContent = "Bật — " + t + " mỗi ngày";
   alarmEl.className = "review-alarm-status alarm-on";
   setAlarmButtonState(true);
-  chrome.runtime.sendMessage({ action: "set-review-alarm", hour: h, minute: m }).catch(() => { });
+  chrome.runtime
+    .sendMessage({ action: "set-review-alarm", hour: h, minute: m })
+    .catch(() => {});
 });
 
 document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
@@ -355,7 +634,7 @@ document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
   alarmEl.textContent = "Đã tắt";
   alarmEl.className = "review-alarm-status";
   setAlarmButtonState(false);
-  chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => { });
+  chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => {});
 });
 
 // === ABOUT: load version from manifest ===

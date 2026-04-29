@@ -7,28 +7,72 @@
   let MIN_LEN = 400;
   let scanTimer = null;
   const injected = new WeakSet();
-  const summaryCache = new Map();
+  const summaryCache = new LRUCache(50);
+  const observers = []; // Store observers for cleanup
+  const listeners = []; // Store event listeners for cleanup
 
-  chrome.storage.sync.get("minLength", (d) => { if (d.minLength) MIN_LEN = d.minLength; });
+  // Cleanup function
+  function cleanup() {
+    observers.forEach(obs => obs.disconnect());
+    observers.length = 0;
+    listeners.forEach(({ element, event, handler, options }) => {
+      element.removeEventListener(event, handler, options);
+    });
+    listeners.length = 0;
+    if (scanTimer) {
+      clearInterval(scanTimer);
+      scanTimer = null;
+    }
+  }
+
+  // Cleanup on extension reload
+  if (chrome.runtime?.onConnect) {
+    chrome.runtime.onConnect.addListener(() => cleanup());
+  }
+
+  chrome.storage.sync.get("minLength", (d) => {
+    if (d.minLength) MIN_LEN = d.minLength;
+  });
 
   function isContextValid() {
-    try { return !!chrome.runtime?.id; } catch (e) { return false; }
+    try {
+      return !!chrome.runtime?.id;
+    } catch (e) {
+      return false;
+    }
   }
 
   function hashText(text) {
     let h = 0;
-    for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0;
+    for (let i = 0; i < text.length; i++)
+      h = ((h << 5) - h + text.charCodeAt(i)) | 0;
     return h.toString(36);
   }
 
-  const SITE = location.hostname.includes("facebook") ? "facebook"
-    : location.hostname.includes("threads") ? "threads"
-      : location.hostname.includes("x.com") || location.hostname.includes("twitter") ? "x"
-        : location.hostname.includes("linkedin") ? "linkedin"
-          : location.hostname.includes("reddit") ? "reddit" : "other";
+  const SITE = location.hostname.includes("facebook")
+    ? "facebook"
+    : location.hostname.includes("threads")
+      ? "threads"
+      : location.hostname.includes("x.com") ||
+          location.hostname.includes("twitter")
+        ? "x"
+        : location.hostname.includes("linkedin")
+          ? "linkedin"
+          : location.hostname.includes("reddit")
+            ? "reddit"
+            : "other";
 
   const SEE_MORE_KEYWORDS = {
-    facebook: ["xem thêm", "see more", "voir plus", "mehr anzeigen", "もっと見る", "더 보기", "ver más", "ver mais"],
+    facebook: [
+      "xem thêm",
+      "see more",
+      "voir plus",
+      "mehr anzeigen",
+      "もっと見る",
+      "더 보기",
+      "ver más",
+      "ver mais",
+    ],
     threads: ["more", "xem thêm"],
     x: ["show more"],
     linkedin: ["see more", "xem thêm", "...more"],
@@ -44,36 +88,50 @@
     if (!bg || bg === "rgba(0, 0, 0, 0)") return "dark";
     const m = bg.match(/\d+/g);
     if (!m) return "dark";
-    return ((+m[0] + +m[1] + +m[2]) / 3) > 128 ? "light" : "dark";
+    return (+m[0] + +m[1] + +m[2]) / 3 > 128 ? "light" : "dark";
   }
   function applyTheme() {
     currentTheme = detectTheme();
-    document.querySelectorAll(".fbs-wrap, .fbs-panel, .fbs-backdrop").forEach(el => {
-      el.setAttribute("data-fbs-theme", currentTheme);
-    });
+    document
+      .querySelectorAll(".fbs-wrap, .fbs-panel, .fbs-backdrop")
+      .forEach((el) => {
+        el.setAttribute("data-fbs-theme", currentTheme);
+      });
   }
   let themeTimer = null;
   function throttledApplyTheme() {
     if (themeTimer) return;
-    themeTimer = setTimeout(() => { themeTimer = null; applyTheme(); }, 500);
+    themeTimer = setTimeout(() => {
+      themeTimer = null;
+      applyTheme();
+    }, 500);
   }
   setTimeout(applyTheme, 1000);
-  new MutationObserver(throttledApplyTheme).observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
+  const themeObserver = new MutationObserver(throttledApplyTheme);
+  themeObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class", "style"],
+  });
+  observers.push(themeObserver);
 
   // === SCAN LOGIC ===
   function findNewSeeMoreElements() {
     const results = [];
-    const root = document.querySelector('div[role="main"]')
-      || document.querySelector('div[id^="mount_0_0"]')
-      || document.querySelector("main") || document.body;
+    const root =
+      document.querySelector('div[role="main"]') ||
+      document.querySelector('div[id^="mount_0_0"]') ||
+      document.querySelector("main") ||
+      document.body;
     // Use more specific selector to reduce DOM traversal
-    const els = root.querySelectorAll('div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]');
+    const els = root.querySelectorAll(
+      'div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]',
+    );
     for (const el of els) {
       if (el.dataset.fbsScanned) continue;
       if (el.children.length > 3) continue;
       const t = (el.textContent || "").trim().toLowerCase();
       if (t.length > 30 || t.length < 4) continue;
-      if (SEE_MORE.some(kw => t === kw || t === "..." + kw)) {
+      if (SEE_MORE.some((kw) => t === kw || t === "..." + kw)) {
         el.dataset.fbsScanned = "1";
         if (isInNonPostArea(el)) continue;
         results.push(el);
@@ -88,7 +146,8 @@
       p = p.parentElement;
       if (!p || p === document.body) return false;
       const role = p.getAttribute("role") || "";
-      if (["navigation", "banner", "dialog", "complementary"].includes(role)) return true;
+      if (["navigation", "banner", "dialog", "complementary"].includes(role))
+        return true;
       // Skip comment areas on Facebook — comments use role="article" nested inside another role="article" (the post)
       if (SITE === "facebook" && role === "article") {
         let ancestor = p.parentElement;
@@ -99,8 +158,10 @@
         }
       }
       // Only check computed style for elements that might be fixed/sticky (cheaper than always calling getComputedStyle)
-      if (p.style.position === "fixed" || p.style.position === "sticky") return true;
-      if (p.classList.contains("fixed") || p.classList.contains("sticky")) return true;
+      if (p.style.position === "fixed" || p.style.position === "sticky")
+        return true;
+      if (p.classList.contains("fixed") || p.classList.contains("sticky"))
+        return true;
     }
     return false;
   }
@@ -109,14 +170,20 @@
     let p = el;
     for (let i = 0; i < 5; i++) {
       if (!p) return el;
-      if (p.getAttribute("role") === "button" || p.tagName === "A" || p.tagName === "BUTTON") return p;
+      if (
+        p.getAttribute("role") === "button" ||
+        p.tagName === "A" ||
+        p.tagName === "BUTTON"
+      )
+        return p;
       p = p.parentElement;
     }
     return el;
   }
 
   function findTextContainer(seeMoreEl) {
-    let el = seeMoreEl, best = null;
+    let el = seeMoreEl,
+      best = null;
     for (let i = 0; i < 12; i++) {
       el = el.parentElement;
       if (!el || el === document.body) break;
@@ -147,11 +214,11 @@
 
     // Remove unwanted elements (only structural noise, not content)
     const unwanted = clone.querySelectorAll(
-      'script, style, nav, footer, aside, ' +
-      '[role="navigation"], [role="banner"], [role="complementary"], ' +
-      '.related-posts, .recommended, .recommendation'
+      "script, style, nav, footer, aside, " +
+        '[role="navigation"], [role="banner"], [role="complementary"], ' +
+        ".related-posts, .recommended, .recommendation",
     );
-    unwanted.forEach(el => el.remove());
+    unwanted.forEach((el) => el.remove());
 
     // Get text content
     let text = clone.innerText || clone.textContent || "";
@@ -168,16 +235,23 @@
     let cleaned = text;
     for (const p of patterns) {
       const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      cleaned = cleaned.replace(new RegExp("\\s*" + escaped + "\\s*$", "gi"), "");
+      cleaned = cleaned.replace(
+        new RegExp("\\s*" + escaped + "\\s*$", "gi"),
+        "",
+      );
     }
     return cleaned.replace(/\s+/g, " ").trim();
   }
 
-  const ICON_BASE64 = 'data:image/png;base64,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';
+  const ICON_BASE64 =
+    "data:image/png;base64,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";
 
   // === OVERLAY (panel, backdrop, streaming) ===
-  let backdrop = null, panel = null, panelBody = null;
-  let isSummarizing = false, currentPort = null;
+  let backdrop = null,
+    panel = null,
+    panelBody = null;
+  let isSummarizing = false,
+    currentPort = null;
 
   function ensureOverlay() {
     if (panel && panel.isConnected) return;
@@ -189,7 +263,9 @@
     panel = document.createElement("div");
     panel.className = "fbs-panel";
     panel.innerHTML =
-      '<div class="fbs-panel-head"><span><img src="' + ICON_BASE64 + '" width="16" height="16" style="vertical-align:-3px"> <span class="fbs-title-text">Tóm tắt AI</span></span>' +
+      '<div class="fbs-panel-head"><span><img src="' +
+      ICON_BASE64 +
+      '" width="16" height="16" style="vertical-align:-3px"> <span class="fbs-title-text">Tóm tắt AI</span></span>' +
       '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
       '<div class="fbs-panel-body"></div>' +
       '<div class="fbs-panel-footer">' +
@@ -198,13 +274,17 @@
       '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
       '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
       '<button class="fbs-post-status-btn" title="Đăng lên Facebook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg> Đăng</button>' +
-      '</div>';
+      "</div>";
     document.body.appendChild(panel);
     panelBody = panel.querySelector(".fbs-panel-body");
     panel.querySelector(".fbs-close").addEventListener("click", closeOverlay);
     panel.querySelector(".fbs-copy-btn").addEventListener("click", copyResult);
-    panel.querySelector(".fbs-post-status-btn").addEventListener("click", handlePostStatus);
-    panel.querySelector(".fbs-stop-btn").addEventListener("click", stopSummarize);
+    panel
+      .querySelector(".fbs-post-status-btn")
+      .addEventListener("click", handlePostStatus);
+    panel
+      .querySelector(".fbs-stop-btn")
+      .addEventListener("click", stopSummarize);
     panel.querySelector(".fbs-regen-btn").addEventListener("click", regenerate);
     panel.querySelector(".fbs-edit-btn").addEventListener("click", toggleEdit);
   }
@@ -221,16 +301,23 @@
       const editedText = existingTextarea.value;
       // Store edited text for copy
       panelBody.dataset.editedText = editedText;
-      panelBody.innerHTML = '<div class="fbs-result">' + fmt(editedText) + '</div>';
-      editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa';
+      panelBody.innerHTML =
+        '<div class="fbs-result">' + fmt(editedText) + "</div>";
+      editBtn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa';
     } else {
       // Switch to edit mode
-      const currentText = panelBody.dataset.editedText || panelBody.innerText || "";
-      panelBody.innerHTML = '<textarea class="fbs-edit-textarea">' + esc(currentText) + '</textarea>';
+      const currentText =
+        panelBody.dataset.editedText || panelBody.innerText || "";
+      panelBody.innerHTML =
+        '<textarea class="fbs-edit-textarea">' +
+        esc(currentText) +
+        "</textarea>";
       const textarea = panelBody.querySelector(".fbs-edit-textarea");
       textarea.focus();
       textarea.setSelectionRange(0, 0);
-      editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Xong';
+      editBtn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Xong';
     }
   }
 
@@ -277,14 +364,29 @@
     backdrop.classList.add("fbs-visible");
     panel.classList.add("fbs-visible");
     const footer = panel.querySelector(".fbs-panel-footer");
-    const hasContent = html.includes("fbs-result") || html.includes("fbs-loading") || streaming;
+    const hasContent =
+      html.includes("fbs-result") || html.includes("fbs-loading") || streaming;
     footer.style.display = hasContent ? "flex" : "none";
-    panel.querySelector(".fbs-stop-btn").style.display = (isSummarizing || streaming) ? "inline-flex" : "none";
-    panel.querySelector(".fbs-copy-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
-    panel.querySelector(".fbs-post-status-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result") && SITE === "facebook" && type !== "affiliate") ? "inline-flex" : "none";
-    panel.querySelector(".fbs-regen-btn").style.display = (!isSummarizing && !streaming) ? "inline-flex" : "none";
-    panel.querySelector(".fbs-edit-btn").style.display = (!isSummarizing && !streaming && html.includes("fbs-result")) ? "inline-flex" : "none";
-    if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
+    panel.querySelector(".fbs-stop-btn").style.display =
+      isSummarizing || streaming ? "inline-flex" : "none";
+    panel.querySelector(".fbs-copy-btn").style.display =
+      !isSummarizing && !streaming ? "inline-flex" : "none";
+    panel.querySelector(".fbs-post-status-btn").style.display =
+      !isSummarizing &&
+      !streaming &&
+      html.includes("fbs-result") &&
+      SITE === "facebook" &&
+      type !== "affiliate"
+        ? "inline-flex"
+        : "none";
+    panel.querySelector(".fbs-regen-btn").style.display =
+      !isSummarizing && !streaming ? "inline-flex" : "none";
+    panel.querySelector(".fbs-edit-btn").style.display =
+      !isSummarizing && !streaming && html.includes("fbs-result")
+        ? "inline-flex"
+        : "none";
+    if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500)
+      panelBody.scrollTop = panelBody.scrollHeight;
   }
 
   function closeOverlay() {
@@ -300,22 +402,34 @@
   function stopSummarize() {
     if (!isSummarizing) return;
     isSummarizing = false;
-    if (currentPort) { try { currentPort.disconnect(); } catch (_) { } currentPort = null; }
+    if (currentPort) {
+      try {
+        currentPort.disconnect();
+      } catch (_) {}
+      currentPort = null;
+    }
     if (panelBody) {
-      openOverlay(panelBody.innerHTML +
-        '<div class="fbs-error">Đã dừng.</div>', false);
+      openOverlay(
+        panelBody.innerHTML + '<div class="fbs-error">Đã dừng.</div>',
+        false,
+      );
     }
   }
 
   function copyResult() {
     // If in edit mode, get text from textarea; otherwise use edited cache or display text
     const textarea = panelBody?.querySelector(".fbs-edit-textarea");
-    const text = textarea ? textarea.value : (panelBody?.dataset?.editedText || panelBody?.innerText || "");
+    const text = textarea
+      ? textarea.value
+      : panelBody?.dataset?.editedText || panelBody?.innerText || "";
     navigator.clipboard.writeText(text).then(() => {
       const btn = panel.querySelector(".fbs-copy-btn");
       const orig = btn.innerHTML;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied';
-      setTimeout(() => { btn.innerHTML = orig; }, 1500);
+      btn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied';
+      setTimeout(() => {
+        btn.innerHTML = orig;
+      }, 1500);
     });
   }
 
@@ -357,7 +471,8 @@
           if (u.hostname.includes("facebook.com")) {
             const mp = u.searchParams.get("multi_permalinks");
             if (mp && u.pathname.includes("/groups/")) {
-              cleanUrl = u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+              cleanUrl =
+                u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
             } else {
               const sfid = u.searchParams.get("story_fbid");
               const uid = u.searchParams.get("id");
@@ -370,7 +485,12 @@
           } else {
             // Strip tracking params
             for (const k of [...u.searchParams.keys()]) {
-              if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref"].includes(k)) u.searchParams.delete(k);
+              if (
+                k.startsWith("utm_") ||
+                k.startsWith("__") ||
+                ["fbclid", "gclid", "ref"].includes(k)
+              )
+                u.searchParams.delete(k);
             }
             cleanUrl = u.toString().replace(/\?$/, "");
           }
@@ -384,7 +504,7 @@
     } catch (_) {
       // Fallback
       const resultEl = panelBody?.querySelector(".fbs-result");
-      const text = resultEl ? resultEl.innerText : (panelBody?.innerText || "");
+      const text = resultEl ? resultEl.innerText : panelBody?.innerText || "";
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
       openFacebookComposer(text.trim(), "", "", "", "");
@@ -396,32 +516,55 @@
     preview.className = "fbs-status-preview";
 
     // Validate author/source — bỏ nếu chứa ký tự rác (FB anti-scraping)
-    const isValidName = (n) => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n) && n.split(/\s+/).length <= 10;
+    const isValidName = (n) =>
+      n &&
+      n.length >= 2 &&
+      n.length < 80 &&
+      !/[a-f0-9]{10,}/i.test(n) &&
+      !/\d{8,}/.test(n) &&
+      n.split(/\s+/).length <= 10;
     const cleanAuthor = isValidName(author) ? author : "";
     const cleanSource = isValidName(source) ? source : "";
 
     // Ảnh preview (nếu có)
     const imgHtml = imageUrl
-      ? '<div class="fbs-sp-image"><img src="' + esc(imageUrl) + '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh</button></div>'
-      : '';
+      ? '<div class="fbs-sp-image"><img src="' +
+        esc(imageUrl) +
+        '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh</button></div>'
+      : "";
 
     preview.innerHTML =
-      '<div class="fbs-sp-header"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Preview Status <span class="fbs-sp-charcount">' + text.length + ' ký tự</span></div>' +
+      '<div class="fbs-sp-header"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Preview Status <span class="fbs-sp-charcount">' +
+      text.length +
+      " ký tự</span></div>" +
       imgHtml +
-      '<div class="fbs-sp-text">' + esc(text).replace(/\n/g, "<br>") + '</div>' +
+      '<div class="fbs-sp-text">' +
+      esc(text).replace(/\n/g, "<br>") +
+      "</div>" +
       '<div class="fbs-sp-link-input">' +
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
-      '<input type="text" class="fbs-sp-link-field" placeholder="Paste link bài gốc (ghi nguồn ở comment đầu)" value="' + esc(sourceUrl || "") + '">' +
-      '</div>' +
-      (cleanAuthor ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + esc(cleanAuthor) + (cleanSource && cleanSource !== cleanAuthor ? ' <span class="fbs-sp-source-group">(' + esc(cleanSource) + ')</span>' : '') + '</div>' : '') +
+      '<input type="text" class="fbs-sp-link-field" placeholder="Paste link bài gốc (ghi nguồn ở comment đầu)" value="' +
+      esc(sourceUrl || "") +
+      '">' +
+      "</div>" +
+      (cleanAuthor
+        ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' +
+          esc(cleanAuthor) +
+          (cleanSource && cleanSource !== cleanAuthor
+            ? ' <span class="fbs-sp-source-group">(' +
+              esc(cleanSource) +
+              ")</span>"
+            : "") +
+          "</div>"
+        : "") +
       '<div class="fbs-sp-comment" style="display:none">' +
       '<div class="fbs-sp-comment-label">Comment đầu tiên (ghi nguồn):</div>' +
       '<div class="fbs-sp-comment-text"></div>' +
       '<button class="fbs-sp-copy-comment"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn</button>' +
-      '</div>' +
+      "</div>" +
       '<div class="fbs-sp-actions">' +
       '<button class="fbs-sp-open-fb"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status</button>' +
-      '</div>';
+      "</div>";
 
     panelBody.appendChild(preview);
     panelBody.scrollTop = panelBody.scrollHeight;
@@ -444,7 +587,8 @@
       let sourceLine = "Nguồn: ";
       if (cleanAuthor) {
         sourceLine += cleanAuthor;
-        if (cleanSource && cleanSource !== cleanAuthor) sourceLine += " (" + cleanSource + ")";
+        if (cleanSource && cleanSource !== cleanAuthor)
+          sourceLine += " (" + cleanSource + ")";
         sourceLine += "\n" + url;
       } else if (cleanSource) {
         sourceLine += cleanSource + "\n" + url;
@@ -464,7 +608,9 @@
         if (u.hostname.includes("facebook.com")) {
           const mp = u.searchParams.get("multi_permalinks");
           if (mp && u.pathname.includes("/groups/")) {
-            return u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+            return (
+              u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/"
+            );
           }
           const sfid = u.searchParams.get("story_fbid");
           const uid = u.searchParams.get("id");
@@ -475,10 +621,17 @@
         }
         // Non-FB: strip tracking
         for (const k of [...u.searchParams.keys()]) {
-          if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref"].includes(k)) u.searchParams.delete(k);
+          if (
+            k.startsWith("utm_") ||
+            k.startsWith("__") ||
+            ["fbclid", "gclid", "ref"].includes(k)
+          )
+            u.searchParams.delete(k);
         }
         return u.toString().replace(/\?$/, "");
-      } catch (_) { return raw; }
+      } catch (_) {
+        return raw;
+      }
     }
 
     // Auto-normalize khi paste link
@@ -501,121 +654,182 @@
     function autoPasteToLexical(element, text, file = null) {
       element.focus();
       const dataTransfer = new DataTransfer();
-      dataTransfer.setData('text/plain', text);
+      dataTransfer.setData("text/plain", text);
       if (file) dataTransfer.items.add(file);
-      element.dispatchEvent(new ClipboardEvent('paste', {
-        clipboardData: dataTransfer,
-        bubbles: true,
-        cancelable: true
-      }));
+      element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: dataTransfer,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     }
 
     // Copy comment (ghi nguồn)
-    preview.querySelector(".fbs-sp-copy-comment").addEventListener("click", async () => {
-      const btn = preview.querySelector(".fbs-sp-copy-comment");
-      const content = commentText.textContent;
-      if (!content) return;
-      await navigator.clipboard.writeText(content);
-      
-      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
-      
-      let posted = false;
-      if (SITE === "facebook") {
-        const commentBoxes = Array.from(document.querySelectorAll('div[role="textbox"][contenteditable="true"]'))
-          .filter(el => {
+    preview
+      .querySelector(".fbs-sp-copy-comment")
+      .addEventListener("click", async () => {
+        const btn = preview.querySelector(".fbs-sp-copy-comment");
+        const content = commentText.textContent;
+        if (!content) return;
+        await navigator.clipboard.writeText(content);
+
+        btn.innerHTML =
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
+
+        let posted = false;
+        if (SITE === "facebook") {
+          const commentBoxes = Array.from(
+            document.querySelectorAll(
+              'div[role="textbox"][contenteditable="true"]',
+            ),
+          ).filter((el) => {
             const label = (el.getAttribute("aria-label") || "").toLowerCase();
-            return label.includes("viết bình luận") || label.includes("comment") || label.includes("trả lời");
+            return (
+              label.includes("viết bình luận") ||
+              label.includes("comment") ||
+              label.includes("trả lời")
+            );
           });
-        
-        let targetBox = commentBoxes[0];
-        if (lastSummarizeParams && lastSummarizeParams._element) {
-           const postEl = lastSummarizeParams._element.closest('[role="article"]');
-           if (postEl) {
-             const boxInPost = postEl.querySelector('div[role="textbox"][contenteditable="true"]');
-             if (boxInPost) targetBox = boxInPost;
-           }
+
+          let targetBox = commentBoxes[0];
+          if (lastSummarizeParams && lastSummarizeParams._element) {
+            const postEl =
+              lastSummarizeParams._element.closest('[role="article"]');
+            if (postEl) {
+              const boxInPost = postEl.querySelector(
+                'div[role="textbox"][contenteditable="true"]',
+              );
+              if (boxInPost) targetBox = boxInPost;
+            }
+          }
+
+          if (targetBox) {
+            autoPasteToLexical(targetBox, content);
+            setTimeout(() => {
+              targetBox.dispatchEvent(
+                new KeyboardEvent("keydown", {
+                  key: "Enter",
+                  code: "Enter",
+                  keyCode: 13,
+                  which: 13,
+                  bubbles: true,
+                }),
+              );
+            }, 500);
+            posted = true;
+          }
         }
 
-        if (targetBox) {
-           autoPasteToLexical(targetBox, content);
-           setTimeout(() => {
-              targetBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-           }, 500);
-           posted = true;
+        if (posted) {
+          btn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã tự cmt!';
+        } else {
+          btn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
         }
-      }
-      
-      if (posted) {
-        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã tự cmt!';
-      } else {
-        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
-      }
-      setTimeout(() => { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn'; }, 2500);
-    });
+        setTimeout(() => {
+          btn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy nguồn';
+        }, 2500);
+      });
 
     // Copy ảnh
     const copyImgBtn = preview.querySelector(".fbs-sp-copy-img");
     if (copyImgBtn) {
       copyImgBtn.addEventListener("click", async () => {
         try {
-          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
+          copyImgBtn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
           const imgEl = preview.querySelector(".fbs-sp-image img");
           const canvas = document.createElement("canvas");
           canvas.width = imgEl.naturalWidth;
           canvas.height = imgEl.naturalHeight;
           canvas.getContext("2d").drawImage(imgEl, 0, 0);
-          const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
-          setTimeout(() => { copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh'; }, 2500);
+          const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+          await navigator.clipboard.write([
+            new ClipboardItem({ "image/png": blob }),
+          ]);
+          copyImgBtn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã copy!';
+          setTimeout(() => {
+            copyImgBtn.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh';
+          }, 2500);
         } catch (_) {
           window.open(imageUrl, "_blank");
-          copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Mở tab mới';
-          setTimeout(() => { copyImgBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh'; }, 2000);
+          copyImgBtn.innerHTML =
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Mở tab mới';
+          setTimeout(() => {
+            copyImgBtn.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh';
+          }, 2000);
         }
       });
     }
 
     // Đăng status — auto-copy text + mở Facebook composer
-    preview.querySelector(".fbs-sp-open-fb").addEventListener("click", async () => {
-      const btn = preview.querySelector(".fbs-sp-open-fb");
-      await navigator.clipboard.writeText(text);
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
-      if (SITE === "facebook") {
-        setTimeout(() => {
-          const allButtons = document.querySelectorAll('div[role="main"] div[role="button"]');
-          for (const b of allButtons) {
-            const t = (b.textContent || "").toLowerCase();
-            if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something")) {
-              b.click();
-              setTimeout(async () => {
-                const editor = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]');
-                let imgFile = null;
-                const imgEl = preview.querySelector(".fbs-sp-image img");
-                if (imgEl && imgEl.naturalWidth > 0) {
-                  try {
-                    const canvas = document.createElement("canvas");
-                    canvas.width = imgEl.naturalWidth;
-                    canvas.height = imgEl.naturalHeight;
-                    canvas.getContext("2d").drawImage(imgEl, 0, 0);
-                    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
-                    if (blob) imgFile = new File([blob], "image.png", { type: "image/png" });
-                  } catch (e) { console.warn("Image paste failed", e); }
-                }
-                if (editor) autoPasteToLexical(editor, text, imgFile);
-                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
-              }, 800);
-              return;
+    preview
+      .querySelector(".fbs-sp-open-fb")
+      .addEventListener("click", async () => {
+        const btn = preview.querySelector(".fbs-sp-open-fb");
+        await navigator.clipboard.writeText(text);
+        btn.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
+        if (SITE === "facebook") {
+          setTimeout(() => {
+            const allButtons = document.querySelectorAll(
+              'div[role="main"] div[role="button"]',
+            );
+            for (const b of allButtons) {
+              const t = (b.textContent || "").toLowerCase();
+              if (
+                t.includes("bạn đang nghĩ gì") ||
+                t.includes("what's on your mind") ||
+                t.includes("write something")
+              ) {
+                b.click();
+                setTimeout(async () => {
+                  const editor = document.querySelector(
+                    'div[role="dialog"] div[role="textbox"][contenteditable="true"]',
+                  );
+                  let imgFile = null;
+                  const imgEl = preview.querySelector(".fbs-sp-image img");
+                  if (imgEl && imgEl.naturalWidth > 0) {
+                    try {
+                      const canvas = document.createElement("canvas");
+                      canvas.width = imgEl.naturalWidth;
+                      canvas.height = imgEl.naturalHeight;
+                      canvas.getContext("2d").drawImage(imgEl, 0, 0);
+                      const blob = await new Promise((r) =>
+                        canvas.toBlob(r, "image/png"),
+                      );
+                      if (blob)
+                        imgFile = new File([blob], "image.png", {
+                          type: "image/png",
+                        });
+                    } catch (e) {
+                      console.warn("Image paste failed", e);
+                    }
+                  }
+                  if (editor) autoPasteToLexical(editor, text, imgFile);
+                  btn.innerHTML =
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
+                }, 800);
+                return;
+              }
             }
-          }
-          window.scrollTo({ top: 0, behavior: "smooth" });
-          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
-        }, 200);
-      }
-    });
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            btn.innerHTML =
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
+          }, 200);
+        }
+      });
   }
 
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeOverlay();
+  });
 
   // ============================================================
   // AGENT POST API — Bypasses UI, called directly by auto-pilot
@@ -626,37 +840,55 @@
       const u = new URL(rawUrl);
       if (u.hostname.includes("facebook.com")) {
         const mp = u.searchParams.get("multi_permalinks");
-        if (mp && u.pathname.includes("/groups/")) return u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/";
+        if (mp && u.pathname.includes("/groups/"))
+          return (
+            u.origin + u.pathname.replace(/\/$/, "") + "/posts/" + mp + "/"
+          );
         const sfid = u.searchParams.get("story_fbid");
         const uid = u.searchParams.get("id");
         if (sfid && uid) return u.origin + "/" + uid + "/posts/" + sfid + "/";
         return u.origin + u.pathname;
       }
       for (const k of [...u.searchParams.keys()]) {
-        if (k.startsWith("utm_") || k.startsWith("__") || ["fbclid","gclid","ref","comment_id","reply_comment_id"].includes(k)) u.searchParams.delete(k);
+        if (
+          k.startsWith("utm_") ||
+          k.startsWith("__") ||
+          ["fbclid", "gclid", "ref", "comment_id", "reply_comment_id"].includes(
+            k,
+          )
+        )
+          u.searchParams.delete(k);
       }
       return u.toString().replace(/\?$/, "");
-    } catch (_) { return rawUrl; }
+    } catch (_) {
+      return rawUrl;
+    }
   }
 
   async function fetchImageBlob(imgSrc) {
     if (!imgSrc) return null;
-    
+
     // Attempt 1: Via Canvas (fastest but fails on cross-origin taint)
     const imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
     if (imgEl && imgEl.naturalWidth > 0) {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = imgEl.naturalWidth; canvas.height = imgEl.naturalHeight;
+        canvas.width = imgEl.naturalWidth;
+        canvas.height = imgEl.naturalHeight;
         canvas.getContext("2d").drawImage(imgEl, 0, 0);
-        const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+        const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
         if (blob) return new File([blob], "image.png", { type: "image/png" });
       } catch (_) {}
     }
 
     // Attempt 2: Via Background.js fetch (bypasses CORS)
     try {
-      const resp = await new Promise(resolve => chrome.runtime.sendMessage({ action: "fetch-image", url: imgSrc }, resolve));
+      const resp = await new Promise((resolve) =>
+        chrome.runtime.sendMessage(
+          { action: "fetch-image", url: imgSrc },
+          resolve,
+        ),
+      );
       if (resp && resp.base64) {
         const fetchResp = await fetch(resp.base64);
         const blob = await fetchResp.blob();
@@ -669,15 +901,43 @@
 
   function pasteToLexical(element, text, file = null) {
     element.focus();
-    const dt = new DataTransfer();
-    dt.setData("text/plain", text);
-    if (file) dt.items.add(file);
-    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    // Paste text trước (không kèm file — Facebook sẽ bỏ text nếu có file)
+    if (text) {
+      const dtText = new DataTransfer();
+      dtText.setData("text/plain", text);
+      element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: dtText,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+    // Paste file riêng sau (nếu có)
+    if (file) {
+      setTimeout(() => {
+        element.focus();
+        const dtFile = new DataTransfer();
+        dtFile.items.add(file);
+        element.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: dtFile,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, 500);
+    }
   }
 
   function buildCommentText(cleanUrl, author, source) {
     let line = "Nguồn: ";
-    const isValidName = n => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n);
+    const isValidName = (n) =>
+      n &&
+      n.length >= 2 &&
+      n.length < 80 &&
+      !/[a-f0-9]{10,}/i.test(n) &&
+      !/\d{8,}/.test(n);
     const a = isValidName(author) ? author : "";
     const s = isValidName(source) ? source : "";
     if (a) {
@@ -692,20 +952,65 @@
     return line;
   }
 
-  window.fbsAgentPost = async function(summaryText, imageUrl, rawSourceUrl) {
+  window.fbsAgentPost = async function (summaryText, imageUrl, rawSourceUrl, postElement) {
     if (SITE !== "facebook") return { ok: false, reason: "not_facebook" };
 
     const cleanUrl = cleanSourceUrl(rawSourceUrl);
-    // Lấy author từ DOM để ghi vào comment nguồn
-    const postAuthor = currentPost && typeof window.fbsExtractAuthor === "function"
-      ? window.fbsExtractAuthor(currentPost) : "";
-    const commentText = cleanUrl ? buildCommentText(cleanUrl, postAuthor, "") : "";
+    // Lấy author + source (group/page name) từ DOM
+    const postAuthor =
+      postElement && typeof window.fbsExtractAuthor === "function"
+        ? window.fbsExtractAuthor(postElement)
+        : "";
+    const postSource =
+      postElement && typeof extractPostSource === "function"
+        ? extractPostSource(postElement)
+        : "";
+
+    // LUÔN tạo commentText — bắt buộc comment nguồn
+    let commentText = "";
+    const isUsefulUrl = cleanUrl && cleanUrl !== "https://www.facebook.com" && cleanUrl.length > 30;
+
+    if (isUsefulUrl) {
+      // Có link chính xác → dùng link + tên tác giả
+      commentText = buildCommentText(cleanUrl, postAuthor, postSource);
+    } else {
+      // Không có link chính xác → build comment từ thông tin có sẵn
+      let parts = [];
+      parts.push("Nguồn:");
+      if (postAuthor) parts.push(postAuthor);
+      if (postSource && postSource !== postAuthor) parts.push("(" + postSource + ")");
+      if (cleanUrl && cleanUrl.length > 30) {
+        parts.push("\n" + cleanUrl);
+      } else {
+        // Dùng URL trang hiện tại nếu có ý nghĩa (group/page)
+        const pageUrl = location.href;
+        if (pageUrl.includes("/groups/") || pageUrl.includes("/pages/")) {
+          parts.push("\n" + pageUrl.split("?")[0]);
+        }
+      }
+      commentText = parts.join(" ").trim();
+      // Nếu vẫn chỉ có "Nguồn:" thì thêm tên trang
+      if (commentText === "Nguồn:") {
+        commentText = "Nguồn: Facebook";
+      }
+    }
+    console.log("[Agent] Comment text prepared:", commentText);
+    console.log("[Agent] Author:", postAuthor || "(unknown)", "| Source:", postSource || "(unknown)", "| URL:", cleanUrl || "(none)");
 
     // Build final post text
     let postText = summaryText.trim();
+    // Luôn thêm dòng "Nguồn dưới cmt đầu" vì comment bắt buộc
     if (!postText.includes("Nguồn:") && !postText.includes("nguồn:")) {
-      postText += "\n\n" + (cleanUrl ? "Nguồn dưới cmt đầu" : "");
+      postText += "\n\n—\nNguồn dưới cmt đầu";
     }
+
+    console.log("[Agent] fbsAgentPost called:", {
+      textLength: postText.length,
+      textPreview: postText.substring(0, 80),
+      hasImage: !!imageUrl,
+      sourceUrl: cleanUrl || "(none)",
+      hasComment: !!commentText,
+    });
 
     // Step 1: Mở FB Composer (click "Bạn đang nghĩ gì?")
     const mainArea = document.querySelector('div[role="main"]');
@@ -715,8 +1020,16 @@
     let composerBtn = null;
     for (const b of allButtons) {
       const t = (b.textContent || "").toLowerCase();
-      if (t.includes("bạn đang nghĩ gì") || t.includes("what's on your mind") || t.includes("write something") || t.includes("viết gì đó") || t.includes("chia sẻ điều gì") || t.includes("say something")) {
-        composerBtn = b; break;
+      if (
+        t.includes("bạn đang nghĩ gì") ||
+        t.includes("what's on your mind") ||
+        t.includes("write something") ||
+        t.includes("viết gì đó") ||
+        t.includes("chia sẻ điều gì") ||
+        t.includes("say something")
+      ) {
+        composerBtn = b;
+        break;
       }
     }
     if (!composerBtn) return { ok: false, reason: "no_composer_btn" };
@@ -725,9 +1038,11 @@
     // Step 2: Chờ dialog mở, tìm editor (poll trong 5s)
     let editor = null;
     for (let i = 0; i < 25; i++) {
-      editor = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]');
+      editor = document.querySelector(
+        'div[role="dialog"] div[role="textbox"][contenteditable="true"]',
+      );
       if (editor) break;
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 200));
     }
     if (!editor) {
       console.error("[Agent] Không tìm thấy Editor TextBox.");
@@ -737,100 +1052,145 @@
     // Kích hoạt Lexical bằng cách click & focus trước khi paste
     editor.click();
     editor.focus();
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 1000));
 
     // Step 3: Fetch image blob nếu có
     const imgFile = await fetchImageBlob(imageUrl);
 
-    // Step 4: Paste text (+ image)
+    // Step 4: Paste text (+ image) — giả lập gõ chậm
+    console.log("[Agent] Pasting text...", { length: postText.length });
     pasteToLexical(editor, postText, imgFile);
-    await new Promise(r => setTimeout(r, 1500 + Math.random() * 500));
+    // Chờ text render + image upload (người thật mất 3-8s để review trước khi đăng)
+    await new Promise((r) => setTimeout(r, imgFile ? 5000 : 3000));
 
     // Step 5: Chờ nút Tiếp hoặc Đăng native không bị disabled (đợi upload ảnh)
     let fbPostBtn = null;
     let isNextBtn = false;
     for (let i = 0; i < 20; i++) {
-      fbPostBtn = document.querySelector('div[aria-label="Tiếp"][role="button"], div[aria-label="Next"][role="button"], div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]');
+      fbPostBtn = document.querySelector(
+        'div[aria-label="Tiếp"][role="button"], div[aria-label="Next"][role="button"], div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]',
+      );
       if (fbPostBtn && fbPostBtn.getAttribute("aria-disabled") !== "true") {
         const label = fbPostBtn.getAttribute("aria-label");
         isNextBtn = label === "Tiếp" || label === "Next";
         break;
       }
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
     }
     if (!fbPostBtn) {
       console.error("[Agent] Không tìm thấy nút Đăng/Tiếp.");
       return { ok: false, reason: "no_post_btn" };
     }
+    // Giả lập review trước khi đăng (2-4s)
+    await new Promise((r) => setTimeout(r, 2000 + Math.random() * 2000));
+    console.log("[Agent] Clicking post button...");
     fbPostBtn.click();
 
     // Nếu phải qua bước "Tiếp" (Next), chờ màn hình tiếp theo và bấm "Đăng"
     if (isNextBtn) {
-      await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
+      await new Promise((r) => setTimeout(r, 1000 + Math.random() * 500));
       let finalPostBtn = null;
       for (let i = 0; i < 15; i++) {
-        finalPostBtn = document.querySelector('div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]');
-        if (finalPostBtn && finalPostBtn.getAttribute("aria-disabled") !== "true") break;
-        await new Promise(r => setTimeout(r, 500));
+        finalPostBtn = document.querySelector(
+          'div[aria-label="Đăng"][role="button"], div[aria-label="Post"][role="button"]',
+        );
+        if (
+          finalPostBtn &&
+          finalPostBtn.getAttribute("aria-disabled") !== "true"
+        )
+          break;
+        await new Promise((r) => setTimeout(r, 500));
       }
       if (finalPostBtn) {
         finalPostBtn.click();
       } else {
-        console.error("[Agent] Mắc kẹt sau khi bấm Tiếp, không tìm thấy nút Đăng.");
+        console.error(
+          "[Agent] Mắc kẹt sau khi bấm Tiếp, không tìm thấy nút Đăng.",
+        );
         return { ok: false, reason: "no_final_post_btn" };
       }
     }
 
-    // Step 6: Chờ post xuất hiện trên Feed (~8s)
-    await new Promise(r => setTimeout(r, 8000));
+    // Step 6: Chờ post xuất hiện trên Feed
+    console.log("[Agent] === STEP 6: Bài đã đăng, chờ feed refresh ===");
+    console.log("[Agent] commentText:", commentText.substring(0, 80));
+    await new Promise((r) => setTimeout(r, 10000));
 
-    // Step 7: Auto-comment nguồn vào bài vừa đăng
-    if (commentText) {
-      // Tìm bài vừa đăng: match bằng phần text thuần (strip markdown **) để tránh mismatch
-      const feed = document.querySelector('div[role="feed"]');
-      let firstPost = null;
-      if (feed) {
-        const articles = feed.querySelectorAll('[role="article"]');
-        const rawSnippet = postText.replace(/\*\*/g, "").substring(0, 50).toLowerCase().trim();
-        for (const art of articles) {
-          if ((art.textContent || "").toLowerCase().includes(rawSnippet)) {
-            firstPost = art;
-            break;
+    // Step 7: Comment nguồn — bài vừa đăng nằm ngay đầu feed
+    {
+      try {
+        console.log("[Agent] === STEP 7: Comment nguồn ===");
+
+        // Tìm nút "Viết bình luận" trực tiếp bằng aria-label (chính xác nhất)
+        let commentBtn = null;
+        let commentBox = null;
+
+        // Poll tìm nút comment trong 15s (bài có thể chưa render xong)
+        for (let poll = 0; poll < 30 && !commentBtn && !commentBox; poll++) {
+          // Ưu tiên: tìm aria-label="Viết bình luận" hoặc "Write a comment"
+          commentBtn = document.querySelector('[aria-label="Viết bình luận"][role="button"]') ||
+                       document.querySelector('[aria-label="Write a comment"][role="button"]') ||
+                       document.querySelector('[aria-label="Comment"][role="button"]');
+          // Hoặc comment box đã mở sẵn
+          if (!commentBtn) {
+            commentBox = document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="bình luận"]') ||
+                         document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="comment"]');
           }
+          if (!commentBtn && !commentBox) await new Promise((r) => setTimeout(r, 500));
         }
-        // Fallback: bài đầu tiên trong feed
-        if (!firstPost) firstPost = feed.querySelector('[role="article"]');
-      }
 
-      if (firstPost) {
-         // Thử tìm và click nút "Bình luận"
-         const commentBtn = firstPost.querySelector('div[aria-label="Bình luận"], div[aria-label="Comment"]');
-         if (commentBtn) {
-            commentBtn.click();
-            await new Promise(r => setTimeout(r, 1500));
-         }
-      }
+        if (commentBox) {
+          console.log("[Agent] Comment box already open!");
+        } else if (commentBtn) {
+          console.log("[Agent] Found 'Viết bình luận' button, clicking...");
+          commentBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+          await new Promise((r) => setTimeout(r, 1000));
+          commentBtn.click();
+          await new Promise((r) => setTimeout(r, 3000));
 
-      // Tìm ô textbox bình luận đang mở
-      const commentBoxes = Array.from(document.querySelectorAll('div[role="textbox"][contenteditable="true"]'))
-        .filter(el => {
-          const lbl = (el.getAttribute("aria-label") || "").toLowerCase();
-          return lbl.includes("viết bình luận") || lbl.includes("comment") || lbl.includes("trả lời");
-        });
-        
-      if (commentBoxes.length > 0) {
-        const box = commentBoxes[0];
-        box.click();
-        box.focus();
-        await new Promise(r => setTimeout(r, 500));
-        pasteToLexical(box, commentText);
-        await new Promise(r => setTimeout(r, 1500));
-        
-        // Nhấn Enter để gửi comment
-        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
-        await new Promise(r => setTimeout(r, 2000));
-      } else {
-        console.warn("[Agent] Không tìm thấy ô nhập bình luận cho bài mới.");
+          // Poll tìm comment textbox sau khi click (có thể trong dialog)
+          for (let poll = 0; poll < 20 && !commentBox; poll++) {
+            // Chính xác nhất: data-lexical-editor textbox
+            commentBox = document.querySelector('[data-lexical-editor="true"][role="textbox"][contenteditable="true"]');
+            // Fallback: aria-label chứa "Bình luận dưới tên"
+            if (!commentBox) {
+              commentBox = document.querySelector('[aria-label*="Bình luận dưới tên"][contenteditable="true"]') ||
+                           document.querySelector('[aria-label*="Comment as"][contenteditable="true"]');
+            }
+            // Fallback: bất kỳ textbox contenteditable trong dialog
+            if (!commentBox) {
+              commentBox = document.querySelector('div[role="dialog"] div[contenteditable="true"][role="textbox"]');
+            }
+            // Fallback cuối: textbox cuối cùng trong document
+            if (!commentBox) {
+              const allBoxes = document.querySelectorAll('div[contenteditable="true"][role="textbox"]');
+              if (allBoxes.length > 0) commentBox = allBoxes[allBoxes.length - 1];
+            }
+            if (!commentBox) await new Promise((r) => setTimeout(r, 500));
+          }
+        } else {
+          console.warn("[Agent] Không tìm thấy nút 'Viết bình luận' sau 15s");
+        }
+
+        if (commentBox) {
+          console.log("[Agent] ✓ Comment box found! Pasting...");
+          commentBox.click();
+          commentBox.focus();
+          await new Promise((r) => setTimeout(r, 1000));
+          pasteToLexical(commentBox, commentText);
+          await new Promise((r) => setTimeout(r, 2500));
+
+          // Gửi bằng Enter
+          commentBox.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }),
+          );
+          await new Promise((r) => setTimeout(r, 2000));
+          console.log("[Agent] ✓ Comment nguồn đã gửi!");
+        } else {
+          console.warn("[Agent] ✗ Không tìm thấy ô comment");
+        }
+      } catch (commentErr) {
+        console.error("[Agent] Lỗi khi comment:", commentErr.message);
       }
     }
 
@@ -838,20 +1198,28 @@
   };
 
   // Expose DOM extractors for auto-pilot
-  window.fbsExtractImage     = extractPostImage;
+  window.fbsExtractImage = extractPostImage;
   window.fbsExtractPermalink = extractPostPermalink;
-  window.fbsExtractAuthor    = extractPostAuthor;
+  window.fbsExtractAuthor = extractPostAuthor;
 
+  // Async version: lấy permalink (fallback sang sync vì menu ⋯ không có "Sao chép liên kết" trên newsfeed)
+  window.fbsExtractPermalinkAsync = async function (element) {
+    return extractPostPermalink(element) || "";
+  };
 
   // === HELPERS ===
-  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function esc(s) {
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
   function fmt(t) {
     return esc(t)
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
       .replace(/^[-•]\s*/gm, "• ")
-      .replace(/\n{2,}/g, "<br>")  // nhiều dòng trống -> 1 br
-      .replace(/\n/g, "<br>");      // 1 dòng -> 1 br
+      .replace(/\n{2,}/g, "<br>") // nhiều dòng trống -> 1 br
+      .replace(/\n/g, "<br>"); // 1 dòng -> 1 br
   }
 
   // === BUTTONS ===
@@ -861,7 +1229,9 @@
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
     d.innerHTML =
-      '<img src="' + ICON_BASE64 + '" width="12" height="12" style="vertical-align:-2px"><span title="Tóm tắt nội dung"> Tóm tắt</span>';
+      '<img src="' +
+      ICON_BASE64 +
+      '" width="12" height="12" style="vertical-align:-2px"><span title="Tóm tắt nội dung"> Tóm tắt</span>';
     return d;
   }
 
@@ -870,62 +1240,198 @@
     d.className = "fbs-btn-inline";
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
-    d.style.cssText = "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
-    d.innerHTML = ' · <span title="Tóm tắt nội dung" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><img src="' + ICON_BASE64 + '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt</span>';
+    d.style.cssText =
+      "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
+    d.innerHTML =
+      ' · <span title="Tóm tắt nội dung" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><img src="' +
+      ICON_BASE64 +
+      '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt</span>';
     const pill = d.querySelector("span");
-    d.addEventListener("mouseenter", () => { pill.style.background = "rgba(79,195,247,0.28)"; });
-    d.addEventListener("mouseleave", () => { pill.style.background = "rgba(79,195,247,0.13)"; });
+    d.addEventListener("mouseenter", () => {
+      pill.style.background = "rgba(79,195,247,0.28)";
+    });
+    d.addEventListener("mouseleave", () => {
+      pill.style.background = "rgba(79,195,247,0.13)";
+    });
     return d;
   }
 
   // === POST METADATA EXTRACTION ===
   function extractPostPermalink(element) {
-    // Nếu đang xem bài đơn lẻ (URL chứa /posts/, /permalink/, story_fbid) → dùng URL trang
     const url = location.href;
     if (SITE === "facebook") {
-      if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks/.test(url)) return url;
-      // Đang ở newsfeed → tìm permalink từ timestamp link trong post container
-      if (element) {
-        let postContainer = element;
-        for (let i = 0; i < 20; i++) {
-          if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
-          postContainer = postContainer.parentElement;
-          if (postContainer.getAttribute("role") === "article") break;
+      // Nếu đang xem bài đơn lẻ → dùng URL trang
+      if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks|pfbid/.test(url))
+        return url;
+
+      // Đang ở newsfeed → tìm permalink trong article
+      if (!element) return "";
+
+      // Tìm article container
+      let postContainer = element;
+      for (let i = 0; i < 20; i++) {
+        if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+        postContainer = postContainer.parentElement;
+        if (postContainer.getAttribute("role") === "article") break;
+      }
+
+      // Lấy TẤT CẢ link trong bài
+      const allLinks = postContainer.querySelectorAll("a[href]");
+      const candidates = [];
+
+      console.log("[Permalink] Scanning", allLinks.length, "links in article");
+
+      for (const link of allLinks) {
+        const href = link.href || "";
+        if (!href) continue;
+
+        // Bỏ qua link rõ ràng không phải permalink
+        if (href.includes("/photo") || href.includes("/reel/") || href.includes("/hashtag/") ||
+            href.includes("/events/") || href.includes("/marketplace/") ||
+            href.includes("facebook.com/policies") || href.includes("facebook.com/help") ||
+            href.includes("/groups/") && !href.includes("/posts/") ||
+            href.includes("l.facebook.com/") || href.includes("/share") ||
+            href === "https://www.facebook.com/" || href === "https://www.facebook.com") continue;
+
+        const isPermalink =
+          href.includes("/posts/") ||
+          href.includes("/permalink") ||
+          href.includes("story_fbid") ||
+          href.includes("pfbid") ||
+          href.includes("multi_permalinks");
+
+        if (isPermalink) {
+          candidates.push({ href, priority: 1, reason: "permalink_pattern" });
+          continue;
         }
-        // Facebook timestamp links thường chứa /posts/, /permalink/, /videos/, /photos/, story_fbid
-        const timeLinks = postContainer.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="multi_permalinks"]');
-        for (const link of timeLinks) {
-          if (link.href && !link.href.includes("/photo")) {
-            try {
-              const u = new URL(link.href);
-              // Strip tracking params
-              for (const k of [...u.searchParams.keys()]) {
-                if (k.startsWith("__") || ["fbclid", "ref", "comment_id", "reply_comment_id"].includes(k)) u.searchParams.delete(k);
-              }
-              return u.origin + u.pathname;
-            } catch (_) { }
-          }
+
+        // Link có text ngắn giống timestamp
+        const text = (link.textContent || "").trim();
+        const ariaLabel = (link.getAttribute("aria-label") || "").trim();
+        const isTimestamp =
+          /^\d+\s*(giờ|phút|ngày|giây|tháng|năm|h|m|d|w|s|hr|min|tuần|week)/i.test(text) ||
+          /^(hôm qua|yesterday|just now|vừa xong|hôm kia)/i.test(text) ||
+          /\d+\s*(giờ|phút|ngày|hour|minute|day|month|year)/i.test(ariaLabel);
+
+        if (isTimestamp && text.length < 30 && href.includes("facebook.com")) {
+          candidates.push({ href, priority: 2, reason: "timestamp:" + text });
+          continue;
         }
-        // Fallback: tìm link có aria-label chứa thời gian (giờ, phút, ngày)
-        const allLinks = postContainer.querySelectorAll('a[role="link"][href*="facebook.com"]');
-        for (const link of allLinks) {
-          const ariaLabel = (link.getAttribute("aria-label") || "").toLowerCase();
-          const text = (link.textContent || "").toLowerCase();
-          if (/\d+\s*(giờ|phút|ngày|giây|tháng|năm|hour|minute|day|second|month|year|h |m |d )/i.test(ariaLabel) ||
-              /\d+\s*(giờ|phút|ngày|giây|tháng|năm|hour|minute|day|second|month|year|h |m |d )/i.test(text)) {
-            if (link.href && (link.href.includes("/posts/") || link.href.includes("/permalink/") || link.href.includes("story_fbid"))) {
-              try { return new URL(link.href).origin + new URL(link.href).pathname; } catch (_) { }
+
+        // Link ngắn trỏ đến user profile + post (dạng /username/posts/ hoặc /username/pfbid)
+        try {
+          const u = new URL(href);
+          if (u.hostname.includes("facebook.com") && u.pathname.length > 5) {
+            const parts = u.pathname.split("/").filter(Boolean);
+            // Pattern: /username/posts/id hoặc /username/pfbidXXX
+            if (parts.length >= 2 && (parts[1] === "posts" || parts[1].startsWith("pfbid"))) {
+              candidates.push({ href, priority: 1, reason: "path_pattern:" + u.pathname });
             }
           }
+        } catch (_) {}
+      }
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.priority - b.priority);
+        console.log("[Permalink] Found", candidates.length, "candidates:", candidates.slice(0, 3).map(c => c.reason + " → " + c.href.substring(0, 60)));
+        const best = candidates[0];
+        try {
+          const u = new URL(best.href);
+          for (const k of [...u.searchParams.keys()]) {
+            if (k.startsWith("__") || k.startsWith("utm_") ||
+                ["fbclid", "ref", "comment_id", "reply_comment_id", "notif_id", "notif_t", "mibextid"].includes(k))
+              u.searchParams.delete(k);
+          }
+          const clean = u.searchParams.toString()
+            ? u.origin + u.pathname + "?" + u.searchParams.toString()
+            : u.origin + u.pathname;
+          return clean.replace(/\/$/, "");
+        } catch (_) {
+          return best.href;
         }
       }
+
+      // === FALLBACK: Bài trong Group — tìm group permalink ===
+      let groupUrl = "";
+      for (const link of allLinks) {
+        const href = link.href || "";
+        const match = href.match(/facebook\.com\/groups\/(\d+)/);
+        if (match) { groupUrl = "https://www.facebook.com/groups/" + match[1]; break; }
+      }
+
+      if (groupUrl) {
+        // Tìm post ID từ data attributes
+        const dataFtEl = postContainer.querySelector("[data-ft]");
+        if (dataFtEl) {
+          try {
+            const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
+            if (ft.top_level_post_id) {
+              const permalink = groupUrl + "/posts/" + ft.top_level_post_id;
+              console.log("[Permalink] Constructed from data-ft:", permalink);
+              return permalink;
+            }
+          } catch (_) {}
+        }
+
+        // Tìm post ID từ article ID hoặc aria attributes
+        const idSources = [
+          postContainer.getAttribute("aria-describedby"),
+          postContainer.getAttribute("aria-labelledby"),
+          postContainer.id,
+        ].join(" ");
+        const idMatch = idSources.match(/(\d{10,})/);
+        if (idMatch) {
+          const permalink = groupUrl + "/posts/" + idMatch[1];
+          console.log("[Permalink] Constructed from element ID:", permalink);
+          return permalink;
+        }
+
+        // Tìm trong innerHTML: Facebook đôi khi embed post ID trong hidden elements
+        const hiddenInputs = postContainer.querySelectorAll("input[type='hidden'], [data-story-id], [data-post-id]");
+        for (const el of hiddenInputs) {
+          const val = el.value || el.getAttribute("data-story-id") || el.getAttribute("data-post-id") || "";
+          if (/^\d{10,}$/.test(val)) {
+            const permalink = groupUrl + "/posts/" + val;
+            console.log("[Permalink] Constructed from hidden input:", permalink);
+            return permalink;
+          }
+        }
+
+        // Fallback: dùng group URL (ít nhất cho biết nguồn từ group nào)
+        console.log("[Permalink] Using group URL as fallback:", groupUrl);
+        return groupUrl;
+      }
+
+      // === FALLBACK CUỐI: Link profile tác giả ===
+      for (const link of allLinks) {
+        const href = link.href || "";
+        if (href.includes("facebook.com") && (href.includes("/user/") || href.includes("/profile.php"))) {
+          try {
+            const u = new URL(href);
+            for (const k of [...u.searchParams.keys()]) { if (k.startsWith("__")) u.searchParams.delete(k); }
+            console.log("[Permalink] Using author link as last resort");
+            return u.toString().replace(/\?$/, "");
+          } catch (_) {}
+        }
+      }
+
+      console.warn("[Permalink] No candidates found in article with", allLinks.length, "links");
+      const sample = Array.from(allLinks).slice(0, 5).map(l => l.href.substring(0, 80));
+      console.warn("[Permalink] Sample links:", sample);
       return "";
     }
+
+    // Non-Facebook platforms
+    if (!element) return url;
     // Non-Facebook: thử tìm trong DOM
     if (!element) return url;
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
-      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
@@ -939,7 +1445,9 @@
     if (selector) {
       const link = postContainer.querySelector(selector);
       if (link && link.href) {
-        try { return new URL(link.href).origin + new URL(link.href).pathname; } catch (_) { }
+        try {
+          return new URL(link.href).origin + new URL(link.href).pathname;
+        } catch (_) {}
       }
     }
     return url;
@@ -951,7 +1459,11 @@
     // Walk up to post container
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
-      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
@@ -963,7 +1475,7 @@
 
       // 1. Look for images inside photo/video link containers
       const photoLinks = postContainer.querySelectorAll(
-        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]'
+        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]',
       );
       for (const link of photoLinks) {
         const img = link.querySelector("img");
@@ -991,7 +1503,12 @@
         const parentLink = img.closest("a");
         if (parentLink) {
           const href = parentLink.href || "";
-          if (href && !href.includes("/photo") && !href.includes("/video") && !href.includes("fbid")) {
+          if (
+            href &&
+            !href.includes("/photo") &&
+            !href.includes("/video") &&
+            !href.includes("fbid")
+          ) {
             // Link doesn't point to photo/video — likely avatar or other UI element
             if (w < 500) continue;
           }
@@ -1035,7 +1552,14 @@
     // Fallback: innerText (tránh textContent vì FB chèn ký tự rác anti-scraping)
     const name = (link.innerText || link.textContent || "").trim();
     // Validate: tên hợp lệ không chứa quá nhiều số/ký tự lạ
-    if (name.length >= 2 && name.length < 80 && !SEE_MORE.includes(name.toLowerCase()) && !/[\d]{8,}/.test(name) && !/[a-f0-9]{10,}/i.test(name)) return name;
+    if (
+      name.length >= 2 &&
+      name.length < 80 &&
+      !SEE_MORE.includes(name.toLowerCase()) &&
+      !/[\d]{8,}/.test(name) &&
+      !/[a-f0-9]{10,}/i.test(name)
+    )
+      return name;
     return "";
   }
 
@@ -1055,7 +1579,8 @@
     let el = nested.parentElement;
     for (let i = 0; i < 10 && el && el !== postContainer; i++) {
       const role = (el.getAttribute("role") || "").toLowerCase();
-      if (role === "list" || role === "listitem" || el.tagName === "UL") return true;
+      if (role === "list" || role === "listitem" || el.tagName === "UL")
+        return true;
       el = el.parentElement;
     }
     // (c) Inside or adjacent to a form → comment
@@ -1106,7 +1631,12 @@
       for (const s of strongs) {
         if (s.closest('[role="article"]') !== nested) continue;
         const name = (s.innerText || s.textContent || "").trim();
-        if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name)) return name;
+        if (
+          name.length >= 2 &&
+          name.length < 80 &&
+          !/[a-f0-9]{10,}/i.test(name)
+        )
+          return name;
       }
     }
     return "";
@@ -1125,7 +1655,8 @@
     for (const s of strongs) {
       if (s.closest('[role="article"]') !== container) continue;
       const name = (s.innerText || s.textContent || "").trim();
-      if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name)) return name;
+      if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name))
+        return name;
     }
     return "";
   }
@@ -1136,7 +1667,11 @@
     // Walk up to the outermost post article
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
-      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
@@ -1154,15 +1689,21 @@
     }
 
     // X/Threads
-    const nameEl = postContainer.querySelector('[data-testid="User-Name"], [data-testid="tweetAuthorName"]');
+    const nameEl = postContainer.querySelector(
+      '[data-testid="User-Name"], [data-testid="tweetAuthorName"]',
+    );
     if (nameEl) return (nameEl.textContent || "").split("@")[0].trim();
 
     // LinkedIn
-    const liAuthor = postContainer.querySelector(".feed-shared-actor__name, .update-components-actor__name");
+    const liAuthor = postContainer.querySelector(
+      ".feed-shared-actor__name, .update-components-actor__name",
+    );
     if (liAuthor) return (liAuthor.textContent || "").trim();
 
     // Reddit
-    const redditAuthor = postContainer.querySelector('[data-testid="post_author_link"], a[href*="/user/"]');
+    const redditAuthor = postContainer.querySelector(
+      '[data-testid="post_author_link"], a[href*="/user/"]',
+    );
     if (redditAuthor) return (redditAuthor.textContent || "").trim();
 
     return "";
@@ -1173,7 +1714,11 @@
 
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
-      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
@@ -1210,17 +1755,25 @@
     // Walk up to post container
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
-      if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
       postContainer = postContainer.parentElement;
       if (postContainer.getAttribute("role") === "article") break;
     }
 
     // Reddit has explicit title
-    const redditTitle = postContainer.querySelector('[data-testid="post-title"], h1, h3[slot="title"]');
+    const redditTitle = postContainer.querySelector(
+      '[data-testid="post-title"], h1, h3[slot="title"]',
+    );
     if (redditTitle) return (redditTitle.textContent || "").trim();
 
     // LinkedIn shared articles
-    const liTitle = postContainer.querySelector(".feed-shared-article__title, .update-components-article__title");
+    const liTitle = postContainer.querySelector(
+      ".feed-shared-article__title, .update-components-article__title",
+    );
     if (liTitle) return (liTitle.textContent || "").trim();
 
     // og:title for single post pages
@@ -1233,44 +1786,85 @@
 
   // === STREAMING SUMMARIZE ===
   async function wakeServiceWorker() {
-    try { await chrome.runtime.sendMessage({ action: "ping" }); } catch (_) { }
+    try {
+      await chrome.runtime.sendMessage({ action: "ping" });
+    } catch (_) {}
   }
 
   async function summarizeText(text, type = "summary", contextElement = null) {
     if (!text || text.length < 50) {
-      openOverlay('<div class="fbs-error">Text quá ngắn để tóm tắt.</div>', false);
+      openOverlay(
+        '<div class="fbs-error">Text quá ngắn để tóm tắt.</div>',
+        false,
+      );
       return;
     }
 
     if (!isContextValid()) {
-      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      openOverlay(
+        '<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>',
+        false,
+        type,
+      );
       return;
     }
 
     // Smart cache key includes settings that affect output
     let settings;
     try {
-      settings = await new Promise(r => chrome.storage.sync.get(["summaryLength", "promptStyle"], r));
+      settings = await new Promise((r) =>
+        chrome.storage.sync.get(["summaryLength", "promptStyle"], r),
+      );
     } catch (_) {
-      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      openOverlay(
+        '<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>',
+        false,
+        type,
+      );
       return;
     }
-    const cacheKey = hashText(text) + "_" + type + "_" + (settings.summaryLength || "medium") + "_" + (settings.promptStyle || "default");
+    const cacheKey =
+      hashText(text) +
+      "_" +
+      type +
+      "_" +
+      (settings.summaryLength || "medium") +
+      "_" +
+      (settings.promptStyle || "default");
 
     if (summaryCache.has(cacheKey)) {
-      openOverlay('<div class="fbs-result">' + fmt(summaryCache.get(cacheKey)) + '</div>', false, type);
+      openOverlay(
+        '<div class="fbs-result">' + fmt(summaryCache.get(cacheKey)) + "</div>",
+        false,
+        type,
+      );
       return;
     }
 
     lastSummarizeParams = { text, type, _element: contextElement };
     isSummarizing = true;
-    const title = type === "affiliate" ? "Đang viết bài Affiliate..." : type === "status_share" ? "Đang viết Status..." : "Đang tóm tắt...";
-    openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
+    const title =
+      type === "affiliate"
+        ? "Đang viết bài Affiliate..."
+        : type === "status_share"
+          ? "Đang viết Status..."
+          : "Đang tóm tắt...";
+    openOverlay(
+      '<div class="fbs-loading"><div class="fbs-spinner"></div><span>' +
+        title +
+        "</span></div>",
+      false,
+      type,
+    );
 
     // Wake SW before connecting port (MV3 SW dies after ~30s idle)
     await wakeServiceWorker();
     if (!isContextValid()) {
-      openOverlay('<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>', false, type);
+      openOverlay(
+        '<div class="fbs-error">Extension đã cập nhật. Vui lòng F5.</div>',
+        false,
+        type,
+      );
       return;
     }
     currentPort = chrome.runtime.connect({ name: "summarize-stream" });
@@ -1281,7 +1875,18 @@
     const _author = extractPostAuthor(_el);
     const _title = extractPostTitle(_el);
     const _source = extractPostSource(_el);
-    currentPort.postMessage({ action: "summarize", text, site: SITE, type, sourceUrl: _sourceUrl, imageUrl: _imageUrl, author: _author, postTitle: _title, postSource: _source, agentMode: !!window._fbsAgentMode });
+    currentPort.postMessage({
+      action: "summarize",
+      text,
+      site: SITE,
+      type,
+      sourceUrl: _sourceUrl,
+      imageUrl: _imageUrl,
+      author: _author,
+      postTitle: _title,
+      postSource: _source,
+      agentMode: !!window._fbsAgentMode,
+    });
 
     let first = true;
     let streamBuffer = "";
@@ -1293,9 +1898,13 @@
       if (existingResult) {
         existingResult.innerHTML = fmt(streamBuffer);
       } else {
-        openOverlay('<div class="fbs-result">' + fmt(streamBuffer) + '</div>', true);
+        openOverlay(
+          '<div class="fbs-result">' + fmt(streamBuffer) + "</div>",
+          true,
+        );
       }
-      if (panelBody.scrollHeight - panelBody.scrollTop < 500) panelBody.scrollTop = panelBody.scrollHeight;
+      if (panelBody.scrollHeight - panelBody.scrollTop < 500)
+        panelBody.scrollTop = panelBody.scrollHeight;
     }
 
     currentPort.onMessage.addListener((msg) => {
@@ -1310,25 +1919,51 @@
           streamRafId = requestAnimationFrame(renderStream);
         }
       } else if (msg.action === "done") {
-        if (streamRafId) { cancelAnimationFrame(streamRafId); streamRafId = null; }
+        if (streamRafId) {
+          cancelAnimationFrame(streamRafId);
+          streamRafId = null;
+        }
         isSummarizing = false;
         summaryCache.set(cacheKey, msg.full);
         // Show quality warnings from post-processing guardrails
         let qualityHtml = "";
         if (msg.issues && msg.issues.length > 0) {
-          const issueClass = msg.quality === "warn" ? "fbs-quality-warn" : "fbs-quality-info";
-          qualityHtml = '<div class="' + issueClass + '">' + msg.issues.map(i => esc(i)).join("<br>") + '</div>';
+          const issueClass =
+            msg.quality === "warn" ? "fbs-quality-warn" : "fbs-quality-info";
+          qualityHtml =
+            '<div class="' +
+            issueClass +
+            '">' +
+            msg.issues.map((i) => esc(i)).join("<br>") +
+            "</div>";
         }
-        openOverlay('<div class="fbs-result">' + fmt(msg.full) + '</div>' + qualityHtml, false, type);
+        openOverlay(
+          '<div class="fbs-result">' + fmt(msg.full) + "</div>" + qualityHtml,
+          false,
+          type,
+        );
         // Agent mode: score đã được tính trong cùng lần gọi AI → gửi decision ngay, không cần eval riêng
         if (window._fbsAgentMode && typeof msg.agentScore === "number") {
-          window.dispatchEvent(new CustomEvent("fbs_agent_decision", { detail: { score: msg.agentScore } }));
+          window.dispatchEvent(
+            new CustomEvent("fbs_agent_decision", {
+              detail: { score: msg.agentScore },
+            }),
+          );
         }
-        try { currentPort.disconnect(); } catch (_) { } currentPort = null;
+        try {
+          currentPort.disconnect();
+        } catch (_) {}
+        currentPort = null;
       } else if (msg.action === "error") {
         isSummarizing = false;
-        openOverlay('<div class="fbs-error">' + esc(msg.error) + '</div>', false);
-        try { currentPort.disconnect(); } catch (_) { } currentPort = null;
+        openOverlay(
+          '<div class="fbs-error">' + esc(msg.error) + "</div>",
+          false,
+        );
+        try {
+          currentPort.disconnect();
+        } catch (_) {}
+        currentPort = null;
       }
     });
 
@@ -1336,7 +1971,11 @@
       if (isSummarizing) {
         isSummarizing = false;
         if (panelBody && !panelBody.innerHTML.includes("fbs-result")) {
-          openOverlay('<div class="fbs-error">Kết nối bị ngắt.</div>', false, type);
+          openOverlay(
+            '<div class="fbs-error">Kết nối bị ngắt.</div>',
+            false,
+            type,
+          );
         } else if (panelBody) {
           openOverlay(panelBody.innerHTML, false, type);
         }
@@ -1346,29 +1985,52 @@
 
   // === MESSAGES (CONTEXT MENU, SHORTCUTS & UNSHORTEN) ===
   chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === "clear-cache") {
+      summaryCache.clear();
+      logger.info("Cache cleared via test mode");
+      return;
+    }
     if (msg.action === "summarize-selection" && msg.text) {
       summarizeText(msg.text, msg.type);
     }
     if (msg.action === "shortcut-summarize-shortcut") {
       const text = window.getSelection().toString();
       if (text) summarizeText(text, "summary");
-      else openOverlay('<div class="fbs-error">Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!</div>', false);
+      else
+        openOverlay(
+          '<div class="fbs-error">Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!</div>',
+          false,
+        );
     }
     if (msg.action === "shortcut-affiliate-shortcut") {
       const text = window.getSelection().toString();
       if (text) summarizeText(text, "affiliate");
-      else openOverlay('<div class="fbs-error">Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!</div>', false);
+      else
+        openOverlay(
+          '<div class="fbs-error">Vui lòng bôi đen đoạn văn bản trước khi bấm Hotkey!</div>',
+          false,
+        );
     }
     if (msg.action === "unshorten-result") {
       if (msg.error) {
-        openOverlay('<div class="fbs-error">' + esc(msg.error) + '</div>', false);
+        openOverlay(
+          '<div class="fbs-error">' + esc(msg.error) + "</div>",
+          false,
+        );
       } else if (msg.text) {
-        navigator.clipboard.writeText(msg.text)
-          .catch(() => openOverlay('<div class="fbs-error">Lỗi ghi clipboard. Link gốc là:<br><code>' + esc(msg.text) + '</code></div>', false));
+        navigator.clipboard
+          .writeText(msg.text)
+          .catch(() =>
+            openOverlay(
+              '<div class="fbs-error">Lỗi ghi clipboard. Link gốc là:<br><code>' +
+                esc(msg.text) +
+                "</code></div>",
+              false,
+            ),
+          );
       }
     }
   });
-
 
   // === INJECT BUTTON ===
   function inject(target, seeMoreClickable, textContainer, seeMoreOriginal) {
@@ -1378,7 +2040,8 @@
     const isInline = !!(seeMoreOriginal && seeMoreOriginal.parentElement);
     const wrap = document.createElement("span");
     if (isInline) {
-      wrap.style.cssText = "display:inline;position:relative;vertical-align:baseline;";
+      wrap.style.cssText =
+        "display:inline;position:relative;vertical-align:baseline;";
     } else {
       wrap.className = "fbs-wrap";
     }
@@ -1389,22 +2052,31 @@
     // 1) Insert after "Xem thêm" text element (don't wrap/move it)
     if (!inserted && seeMoreOriginal && seeMoreOriginal.parentElement) {
       try {
-        seeMoreOriginal.parentElement.insertBefore(wrap, seeMoreOriginal.nextSibling);
+        seeMoreOriginal.parentElement.insertBefore(
+          wrap,
+          seeMoreOriginal.nextSibling,
+        );
         inserted = true;
-      } catch (e) { }
+      } catch (e) {}
     }
 
     // 2) Insert after clickable
     if (!inserted && seeMoreClickable && seeMoreClickable.parentElement) {
       try {
-        seeMoreClickable.parentElement.insertBefore(wrap, seeMoreClickable.nextSibling);
+        seeMoreClickable.parentElement.insertBefore(
+          wrap,
+          seeMoreClickable.nextSibling,
+        );
         inserted = true;
-      } catch (e) { }
+      } catch (e) {}
     }
 
     // 3) Append to text container
     if (!inserted && textContainer) {
-      try { textContainer.appendChild(wrap); inserted = true; } catch (e) { }
+      try {
+        textContainer.appendChild(wrap);
+        inserted = true;
+      } catch (e) {}
     }
 
     // 4) Fallback absolute
@@ -1415,25 +2087,40 @@
       target.appendChild(wrap);
     }
 
-    const btnEl = wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
+    const btnEl =
+      wrap.querySelector(".fbs-btn") || wrap.querySelector(".fbs-btn-inline");
     btnEl.addEventListener("click", async (e) => {
       e.stopPropagation();
       const type = "summary";
       const title = "Đang tóm tắt...";
-      openOverlay('<div class="fbs-loading"><div class="fbs-spinner"></div><span>' + title + '</span></div>', false, type);
+      openOverlay(
+        '<div class="fbs-loading"><div class="fbs-spinner"></div><span>' +
+          title +
+          "</span></div>",
+        false,
+        type,
+      );
 
       // Expand to get full text
       if (seeMoreClickable) {
-        try { seeMoreClickable.click(); } catch (_) { }
-        await new Promise(r => setTimeout(r, 1200));
+        try {
+          seeMoreClickable.click();
+        } catch (_) {}
+        await new Promise((r) => setTimeout(r, 1200));
       }
 
-      const text = cleanText(extractMainContent(textContainer || target) || (textContainer || target).innerText || "");
+      const text = cleanText(
+        extractMainContent(textContainer || target) ||
+          (textContainer || target).innerText ||
+          "",
+      );
 
       // Collapse back: Facebook no longer has "Ẩn bớt" button.
       // Re-click the same "Xem thêm" element to toggle back.
       if (seeMoreClickable) {
-        try { seeMoreClickable.click(); } catch (_) { }
+        try {
+          seeMoreClickable.click();
+        } catch (_) {}
       }
 
       await summarizeText(text, type, textContainer || target);
@@ -1445,7 +2132,12 @@
     if (!textContainer) return;
     if ((textContainer.innerText || "").trim().length < MIN_LEN / 2) return;
     const target = findInjectTarget(textContainer);
-    if (injected.has(target) || target.querySelector(".fbs-wrap") || target.querySelector(".fbs-btn-inline")) return;
+    if (
+      injected.has(target) ||
+      target.querySelector(".fbs-wrap") ||
+      target.querySelector(".fbs-btn-inline")
+    )
+      return;
     inject(target, findClickable(sm), textContainer, sm);
   }
 
@@ -1455,7 +2147,10 @@
     if (floatingToolbar) return;
     floatingToolbar = document.createElement("div");
     floatingToolbar.className = "fbs-floating-toolbar";
-    floatingToolbar.innerHTML = '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' + ICON_BASE64 + '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button>' +
+    floatingToolbar.innerHTML =
+      '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' +
+      ICON_BASE64 +
+      '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button>' +
       '<button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
     document.body.appendChild(floatingToolbar);
 
@@ -1469,14 +2164,20 @@
       const text = sel.toString().trim();
       if (text) {
         floatingToolbar.classList.remove("fbs-visible");
-        const anchor = sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer.parentElement : null;
+        const anchor =
+          sel.rangeCount > 0
+            ? sel.getRangeAt(0).startContainer.parentElement
+            : null;
         summarizeText(text, action, anchor);
       }
     });
 
-    document.addEventListener("scroll", () => {
-      if (floatingToolbar.classList.contains("fbs-visible")) floatingToolbar.classList.remove("fbs-visible");
-    }, { capture: true, passive: true });
+    const scrollHandler = () => {
+      if (floatingToolbar.classList.contains("fbs-visible"))
+        floatingToolbar.classList.remove("fbs-visible");
+    };
+    document.addEventListener("scroll", scrollHandler, { capture: true, passive: true });
+    listeners.push({ element: document, event: "scroll", handler: scrollHandler, options: { capture: true, passive: true } });
   }
 
   function handleSelection() {
@@ -1495,31 +2196,39 @@
         return;
       }
       const top = rect.top + window.scrollY - 44;
-      const left = rect.left + window.scrollX + (rect.width / 2) - 80;
+      const left = rect.left + window.scrollX + rect.width / 2 - 80;
       floatingToolbar.style.top = top + "px";
       floatingToolbar.style.left = left + "px";
       floatingToolbar.classList.add("fbs-visible");
     }, 0);
   }
 
-  document.addEventListener("mouseup", (e) => {
+  const mouseupHandler = (e) => {
     if (floatingToolbar && floatingToolbar.contains(e.target)) return;
     handleSelection();
-  });
+  };
+  document.addEventListener("mouseup", mouseupHandler);
+  listeners.push({ element: document, event: "mouseup", handler: mouseupHandler });
 
-  document.addEventListener("mousedown", (e) => {
+  const mousedownHandler = (e) => {
     if (floatingToolbar && !floatingToolbar.contains(e.target)) {
       floatingToolbar.classList.remove("fbs-visible");
     }
-  });
+  };
+  document.addEventListener("mousedown", mousedownHandler);
+  listeners.push({ element: document, event: "mousedown", handler: mousedownHandler });
 
   // === REDDIT ===
   function scanRedditPosts() {
-    const posts = document.querySelectorAll('shreddit-post, div[data-testid="post-container"]');
+    const posts = document.querySelectorAll(
+      'shreddit-post, div[data-testid="post-container"]',
+    );
     for (const post of posts) {
       if (post.dataset.fbsScanned) continue;
       post.dataset.fbsScanned = "1";
-      const textEl = post.querySelector('[data-testid="post-content"], .md, [slot="text-body"]');
+      const textEl = post.querySelector(
+        '[data-testid="post-content"], .md, [slot="text-body"]',
+      );
       if (!textEl) continue;
       if ((textEl.innerText || "").trim().length < MIN_LEN) continue;
       inject(post, null, textEl);
@@ -1533,10 +2242,14 @@
       if (a.dataset.fbsUnshorten) continue;
       a.dataset.fbsUnshorten = "1";
       const btn = document.createElement("span");
-      btn.innerHTML = ' <span title="Bóc Link Không Cookie" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:0px 6px 1px;border-radius:6px;background:rgba(255,107,107,0.15);color:#ff6b6b;font-size:0.85em;font-weight:bold;margin-left:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Bóc Link</span>';
+      btn.innerHTML =
+        ' <span title="Bóc Link Không Cookie" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:0px 6px 1px;border-radius:6px;background:rgba(255,107,107,0.15);color:#ff6b6b;font-size:0.85em;font-weight:bold;margin-left:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Bóc Link</span>';
       btn.querySelector("span").addEventListener("click", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        chrome.runtime.sendMessage({ action: "unshorten-shopee-inline", url: a.href }).catch(() => { });
+        e.preventDefault();
+        e.stopPropagation();
+        chrome.runtime
+          .sendMessage({ action: "unshorten-shopee-inline", url: a.href })
+          .catch(() => {});
       });
       a.insertAdjacentElement("afterend", btn);
     }
@@ -1557,6 +2270,11 @@
   scan();
   setTimeout(scan, 500);
   setTimeout(scan, 1500);
-  new MutationObserver(() => debouncedScan()).observe(document.body, { childList: true, subtree: true });
-  setInterval(scan, 5000);
+  const scanObserver = new MutationObserver(() => debouncedScan());
+  scanObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+  observers.push(scanObserver);
+  scanTimer = setInterval(scan, 5000);
 })();

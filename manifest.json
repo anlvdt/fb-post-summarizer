@@ -12,7 +12,8 @@
     "cookies",
     "scripting",
     "alarms",
-    "notifications"
+    "notifications",
+    "clipboardRead"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
@@ -37,12 +38,8 @@
         "https://www.linkedin.com/*",
         "https://www.reddit.com/*"
       ],
-      "js": [
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
+      "js": ["utils.js", "content.js", "auto-pilot.js"],
+      "css": ["content.css"],
       "run_at": "document_end"
     },
     {

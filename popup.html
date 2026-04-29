@@ -67,8 +67,23 @@
         <label for="customAffPrompt">Prompt Affiliate</label>
         <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
       </div>
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="useHeuristicEval">
+          <span>Dùng heuristic thay AI eval (Agent mode)</span>
+        </label>
+        <div class="field-hint">Bỏ qua bước AI chấm điểm, dùng keyword matching để quyết định đăng/bỏ. Tiết kiệm 1 API call/bài nhưng kém chính xác hơn.</div>
+      </div>
       <button id="saveBtn" class="btn btn-primary">Lưu cài đặt</button>
       <div id="status" class="status"></div>
+
+      <!-- Debug Panel (Test Mode) -->
+      <div id="debugPanel" class="debug-panel" style="display:none;margin-top:20px;padding:15px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9;">
+        <h4 style="margin:0 0 10px 0;color:#666;">🧪 Test Mode Debug</h4>
+        <button id="testBtn" class="btn btn-secondary" style="margin-right:10px;">Test kết nối</button>
+        <button id="clearCacheBtn" class="btn btn-secondary">Clear Cache</button>
+        <div id="debugInfo" style="margin-top:10px;font-size:12px;color:#666;"></div>
+      </div>
     </div>
 
     <!-- API Keys Tab -->
