@@ -13,8 +13,13 @@ node_modules/
 # Internal docs (not part of the extension)
 Bộ các quy tắc VnReview*
 KARPATHY-AI-LEARNING-GUIDE*
+OPTIMIZATION_REPORT.md
+CLAUDE-CODE-FREE-GUIDE.md
 cropper.py
 *.pyc
 
 # Repomix
 repomix-output.*
+
+# API keys — never commit
+env.js

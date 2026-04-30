@@ -144,11 +144,6 @@ if (typeof fetchWithTimeout === "undefined") {
   };
 }
 
-// Queue for saveHistory to prevent race conditions (deprecated, using StorageBatcher now)
-function queueSaveHistory(...args) {
-  saveHistory(...args);
-}
-
 async function injectAndSend(tabId, message) {
   try {
     await chrome.scripting.insertCSS({
@@ -968,111 +963,142 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // === HEURISTIC SCORING (thay thế AI eval để tiết kiệm API call) ===
 // Đánh giá nhanh dựa trên keywords, patterns, độ dài — không cần gọi AI
+// Baseline thấp (default-reject): bài phải có tín hiệu dương rõ ràng mới qua ngưỡng >= 5
 function heuristicScore(text) {
   if (!text || text.length < 30) return 1;
 
   const lower = text.toLowerCase();
-  let score = 5; // Baseline trung bình
+  let score = 3; // Baseline thấp — default reject, cần tín hiệu dương để qua 5
 
-  // === POSITIVE signals: công nghệ, AI, tips hữu ích ===
-  const techKeywords = [
-    'ai', 'llm', 'gpt', 'claude', 'gemini', 'chatgpt', 'openai', 'machine learning',
-    'deep learning', 'neural', 'transformer', 'python', 'javascript', 'typescript',
-    'react', 'node', 'api', 'github', 'open source', 'docker', 'kubernetes',
-    'linux', 'macos', 'ios', 'android', 'chrome', 'firefox', 'vscode',
-    'database', 'sql', 'mongodb', 'redis', 'aws', 'azure', 'gcp', 'cloud',
-    'security', 'bảo mật', 'hack', 'vulnerability', 'exploit',
-    'startup', 'saas', 'devops', 'cicd', 'automation', 'tool',
-    'chip', 'gpu', 'cpu', 'ram', 'ssd', 'benchmark',
-    'iphone', 'samsung', 'pixel', 'macbook', 'laptop', 'smartphone',
-    'update', 'cập nhật', 'phiên bản', 'version', 'release',
-    'lập trình', 'code', 'coding', 'developer', 'framework', 'library',
-    'mã nguồn', 'thuật toán', 'algorithm',
+  // === TIER 1A: AI/LLM brands — ưu tiên cao nhất (+3/hit, tối đa +6) ===
+  const aiBrands = [
+    'claude', 'anthropic', 'chatgpt', 'openai', 'gpt-4', 'gpt-3', 'gpt4',
+    'gemini', 'google deepmind', 'llama', 'mistral', 'deepseek', 'qwen',
+    'grok', 'copilot', 'perplexity', 'midjourney', 'sora', 'dall-e',
+    'stable diffusion', 'runway ml', 'large language model', 'trí tuệ nhân tạo',
+    'google ai studio', 'notebooklm', 'meta ai', 'microsoft ai', 'amazon bedrock',
   ];
-  const tipKeywords = [
-    'cách', 'hướng dẫn', 'tutorial', 'tips', 'trick', 'mẹo',
-    'bước 1', 'bước 2', 'step', 'how to', 'guide',
-    'tối ưu', 'optimize', 'productivity', 'workflow',
+  let aiBoost = 0;
+  for (const kw of aiBrands) {
+    if (lower.includes(kw)) aiBoost = Math.min(aiBoost + 3, 6);
+  }
+  score += aiBoost;
+
+  // === TIER 1B: AI subscription / free-tier deals (+2 bonus trên AI boost) ===
+  // "Claude Pro miễn phí", "ChatGPT Plus trial", "Gemini Advanced gói free"
+  const freeSignals = ['miễn phí', 'free tier', 'free plan', 'dùng thử', 'trial ', 'gói miễn', 'đăng ký miễn', 'tháng miễn phí', 'promo code'];
+  if (aiBoost > 0 && freeSignals.some((kw) => lower.includes(kw))) score += 2;
+
+  // === TIER 1C: Security incidents — quan tâm cao (+2.5 nếu có 2+ tín hiệu, +1.5 nếu 1) ===
+  const securityKeywords = [
+    'data breach', 'rò rỉ dữ liệu', 'lộ dữ liệu', 'rò rỉ thông tin',
+    'tấn công mạng', 'tin tặc', 'hacker tấn',
+    'ransomware', 'malware', 'mã độc', 'phishing',
+    'lỗ hổng bảo mật', 'bảo mật nghiêm trọng', 'zero-day',
+    'vulnerability', 'exploit', 'an ninh mạng',
   ];
+  const secHits = securityKeywords.filter((kw) => lower.includes(kw)).length;
+  if (secHits >= 2) score += 2.5;
+  else if (secHits === 1) score += 1.5;
+
+  // === TIER 2: Tech companies / flagship hardware (+2/hit, tối đa +3) ===
+  const techBrands = [
+    'iphone', 'ipad', 'macbook', 'apple silicon', 'vision pro',
+    'samsung galaxy', 'pixel phone', 'oneplus',
+    'nvidia', 'rtx ', 'geforce', 'h100', 'a100',
+    'microsoft', 'windows 11', 'azure', 'google cloud',
+    'qualcomm', 'snapdragon', ' tsmc', 'intel core',
+  ];
+  let brandBoost = 0;
+  for (const kw of techBrands) {
+    if (lower.includes(kw)) brandBoost = Math.min(brandBoost + 2, 3);
+  }
+  score += brandBoost;
+
+  // === TIER 3: Tech topics (+1/hit, tối đa +2) ===
+  const techTopics = [
+    'machine learning', 'deep learning', 'neural network', 'llm',
+    'github', 'open source', 'mã nguồn mở',
+    'lập trình', 'developer', 'kỹ sư phần mềm',
+    'bảo mật', 'cybersecurity',
+    'startup', 'unicorn', 'gọi vốn', 'funding', 'series a', 'series b',
+    'chip ', 'vi xử lý', 'bán dẫn', 'semiconductor',
+    'python', 'javascript', 'typescript', 'react', 'docker', 'kubernetes',
+    'aws ', 'devops', 'cicd', 'api ', 'framework',
+  ];
+  const topicHits = techTopics.filter((kw) => lower.includes(kw)).length;
+  score += Math.min(topicHits, 2);
+
+  // === TIER 4: Tips/hướng dẫn (chỉ tính khi có tech anchor) ===
+  const tipKeywords = ['hướng dẫn', 'tutorial', 'tips', 'thủ thuật', 'mẹo hay', 'tối ưu', 'productivity'];
+  const techAnchors = ['điện thoại', 'máy tính', 'laptop', 'app ', 'phần mềm', 'chrome', 'android', 'ios '];
+  const hasTip = tipKeywords.some((kw) => lower.includes(kw));
+  const hasTechAnchor = techAnchors.some((kw) => lower.includes(kw));
+  if (hasTip && hasTechAnchor) score += 1.5;
+  else if (hasTip) score += 0.3;
+
+  // === News signals (+1 nếu bài có tín hiệu tin tức) ===
   const newsKeywords = [
-    'ra mắt', 'launch', 'announce', 'công bố', 'chính thức',
-    'triệu', 'tỷ', 'million', 'billion', 'funding', 'ipo',
-    'nghiên cứu', 'research', 'paper', 'study',
+    'ra mắt', 'vừa ra mắt', 'chính thức ra', 'công bố', 'announce',
+    'phiên bản mới', 'cập nhật mới', 'billion', 'triệu usd', 'funding',
+    'nghiên cứu mới', 'research paper',
   ];
+  if (newsKeywords.some((kw) => lower.includes(kw))) score += 1;
 
-  // Đếm tech keywords (mỗi keyword +0.5, cap +3)
-  let techHits = 0;
-  for (const kw of techKeywords) {
-    if (lower.includes(kw)) techHits++;
-  }
-  score += Math.min(techHits * 0.5, 3);
+  // === URL presence (+0.5): bài có link thường là chia sẻ tin ===
+  if (/https?:\/\//.test(text)) score += 0.5;
 
-  // Tips/hướng dẫn: +1.5
-  let tipHits = 0;
-  for (const kw of tipKeywords) {
-    if (lower.includes(kw)) tipHits++;
-  }
-  if (tipHits >= 2) score += 1.5;
-  else if (tipHits >= 1) score += 0.8;
-
-  // News signals: +1
-  for (const kw of newsKeywords) {
-    if (lower.includes(kw)) { score += 1; break; }
-  }
-
-  // === NEGATIVE signals: spam, drama, cá nhân ===
+  // === NEGATIVE: spam bán hàng (-3 mỗi hit, cap -5) ===
   const spamKeywords = [
-    'mua ngay', 'giá sốc', 'sale', 'flash sale', 'voucher', 'mã giảm',
-    'shopee', 'lazada', 'tiki', 'affiliate', 'link mua',
-    'dm để', 'inbox', 'liên hệ ngay', 'số lượng có hạn',
+    'mua ngay', 'giá sốc', 'flash sale', 'voucher', 'mã giảm',
+    'shopee.vn', 'lazada.vn', 'tiki.vn',
+    'dm để', 'inbox để', 'liên hệ ngay', 'số lượng có hạn',
     'free ship', 'miễn phí vận chuyển',
   ];
-  const personalKeywords = [
-    'buồn quá', 'vui quá', 'hôm nay mình', 'cảm ơn mọi người',
-    'chúc mừng sinh nhật', 'happy birthday', 'miss you',
-    'drama', 'bóc phốt', 'lừa đảo', 'cảnh báo lừa',
-    'tuyển dụng', 'hiring', 'tìm việc',
-  ];
-
   let spamHits = 0;
   for (const kw of spamKeywords) {
     if (lower.includes(kw)) spamHits++;
   }
-  score -= Math.min(spamHits * 1.5, 4);
+  score -= Math.min(spamHits * 3, 5);
 
-  let personalHits = 0;
-  for (const kw of personalKeywords) {
-    if (lower.includes(kw)) personalHits++;
+  // === NEGATIVE: nội dung cá nhân/drama/off-topic (-2 mỗi hit, cap -4) ===
+  const offTopicKeywords = [
+    'chúc mừng sinh nhật', 'happy birthday', 'bóc phốt', 'drama',
+    'sao hàn', 'kpop', 'phim bộ', 'bóng đá', 'ngoại hạng anh',
+    'công thức nấu', 'cách nấu', 'tuyển dụng', 'cần tuyển',
+    'chiêm tinh', 'tarot', 'tử vi',
+  ];
+  let offTopicHits = 0;
+  for (const kw of offTopicKeywords) {
+    if (lower.includes(kw)) offTopicHits++;
   }
-  score -= Math.min(personalHits * 1, 3);
+  score -= Math.min(offTopicHits * 2, 4);
 
   // === LENGTH heuristic ===
-  // Bài quá ngắn (< 100 chars) thường là status rỗng
   if (text.length < 100) score -= 1;
-  // Bài có độ dài vừa phải (200-2000) thường chất lượng hơn
-  if (text.length >= 200 && text.length <= 2000) score += 0.5;
+  if (text.length >= 200 && text.length <= 3000) score += 0.5;
 
-  // === URL/link presence: bài có link thường là chia sẻ tin ===
-  if (/https?:\/\//.test(text)) score += 0.5;
-
-  // Clamp to 1-9
   return Math.max(1, Math.min(9, Math.round(score)));
 }
 
 // === AUTO-PILOT EVALUATE SUMMARY LOGIC ===
 async function evaluateSummaryForAgent(payload, tabId) {
-  const prompt = `Đánh giá bài viết sau có hữu ích để chia sẻ không.
+  const prompt = `Bạn là biên tập viên tech. Đánh giá bài tóm tắt sau có xứng đáng chia sẻ lên trang công nghệ không.
 
-ĐĂNG (score 7-9) nếu bài thuộc 1 trong các loại:
-- Công nghệ, AI, ML, LLM, tool mới, app mới, GitHub repo
-- Bảo mật, lập trình, hướng dẫn kỹ thuật
-- Tin tức tech, review sản phẩm công nghệ
-- Tips/tricks hữu ích, automation
+ĐĂNG (score 7-9) — ưu tiên cao nhất cho:
+- AI/LLM mới: Claude, ChatGPT, Gemini, Anthropic, OpenAI, DeepSeek, Llama, Grok, Mistral...
+- Đăng ký AI miễn phí / giá rẻ: gói free tier, trial, promo của các AI tool lớn
+- Bảo mật: data breach, lỗ hổng nghiêm trọng, ransomware, tấn công quy mô lớn
+- Sản phẩm tech nổi bật: iPhone, MacBook, chip AI, GPU thế hệ mới
+- Startup tech gọi vốn lớn, IPO, M&A đáng chú ý
+- Lập trình, công cụ dev, GitHub repo nổi bật, framework mới
 
-BỎ QUA (score 1-3) nếu:
-- Status cá nhân, tâm sự, drama
-- Quảng cáo, bán hàng, affiliate
-- Tin rác, spam, clickbait vô nghĩa
+BỎ QUA (score 1-3) — bài thuộc loại:
+- Status cá nhân, cảm xúc, tâm sự, drama
+- Quảng cáo, bán hàng thông thường (shopee, lazada, affiliate hàng tiêu dùng)
+- Ẩm thực, du lịch, thời trang, thể thao, giải trí không liên quan tech
+- Tin tức chính trị, xã hội không liên quan tech
+- Tuyển dụng, chúc mừng, sự kiện cá nhân
 
 Trả về JSON: {"score": 7}`;
 
@@ -1611,7 +1637,7 @@ async function handleStream(
   // Nếu useHeuristicEval = true → bỏ qua, dùng heuristic sau khi có summary
   if (agentMode && !useHeuristicOnly) {
     systemPrompt +=
-      "\n\nAGENT MODE: Trước khi viết tóm tắt, hãy tự đánh giá bài có đáng chia sẻ không (công nghệ/AI/tips hữu ích = 7-9, status cá nhân/drama/spam = 1-3). Đặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là số 1-9), sau đó xuống dòng và viết tóm tắt bình thường. Ví dụ:\n[SCORE:8]\n**Tiêu đề hook**\nNội dung tóm tắt...";
+      "\n\nAGENT MODE: Trước khi viết tóm tắt, chấm điểm bài theo tiêu chí sau:\n- 8-9: Tin AI hot (Claude/ChatGPT/Gemini/Anthropic/OpenAI/DeepSeek ra tính năng mới, đăng ký AI miễn phí/giá rẻ), sự cố bảo mật nghiêm trọng (data breach, ransomware, lỗ hổng lớn)\n- 7: Sản phẩm tech nổi bật, startup gọi vốn lớn, lập trình/tool dev quan trọng\n- 4-6: Tech liên quan nhưng không nổi bật\n- 1-3: Status cá nhân, drama, quảng cáo bán hàng, ẩm thực, thể thao, giải trí không liên quan tech\nĐặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là 1-9), xuống dòng rồi viết tóm tắt. Ví dụ:\n[SCORE:8]\n**Tiêu đề hook**\nNội dung tóm tắt...";
   }
   const streamFns = {
     groq: callGroqStream,

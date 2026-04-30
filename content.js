@@ -34,14 +34,6 @@
     if (d.minLength) MIN_LEN = d.minLength;
   });
 
-  function isContextValid() {
-    try {
-      return !!chrome.runtime?.id;
-    } catch (e) {
-      return false;
-    }
-  }
-
   function hashText(text) {
     let h = 0;
     for (let i = 0; i < text.length; i++)

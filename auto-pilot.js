@@ -8,6 +8,20 @@
   let isAgentRunning = false;
   let postedUrls = new Set();
 
+  // === STATE ===
+  let state = "SCANNING";
+  let currentPost = null;
+  let currentPostUrl = "";
+  let lastPostTime = 0;
+  let lastPostedText = "";
+  let stateEnteredAt = 0;
+  let pendingScore = null;
+  let ownProfileName = "";
+  let postsToday = 0;
+  let postsTodayDate = "";
+  let agentAlwaysRun = false;
+  let loopTimer = null;
+
   // === HUMAN-LIKE TIMING ===
   // Tạo delay ngẫu nhiên theo phân phối gaussian (tự nhiên hơn uniform random)
   function humanDelay(minMs, maxMs) {
@@ -78,31 +92,19 @@
     } catch (_) {}
   }
 
-  // === STATE ===
-  let state = "SCANNING";
-  let currentPost = null;
-  let currentPostUrl = "";
-  let lastPostTime = 0;
-  let lastPostedText = "";
-  let stateEnteredAt = 0;
-  let pendingScore = null;
-  let ownProfileName = "";
-  let postsToday = 0;
-  let postsTodayDate = "";
-  let agentAlwaysRun = false;
-  let loopTimer = null;
-
-  // === LIMITS (research-based, safe for Facebook) ===
-  const MAX_POSTS_PER_DAY = 5;
-  const MIN_POST_INTERVAL_MS = 20 * 60 * 1000; // 20 phút giữa 2 bài
+  // === LIMITS ===
+  const MAX_POSTS_PER_DAY = 3;              // 3 bài/ngày — đủ chất lượng, không spam
+  const MIN_POST_INTERVAL_MS = 90 * 60 * 1000; // 90 phút — trải đều 3 khung giờ vàng
   const SUMMARY_TIMEOUT_MS = 90 * 1000;
   const EVAL_TIMEOUT_MS = 30 * 1000;
-  const EXECUTING_TIMEOUT_MS = 90 * 1000; // 90s cho toàn bộ post + comment flow
+  const EXECUTING_TIMEOUT_MS = 120 * 1000; // 2 phút cho toàn bộ post + comment flow
 
+  // Giờ vàng Facebook Việt Nam (engagement cao nhất)
+  // 7-9 sáng | 11-13 trưa | 19-22 tối — cắt 22-24 vì engagement thấp
   function isGoldenHour() {
     const d = new Date();
     const t = d.getHours() + d.getMinutes() / 60;
-    return (t >= 7 && t < 9) || (t >= 11 && t < 13.5) || (t >= 19 && t < 24);
+    return (t >= 7 && t < 9) || (t >= 11 && t < 13) || (t >= 19 && t < 22);
   }
 
 
@@ -113,7 +115,7 @@
     if (!agentAlwaysRun && !isGoldenHour()) {
       state = "SLEEPING";
       updateStatus("SLEEP", "#6c5ce7");
-      loopTimer = setTimeout(runAgentLoop, 60000);
+      loopTimer = setTimeout(runAgentLoop, 5 * 60 * 1000); // check lại sau 5 phút
       return;
     }
 
@@ -147,6 +149,9 @@
 
         // === SKIP OWN POST ===
         if (shouldSkipPost(postNode)) continue;
+
+        // === SKIP OFF-TOPIC CONTENT (pre-filter — saves API call) ===
+        if (!isTargetContent(postNode)) continue;
 
         // === SKIP ALREADY POSTED ===
         try {
@@ -262,6 +267,121 @@
     loopTimer = setTimeout(runAgentLoop, 2000);
   }
 
+  // === PRE-FILTER: classify post topic before spending API call ===
+  // Reads visible DOM text and rejects off-topic content (ads, drama, food, sport...)
+  // Returns true only for tech/AI/tips/deals content matching the target profile.
+  function isTargetContent(postNode) {
+    try {
+      const clone = postNode.cloneNode(true);
+      // Strip buttons and tiny UI labels so they don't pollute keyword matching
+      clone.querySelectorAll("script, style").forEach((el) => el.remove());
+      const text = (clone.innerText || clone.textContent || "").toLowerCase().trim();
+      if (text.length < 80) return false;
+
+      // === HARD REJECT — clear off-topic signals ===
+      const REJECT_PATTERNS = [
+        "mua ngay", "flash sale", "mã giảm giá", "voucher mua", "giá sốc",
+        "shopee.vn", "lazada.vn", "tiki.vn", "sendo.vn",
+        "dm để", "inbox mình", "liên hệ ngay", "số lượng có hạn",
+        "chúc mừng sinh nhật", "happy birthday", "hbd ",
+        "công thức nấu", "cách nấu", "nấu ăn ngon", "món ngon",
+        "bóng đá", "ngoại hạng anh", "premier league", "world cup",
+        "bóc phốt", "kpop", "sao hàn", "phim bộ", "diễn viên",
+        "tuyển dụng", "cần tuyển", "nộp cv",
+        "chiêm tinh", "tarot", "tử vi",
+      ];
+      for (const kw of REJECT_PATTERNS) {
+        if (text.includes(kw)) {
+          log("info", "Pre-filter: hard reject", { reason: kw, preview: text.substring(0, 50) });
+          return false;
+        }
+      }
+
+      // === AI / LLM brands — strong accept (unambiguous names) ===
+      const AI_BRANDS = [
+        "claude", "chatgpt", "gpt-4", "gpt-3", "gpt4", "gpt3",
+        "llama", "mistral", "gemini", "anthropic", "openai",
+        "deepseek", "qwen", "grok", "copilot", "perplexity",
+        "midjourney", "sora", "dall-e", "stable diffusion",
+        "runway ml", "llm", "large language model",
+        "trí tuệ nhân tạo", "mô hình ngôn ngữ",
+        "google ai studio", "notebooklm", "google ai ", "meta ai",
+        "microsoft ai", "amazon bedrock", "hugging face",
+      ];
+      for (const kw of AI_BRANDS) {
+        if (text.includes(kw)) return true;
+      }
+
+      // === AI subscription / free-tier deals — explicit pass ===
+      // "Claude Pro miễn phí", "ChatGPT Plus trial", "Gemini Advanced free 3 tháng"...
+      // Must combine a general AI term with a free/deal signal to avoid false positives.
+      const AI_TERMS_BROAD = ["claude", "chatgpt", "gemini", "openai", "anthropic", "copilot", "gpt", "ai pro", "ai plus", "ai premium"];
+      const FREE_SIGNALS = ["miễn phí", "free tier", "free plan", "dùng thử", "trial ", "gói miễn", "đăng ký miễn", "tháng miễn phí", "promo code", "coupon ai"];
+      const hasAITerm = AI_TERMS_BROAD.some((kw) => text.includes(kw));
+      const hasFreeSig = FREE_SIGNALS.some((kw) => text.includes(kw));
+      if (hasAITerm && hasFreeSig) return true;
+
+      // === Security incidents — always accept ===
+      const SECURITY_TOPICS = [
+        "data breach", "rò rỉ dữ liệu", "lộ dữ liệu", "rò rỉ thông tin",
+        "tấn công mạng", "tin tặc", "hacker tấn",
+        "ransomware", "malware", "mã độc", "phishing",
+        "lỗ hổng bảo mật", "bảo mật nghiêm trọng",
+        "zero-day", "vulnerability", "exploit",
+        "cybersecurity", "an ninh mạng",
+      ];
+      for (const kw of SECURITY_TOPICS) {
+        if (text.includes(kw)) return true;
+      }
+
+      // === Tech companies / flagship products ===
+      const TECH_BRANDS = [
+        "iphone", "ipad", "macbook", "apple silicon", "vision pro",
+        "samsung galaxy", "pixel phone", "oneplus",
+        "nvidia", "rtx ", "geforce", " gpu ", "a100", "h100",
+        "microsoft", "windows 11", "azure",
+        "google cloud", " gcp", " aws ", "amazon web",
+        "qualcomm", "snapdragon", "apple m",
+      ];
+      for (const kw of TECH_BRANDS) {
+        if (text.includes(kw)) return true;
+      }
+
+      // === Tech topics ===
+      const TECH_TOPICS = [
+        "machine learning", "deep learning", "neural network",
+        "github", "open source", "mã nguồn mở",
+        "lập trình", "developer", "kỹ sư phần mềm", "software engineer",
+        "bảo mật", "cybersecurity",
+        "startup", "unicorn", "gọi vốn", "funding round", "series a", "series b",
+        "chip ", "vi xử lý", "bán dẫn", "semiconductor",
+        "ra mắt", "phiên bản mới", "bản cập nhật", "vừa ra",
+      ];
+      for (const kw of TECH_TOPICS) {
+        if (text.includes(kw)) return true;
+      }
+
+      // === Tips/tutorials require a tech anchor to avoid food/lifestyle tips ===
+      const TIP_TRIGGERS = ["hướng dẫn", "tutorial", "thủ thuật", "mẹo hay", "cách dùng", "tối ưu"];
+      const TECH_ANCHORS = ["điện thoại", "máy tính", "laptop", "app ", "phần mềm", "website", "chrome", "android", "ios "];
+      const hasTip = TIP_TRIGGERS.some((kw) => text.includes(kw));
+      const hasTechAnchor = TECH_ANCHORS.some((kw) => text.includes(kw));
+      if (hasTip && hasTechAnchor) return true;
+
+      // === Tech/device deals require a device anchor ===
+      const DEAL_TRIGGERS = ["khuyến mãi", "giảm giá", "sale "];
+      const DEVICE_ANCHORS = ["iphone", "samsung", "laptop", "màn hình", "tai nghe", "phần mềm"];
+      const hasDeal = DEAL_TRIGGERS.some((kw) => text.includes(kw));
+      const hasDevice = DEVICE_ANCHORS.some((kw) => text.includes(kw));
+      if (hasDeal && hasDevice) return true;
+
+      log("info", "Pre-filter: no target signal", { len: text.length, preview: text.substring(0, 60) });
+      return false;
+    } catch (_) {
+      return true; // On error: don't block, let the post through
+    }
+  }
+
   // === SKIP OWN POST LOGIC ===
   function shouldSkipPost(postNode) {
     try {
@@ -339,16 +459,7 @@
         sourceUrl: rawSrcUrl || "(EMPTY - will use page URL)",
       });
 
-      // Rate limit check
-      const now = Date.now();
-      if (now - lastPostTime < MIN_POST_INTERVAL_MS) {
-        const waitMs = MIN_POST_INTERVAL_MS - (now - lastPostTime);
-        log("info", "Rate limit wait", { seconds: Math.round(waitMs / 1000) });
-        updateStatus("WAIT", "#b2bec3");
-        await wait(waitMs);
-      }
-
-      if (!isAgentRunning) return; // Check again after wait
+      if (!isAgentRunning) return;
 
       // Close summary panel
       try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
@@ -365,7 +476,7 @@
         postsToday++;
         if (rawSrcUrl) postedUrls.add(rawSrcUrl);
         try { chrome?.storage?.local?.set({ agentPostedUrls: Array.from(postedUrls) }); } catch (_) {}
-        log("info", "Post successful!", { postsToday, nextIn: "20 min" });
+        log("info", "Post successful!", { postsToday, nextAllowed: "90 min" });
       } else {
         log("warn", "Post failed", { reason: result?.reason || "unknown" });
       }
@@ -376,9 +487,10 @@
       state = "SCANNING";
       updateStatus("SCAN", "#00b894");
       if (loopTimer) clearTimeout(loopTimer);
-      // Human-like cooldown: 90-180s sau mỗi post attempt
-      const cooldown = humanDelay(90000, 180000);
-      log("info", "Cooldown before next scan", { seconds: Math.round(cooldown / 1000) });
+      // Nghỉ 10-20 phút sau mỗi lần post (kể cả failed).
+      // Rate limit thực sự (90 phút) được xử lý trong handleAgentDecision.
+      const cooldown = humanDelay(10 * 60 * 1000, 20 * 60 * 1000);
+      log("info", "Post cooldown", { minutes: Math.round(cooldown / 60000) });
       loopTimer = setTimeout(runAgentLoop, cooldown);
     }
   }
@@ -400,6 +512,21 @@
     (async () => {
       try {
         if (score >= 5) {
+          // === RATE LIMIT CHECK — trước khi vào EXECUTING ===
+          // Kiểm tra ở đây để tránh bug: await wait(18 phút) bên trong EXECUTING
+          // bị EXECUTING_TIMEOUT (2 phút) cắt ngang → race condition.
+          const now = Date.now();
+          if (now - lastPostTime < MIN_POST_INTERVAL_MS) {
+            const waitMs = MIN_POST_INTERVAL_MS - (now - lastPostTime);
+            log("info", "Rate limit: quá gần bài trước, bỏ qua + ngủ", { waitMin: Math.round(waitMs / 60000) });
+            updateStatus("WAIT", "#b2bec3");
+            try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
+            state = "SCANNING";
+            // Ngủ đến hết interval + buffer nhỏ trước khi quét lại
+            loopTimer = setTimeout(runAgentLoop, waitMs + humanDelay(60000, 120000));
+            return;
+          }
+
           const resultEl = document.querySelector(".fbs-result");
           const summaryText = resultEl ? resultEl.innerText.trim() : "";
           if (!summaryText) {
