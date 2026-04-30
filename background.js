@@ -35,8 +35,8 @@ if (typeof featureFlags === 'undefined') {
   };
 }
 
-// Initialize StorageBatcher for history
-const historyBatcher = new StorageBatcher(500);
+// Initialize StorageBatcher for history (must be after importScripts)
+const historyBatcher = typeof StorageBatcher !== 'undefined' ? new StorageBatcher(500) : { set: () => chrome.storage.local.set.bind(chrome.storage.local) };
 
 // Storage schema version
 const STORAGE_VERSION = 1;
@@ -1241,6 +1241,11 @@ Luôn trả về ĐÚNG ĐỊNH DẠNG JSON (không có markdown code block):
               source: payload.source,
               image: payload.image,
             })
+            .catch(() => {});
+        } else {
+          // Score too low or no status — release agent
+          chrome.tabs
+            .sendMessage(tabId, { action: "agent_decision", score: data.score || 0 })
             .catch(() => {});
         }
         return;

@@ -658,10 +658,7 @@
       try { 
         createAgentUI(); 
         log("info", "Agent UI initialized"); 
-        
-        // Tự động bật Agent (nếu không phải giờ vàng nó sẽ tự sleep)
-        isAgentRunning = true;
-        startAgent();
+        // Agent OFF by default — user must click to start
       } catch (_) {}
     }, 2000);
   }

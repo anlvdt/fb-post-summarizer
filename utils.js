@@ -45,6 +45,10 @@ class LRUCache {
     this.cache.clear();
   }
 
+  keys() {
+    return this.cache.keys();
+  }
+
   get size() {
     return this.cache.size;
   }

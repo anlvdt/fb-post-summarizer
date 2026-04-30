@@ -1501,8 +1501,6 @@
 
     // Non-Facebook platforms
     if (!element) return url;
-    // Non-Facebook: thử tìm trong DOM
-    if (!element) return url;
     let postContainer = element;
     for (let i = 0; i < 20; i++) {
       if (
