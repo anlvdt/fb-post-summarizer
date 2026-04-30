@@ -1186,6 +1186,31 @@
       }
     }
 
+    // Step 8: Đóng modal "Bài viết" mà Facebook mở sau khi đăng/comment
+    // Facebook tự mở post dialog sau khi đăng — agent cần đóng để tiếp tục scroll feed.
+    {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        // Ưu tiên: nút Đóng trong dialog (aria-label tiếng Việt và tiếng Anh)
+        const closeBtn =
+          document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"]') ||
+          document.querySelector('div[role="dialog"] [aria-label="Close"][role="button"]') ||
+          document.querySelector('[aria-label="Đóng"][role="button"]') ||
+          document.querySelector('[aria-label="Close"][role="button"]');
+        if (closeBtn) {
+          console.log("[Agent] Step 8: Đóng modal FB post");
+          closeBtn.click();
+          await new Promise((r) => setTimeout(r, 800));
+        } else {
+          // Fallback: Escape key
+          document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
+          );
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      } catch (_) {}
+    }
+
     return { ok: true };
   };
 

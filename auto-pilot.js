@@ -93,8 +93,11 @@
   }
 
   // === LIMITS ===
-  const MAX_POSTS_PER_DAY = 3;              // 3 bài/ngày — đủ chất lượng, không spam
-  const MIN_POST_INTERVAL_MS = 90 * 60 * 1000; // 90 phút — trải đều 3 khung giờ vàng
+  // HOUR mode: 3 bài/ngày chỉ trong giờ vàng — quality, không spam
+  // ALW mode:  5 bài/ngày, 24/7 — dùng khi cần bắt tin nóng ngoài giờ vàng
+  const MAX_POSTS_PER_DAY_HOUR = 3;
+  const MAX_POSTS_PER_DAY_ALW  = 5;
+  const MIN_POST_INTERVAL_MS = 90 * 60 * 1000; // 90 phút giữa 2 bài (cả 2 mode)
   const SUMMARY_TIMEOUT_MS = 90 * 1000;
   const EVAL_TIMEOUT_MS = 30 * 1000;
   const EXECUTING_TIMEOUT_MS = 120 * 1000; // 2 phút cho toàn bộ post + comment flow
@@ -420,11 +423,12 @@
     try {
       if (!isAgentRunning) { log("info", "Agent stopped - aborting post"); return; }
 
-      // Daily limit
+      // Daily limit — khác nhau theo mode
       const today = new Date().toDateString();
       if (postsTodayDate !== today) { postsTodayDate = today; postsToday = 0; }
-      if (postsToday >= MAX_POSTS_PER_DAY) {
-        log("warn", "Daily limit reached", { postsToday });
+      const maxToday = agentAlwaysRun ? MAX_POSTS_PER_DAY_ALW : MAX_POSTS_PER_DAY_HOUR;
+      if (postsToday >= maxToday) {
+        log("warn", "Daily limit reached", { postsToday, limit: maxToday, mode: agentAlwaysRun ? "ALW" : "HOUR" });
         updateStatus("LIMIT", "#636e72");
         return;
       }
@@ -477,6 +481,19 @@
         if (rawSrcUrl) postedUrls.add(rawSrcUrl);
         try { chrome?.storage?.local?.set({ agentPostedUrls: Array.from(postedUrls) }); } catch (_) {}
         log("info", "Post successful!", { postsToday, nextAllowed: "90 min" });
+
+        // Defensive: đóng bất kỳ modal FB nào còn sót (fbsAgentPost Step 8 có thể chưa đủ)
+        await wait(1000);
+        try {
+          const leftoverDialog =
+            document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"]') ||
+            document.querySelector('div[role="dialog"] [aria-label="Close"][role="button"]');
+          if (leftoverDialog) {
+            log("info", "Closing leftover FB dialog");
+            leftoverDialog.click();
+            await wait(500);
+          }
+        } catch (_) {}
       } else {
         log("warn", "Post failed", { reason: result?.reason || "unknown" });
       }
