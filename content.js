@@ -804,7 +804,9 @@
                       console.warn("Image paste failed", e);
                     }
                   }
-                  if (editor) autoPasteToLexical(editor, text, imgFile);
+                  // Thêm footer "Nguồn dưới cmt đầu" vào text trước khi paste
+                  const textWithFooter = text + "\n\n—\nNguồn dưới cmt đầu";
+                  if (editor) autoPasteToLexical(editor, textWithFooter, imgFile);
                   btn.innerHTML =
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
                 }, 800);
@@ -991,10 +993,8 @@
 
     // Build final post text
     let postText = summaryText.trim();
-    // Luôn thêm dòng "Nguồn dưới cmt đầu" vì comment bắt buộc
-    if (!postText.includes("Nguồn:") && !postText.includes("nguồn:")) {
-      postText += "\n\n—\nNguồn dưới cmt đầu";
-    }
+    // LUÔN thêm dòng "Nguồn dưới cmt đầu" — bất kể nội dung summary
+    postText += "\n\n—\nNguồn dưới cmt đầu";
 
     console.log("[Agent] fbsAgentPost called:", {
       textLength: postText.length,
@@ -1219,8 +1219,69 @@
   window.fbsExtractPermalink = extractPostPermalink;
   window.fbsExtractAuthor = extractPostAuthor;
 
-  // Async version: lấy permalink (fallback sang sync vì menu ⋯ không có "Sao chép liên kết" trên newsfeed)
+  // Async version: lấy permalink (sử dụng nút Share để copy link chính xác tuyệt đối, fallback sang DOM)
   window.fbsExtractPermalinkAsync = async function (element) {
+    try {
+      if (SITE === "facebook" && element) {
+        let postContainer = element;
+        for (let i = 0; i < 20; i++) {
+          if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+          postContainer = postContainer.parentElement;
+          if (postContainer.getAttribute("role") === "article") break;
+        }
+
+        const shareBtn = Array.from(postContainer.querySelectorAll('div[role="button"]')).find(b => {
+          const label = (b.getAttribute("aria-label") || "").toLowerCase();
+          return label.includes("chia sẻ") || label.includes("share") || label.includes("gửi cho bạn bè") || label.includes("send this to friends");
+        });
+
+        if (shareBtn) {
+          const oldClip = await navigator.clipboard.readText().catch(() => "");
+          shareBtn.click();
+          await new Promise(r => setTimeout(r, 800));
+
+          const dialog = document.querySelector('div[role="dialog"]');
+          if (dialog) {
+             let copyBtn = null;
+             const spans = Array.from(dialog.querySelectorAll('span[dir="auto"], div[dir="auto"]'));
+             for (const el of spans) {
+                const t = (el.textContent || "").toLowerCase().trim();
+                if (("sao chép liên kết copy link").includes(t) && t.length > 5) {
+                   copyBtn = el.closest('[role="button"], [role="menuitem"], div[tabindex="0"], div.x1i10hfl');
+                   if (copyBtn) break;
+                }
+             }
+
+             if (copyBtn) {
+               copyBtn.click();
+               await new Promise(r => setTimeout(r, 1200));
+               
+               const newClip = await navigator.clipboard.readText().catch(() => "");
+               if (newClip && newClip.includes("facebook.com") && newClip !== oldClip) {
+                 try {
+                   const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
+                   if (closeBtn) closeBtn.click();
+                 } catch (_) {}
+                 
+                 try {
+                   const u = new URL(newClip);
+                   return u.origin + u.pathname + (u.searchParams.has("fbid") ? "?fbid=" + u.searchParams.get("fbid") : "");
+                 } catch (_) {
+                   return newClip;
+                 }
+               }
+             }
+             
+             try {
+               const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
+               if (closeBtn) closeBtn.click();
+               else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+             } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+
     return extractPostPermalink(element) || "";
   };
 

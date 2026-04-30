@@ -655,7 +655,14 @@
 
   if (isValidPage) {
     setTimeout(() => {
-      try { createAgentUI(); log("info", "Agent UI initialized"); } catch (_) {}
+      try { 
+        createAgentUI(); 
+        log("info", "Agent UI initialized"); 
+        
+        // Tự động bật Agent (nếu không phải giờ vàng nó sẽ tự sleep)
+        isAgentRunning = true;
+        startAgent();
+      } catch (_) {}
     }, 2000);
   }
 })();
