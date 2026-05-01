@@ -130,11 +130,76 @@
         log("warn", state + " timeout - resetting", { elapsed });
         try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
         state = "SCANNING";
+        currentPost = null;
+        currentPostUrl = "";
+        pendingScore = null;
         updateStatus("SCAN", "#00b894");
       } else {
         loopTimer = setTimeout(runAgentLoop, 2000);
         return;
       }
+    }
+
+    // Guard: WAITING_SUMMARY timeout
+    if (state === "WAITING_SUMMARY") {
+      const elapsed = Date.now() - stateEnteredAt;
+      if (elapsed > SUMMARY_TIMEOUT_MS) {
+        log("warn", "WAITING_SUMMARY timeout", { elapsed });
+        try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
+        state = "SCANNING";
+        currentPost = null;
+        currentPostUrl = "";
+        pendingScore = null;
+        loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+        return;
+      }
+
+      // Check if summary is ready
+      const copyBtn = document.querySelector(".fbs-copy-btn");
+      const panel = document.querySelector(".fbs-panel");
+      if (copyBtn && copyBtn.style.display !== "none" && panel && panel.classList.contains("fbs-visible")) {
+        const resultEl = document.querySelector(".fbs-result");
+        if (resultEl) {
+          const summaryText = resultEl.innerText.trim();
+          if (!summaryText || summaryText.includes("API Error") || summaryText.includes("Lỗi API") || summaryText.includes("quá tải") || summaryText.includes("Extension đã cập nhật")) {
+            log("warn", "Bad summary, skipping", { preview: (summaryText || "").substring(0, 50) });
+            try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
+            state = "SCANNING";
+            currentPost = null;
+            currentPostUrl = "";
+            loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+            return;
+          }
+
+          // Summary ready → chuyển sang WAITING_EVAL
+          state = "WAITING_EVAL";
+          stateEnteredAt = Date.now();
+          updateStatus("EVAL", "#fdcb6e");
+          log("info", "Summary ready, waiting for score");
+
+          // Handle buffered score (race condition fix)
+          if (pendingScore !== null) {
+            log("info", "Processing buffered score", { score: pendingScore });
+            const s = pendingScore;
+            pendingScore = null;
+            handleAgentDecision(s);
+            return;
+          }
+        }
+      }
+      // Also check for error state in panel (summary failed without proper error message)
+      const errorEl = document.querySelector(".fbs-error");
+      if (errorEl) {
+        log("warn", "Summary error detected", { text: (errorEl.textContent || "").substring(0, 50) });
+        try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
+        state = "SCANNING";
+        currentPost = null;
+        currentPostUrl = "";
+        loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+        return;
+      }
+      loopTimer = setTimeout(runAgentLoop, 2000);
+      return;
     }
 
     // === SCANNING STATE ===
@@ -218,53 +283,6 @@
         loopTimer = setTimeout(runAgentLoop, scrollPause);
         return;
       }
-    }
-
-    // === WAITING_SUMMARY STATE ===
-    if (state === "WAITING_SUMMARY") {
-      const elapsed = Date.now() - stateEnteredAt;
-      if (elapsed > SUMMARY_TIMEOUT_MS) {
-        log("warn", "WAITING_SUMMARY timeout", { elapsed });
-        try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
-        state = "SCANNING";
-        pendingScore = null;
-        loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
-        return;
-      }
-
-      // Check if summary is ready
-      const copyBtn = document.querySelector(".fbs-copy-btn");
-      const panel = document.querySelector(".fbs-panel");
-      if (copyBtn && copyBtn.style.display !== "none" && panel && panel.classList.contains("fbs-visible")) {
-        const resultEl = document.querySelector(".fbs-result");
-        if (resultEl) {
-          const summaryText = resultEl.innerText.trim();
-          if (!summaryText || summaryText.includes("API Error") || summaryText.includes("Lỗi API") || summaryText.includes("quá tải")) {
-            log("warn", "Bad summary, skipping", { preview: (summaryText || "").substring(0, 50) });
-            try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
-            state = "SCANNING";
-            loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
-            return;
-          }
-
-          // Summary ready → chuyển sang WAITING_EVAL
-          state = "WAITING_EVAL";
-          stateEnteredAt = Date.now();
-          updateStatus("EVAL", "#fdcb6e");
-          log("info", "Summary ready, waiting for score");
-
-          // Handle buffered score (race condition fix)
-          if (pendingScore !== null) {
-            log("info", "Processing buffered score", { score: pendingScore });
-            const s = pendingScore;
-            pendingScore = null;
-            handleAgentDecision(s);
-            return;
-          }
-        }
-      }
-      loopTimer = setTimeout(runAgentLoop, 2000);
-      return;
     }
 
     loopTimer = setTimeout(runAgentLoop, 2000);
@@ -439,7 +457,7 @@
         throw new Error("Missing summary text or post reference");
       }
 
-      // Extract metadata
+      // Extract metadata — retry permalink extraction if empty
       let imageUrl = "";
       let rawSrcUrl = "";
       try {
@@ -454,12 +472,15 @@
             rawSrcUrl = location.href;
           }
         }
-      } catch (_) {}
+      } catch (extractErr) {
+        log("warn", "Metadata extraction error", { error: extractErr.message });
+      }
 
       log("info", "Executing post", {
         textLength: summaryText.length,
         preview: summaryText.substring(0, 60),
         hasImage: !!imageUrl,
+        imageUrl: imageUrl ? imageUrl.substring(0, 80) : "(none)",
         sourceUrl: rawSrcUrl || "(EMPTY - will use page URL)",
       });
 
@@ -482,20 +503,51 @@
         try { chrome?.storage?.local?.set({ agentPostedUrls: Array.from(postedUrls) }); } catch (_) {}
         log("info", "Post successful!", { postsToday, nextAllowed: "90 min" });
 
-        // Defensive: đóng bất kỳ modal FB nào còn sót (fbsAgentPost Step 8 có thể chưa đủ)
-        await wait(1000);
-        try {
-          const leftoverDialog =
-            document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"]') ||
-            document.querySelector('div[role="dialog"] [aria-label="Close"][role="button"]');
-          if (leftoverDialog) {
-            log("info", "Closing leftover FB dialog");
-            leftoverDialog.click();
-            await wait(500);
-          }
-        } catch (_) {}
+        // Defensive: đóng TẤT CẢ modal FB còn sót (fbsAgentPost Step 8 có thể chưa đủ)
+        // Retry loop vì Facebook có thể mở nhiều dialog chồng nhau
+        for (let closeAttempt = 0; closeAttempt < 5; closeAttempt++) {
+          await wait(800);
+          try {
+            const dialogs = document.querySelectorAll('div[role="dialog"]');
+            if (dialogs.length === 0) break;
+            const lastDialog = dialogs[dialogs.length - 1];
+            const closeBtn =
+              lastDialog.querySelector('[aria-label="Đóng"][role="button"]') ||
+              lastDialog.querySelector('[aria-label="Close"][role="button"]') ||
+              lastDialog.querySelector('[aria-label="Đóng"]') ||
+              lastDialog.querySelector('[aria-label="Close"]');
+            if (closeBtn) {
+              log("info", "Closing leftover FB dialog #" + (closeAttempt + 1));
+              closeBtn.click();
+            } else {
+              document.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
+              );
+            }
+          } catch (_) { break; }
+        }
+
+        // Scroll về đầu feed để sẵn sàng quét bài mới
+        await wait(500);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        log("info", "Scrolled back to top of feed");
       } else {
         log("warn", "Post failed", { reason: result?.reason || "unknown" });
+        // Đóng dialog nếu có (post failed nhưng dialog có thể vẫn mở)
+        try {
+          const dialogs = document.querySelectorAll('div[role="dialog"]');
+          for (const d of dialogs) {
+            const closeBtn = d.querySelector('[aria-label="Đóng"][role="button"]') ||
+                             d.querySelector('[aria-label="Close"][role="button"]');
+            if (closeBtn) closeBtn.click();
+          }
+          if (dialogs.length > 0) {
+            await wait(500);
+            document.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
+            );
+          }
+        } catch (_) {}
       }
     } catch (err) {
       log("error", "Execute post failed", { error: err.message });
@@ -625,6 +677,8 @@
     currentPostUrl = "";
     window._fbsAgentMode = false;
     updateStatus("OFF", "#d63031");
+    // Close any open summary panel
+    try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
     log("info", "Agent stopped");
   }
 
