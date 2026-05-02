@@ -1526,6 +1526,8 @@ function postProcessOutput(output, sourceText, type) {
   processed = processed
     .replace(/^(tóm tắt|summary|status|review|affiliate)\s*[:：]\s*/i, "")
     .trim();
+  // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
+  processed = processed.replace(/^Đoạn\s*\d+\s*[:：]\s*/gim, "");
 
   // Xử lý tiêu đề dòng đầu tiên
   if (type && type.startsWith("summary")) {

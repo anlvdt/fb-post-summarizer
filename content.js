@@ -409,11 +409,13 @@
   }
 
   function copyResult() {
-    // If in edit mode, get text from textarea; otherwise use edited cache or display text
+    // If in edit mode, get text from textarea; otherwise use stored plain text
     const textarea = panelBody?.querySelector(".fbs-edit-textarea");
-    const text = textarea
+    const rawText = textarea
       ? textarea.value
-      : panelBody?.dataset?.editedText || panelBody?.innerText || "";
+      : panelBody?.dataset?.editedText || panelBody?.dataset?.plainText || panelBody?.innerText || "";
+    // Format cho Facebook khi copy
+    const text = formatForFacebook(rawText);
     navigator.clipboard.writeText(text).then(() => {
       const btn = panel.querySelector(".fbs-copy-btn");
       const orig = btn.innerHTML;
@@ -432,16 +434,18 @@
     if (isSummarizing || !panelBody) return;
 
     try {
-      // Lấy text từ panel — ưu tiên edited text, rồi fbs-result element (tránh lấy text nút bấm)
+      // Lấy text từ panel — ưu tiên edited text, rồi plain text gốc (tránh innerText bị lỗi format)
       const textarea = panelBody.querySelector(".fbs-edit-textarea");
-      const resultEl = panelBody.querySelector(".fbs-result");
       let text = "";
       if (textarea) {
         text = textarea.value;
       } else if (panelBody.dataset.editedText) {
         text = panelBody.dataset.editedText;
-      } else if (resultEl) {
-        text = resultEl.innerText;
+      } else if (panelBody.dataset.plainText) {
+        text = panelBody.dataset.plainText;
+      } else {
+        const resultEl = panelBody.querySelector(".fbs-result");
+        text = resultEl ? resultEl.innerText : "";
       }
       text = text.trim();
       if (!text) return;
@@ -500,13 +504,95 @@
       if (backdrop) backdrop.classList.remove("fbs-visible");
       openFacebookComposer(text, cleanUrl, imageUrl, author, source);
     } catch (_) {
-      // Fallback
-      const resultEl = panelBody?.querySelector(".fbs-result");
-      const text = resultEl ? resultEl.innerText : panelBody?.innerText || "";
+      // Fallback — ưu tiên plain text gốc
+      const text = panelBody?.dataset?.plainText || panelBody?.querySelector(".fbs-result")?.innerText || panelBody?.innerText || "";
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
       openFacebookComposer(text.trim(), "", "", "", "");
     }
+  }
+
+  // === FORMAT TEXT FOR FACEBOOK STATUS ===
+  // Chuẩn hóa plain text trước khi paste vào Facebook composer
+  // Đảm bảo: tiêu đề VIẾT HOA, đoạn cách dòng trống, glossary format đúng, nguồn cuối bài
+  function formatForFacebook(rawText) {
+    if (!rawText || !rawText.trim()) return rawText;
+    const lines = rawText.split("\n");
+    const output = [];
+    let isFirstNonEmpty = true;
+    let prevWasEmpty = false;
+    let inGlossary = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+
+      // Empty line
+      if (trimmed.length === 0) {
+        // Collapse multiple empty lines into one
+        if (!prevWasEmpty && output.length > 0) {
+          output.push("");
+          prevWasEmpty = true;
+        }
+        continue;
+      }
+      prevWasEmpty = false;
+
+      // Strip markdown bold ** from any line
+      let clean = trimmed.replace(/\*\*(.*?)\*\*/g, "$1");
+      // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
+      clean = clean.replace(/^Đoạn\s*\d+\s*[:：]\s*/i, "");
+
+      // First non-empty line → ensure UPPERCASE title
+      if (isFirstNonEmpty) {
+        isFirstNonEmpty = false;
+        clean = clean.toUpperCase();
+        output.push(clean);
+        continue;
+      }
+
+      // Glossary heading: *** Giải thích thuật ngữ:
+      if (/^\*\*\*/.test(clean)) {
+        inGlossary = true;
+        // Ensure blank line before glossary
+        if (output.length > 0 && output[output.length - 1] !== "") {
+          output.push("");
+        }
+        const heading = clean.replace(/^\*\*\*\s*/, "").toUpperCase();
+        output.push("*** " + heading);
+        continue;
+      }
+
+      // Glossary bullet items: normalize to "- Term: explanation"
+      if (inGlossary && /^[·•\-]\s/.test(clean)) {
+        const bulletText = clean.replace(/^[·•\-]\s*/, "");
+        output.push("- " + bulletText);
+        continue;
+      }
+
+      // End glossary on non-bullet line
+      if (inGlossary && !/^[·•\-]\s/.test(clean)) {
+        inGlossary = false;
+      }
+
+      // Source footer line: — or ---
+      if (clean === "—" || clean === "---") {
+        // Ensure blank line before footer
+        if (output.length > 0 && output[output.length - 1] !== "") {
+          output.push("");
+        }
+        output.push("—");
+        continue;
+      }
+
+      // Regular bullet lines outside glossary: normalize to "- "
+      if (/^[·•]\s/.test(clean)) {
+        clean = "- " + clean.replace(/^[·•]\s*/, "");
+      }
+
+      output.push(clean);
+    }
+
+    return output.join("\n");
   }
 
   function openFacebookComposer(text, sourceUrl, imageUrl, author, source) {
@@ -653,6 +739,12 @@
       element.focus();
       const dataTransfer = new DataTransfer();
       dataTransfer.setData("text/plain", text);
+      // Facebook Lexical cần text/html để giữ line breaks
+      const html = text
+        .split("\n")
+        .map((line) => (line === "" ? "<br>" : "<p>" + line + "</p>"))
+        .join("");
+      dataTransfer.setData("text/html", html);
       if (file) dataTransfer.items.add(file);
       element.dispatchEvent(
         new ClipboardEvent("paste", {
@@ -771,7 +863,13 @@
       .querySelector(".fbs-sp-open-fb")
       .addEventListener("click", async () => {
         const btn = preview.querySelector(".fbs-sp-open-fb");
-        await navigator.clipboard.writeText(text);
+        // Format text cho Facebook trước khi copy
+        const fbText = formatForFacebook(
+          text.includes("Nguồn dưới cmt đầu")
+            ? text
+            : text + "\n\n—\nNguồn dưới cmt đầu"
+        );
+        await navigator.clipboard.writeText(fbText);
         btn.innerHTML =
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
         if (SITE === "facebook") {
@@ -814,7 +912,8 @@
                   const textWithFooter = text.includes("Nguồn dưới cmt đầu")
                     ? text
                     : text + "\n\n—\nNguồn dưới cmt đầu";
-                  if (editor) autoPasteToLexical(editor, textWithFooter, imgFile);
+                  const formattedText = formatForFacebook(textWithFooter);
+                  if (editor) autoPasteToLexical(editor, formattedText, imgFile);
                   btn.innerHTML =
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
                 }, 800);
@@ -914,6 +1013,12 @@
     if (text) {
       const dtText = new DataTransfer();
       dtText.setData("text/plain", text);
+      // Facebook Lexical cần text/html để giữ line breaks
+      const html = text
+        .split("\n")
+        .map((line) => (line === "" ? "<br>" : "<p>" + line + "</p>"))
+        .join("");
+      dtText.setData("text/html", html);
       element.dispatchEvent(
         new ClipboardEvent("paste", {
           clipboardData: dtText,
@@ -1019,6 +1124,8 @@
     if (!postText.includes("Nguồn dưới cmt đầu")) {
       postText += "\n\n—\nNguồn dưới cmt đầu";
     }
+    // Format cho Facebook: chuẩn hóa tiêu đề, đoạn, glossary, nguồn
+    postText = formatForFacebook(postText);
 
     console.log("[Agent] fbsAgentPost called:", {
       textLength: postText.length,
@@ -1363,13 +1470,123 @@
     return d.innerHTML;
   }
   function fmt(t) {
-    return esc(t)
-      .replace(/\*\*\*(.*)/g, "<strong>$1</strong>") // *** heading (giải thích thuật ngữ)
-      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") // **bold**
-      .replace(/\*(.*?)\*/g, "<em>$1</em>") // *italic*
-      .replace(/^[-•·]\s*/gm, "· ") // normalize bullets to middle dot
-      .replace(/\n{2,}/g, "<br><br>") // dòng trống → khoảng cách đoạn
-      .replace(/\n/g, "<br>"); // 1 dòng → 1 br
+    const escaped = esc(t);
+    const lines = escaped.split("\n");
+    const parts = [];
+    let isFirstNonEmpty = true;
+    let inGlossary = false;
+    let inSourceFooter = false;
+    let glossaryLines = [];
+    let sourceLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
+      const trimmed = line.trim().replace(/^Đoạn\s*\d+\s*[:：]\s*/i, "");
+
+      // Detect source footer: line starting with — (em dash) or "Nguồn"
+      if (!inSourceFooter && (trimmed === "—" || trimmed === "---")) {
+        // Flush glossary if open
+        if (inGlossary && glossaryLines.length > 0) {
+          parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
+          glossaryLines = [];
+          inGlossary = false;
+        }
+        inSourceFooter = true;
+        sourceLines.push(trimmed);
+        continue;
+      }
+      if (inSourceFooter) {
+        sourceLines.push(trimmed);
+        continue;
+      }
+
+      // Detect glossary section: *** Giải thích thuật ngữ:
+      if (/^\*\*\*/.test(trimmed)) {
+        inGlossary = true;
+        const heading = trimmed.replace(/^\*\*\*\s*/, "");
+        glossaryLines.push('<div class="fbs-glossary-heading">' + heading + "</div>");
+        continue;
+      }
+
+      // Glossary bullet items: · Term: explanation
+      if (inGlossary && /^[·•\-]\s/.test(trimmed)) {
+        const bulletText = trimmed.replace(/^[·•\-]\s*/, "");
+        // Bold the term before the colon
+        const colonIdx = bulletText.indexOf(":");
+        if (colonIdx > 0) {
+          const term = bulletText.substring(0, colonIdx);
+          const explanation = bulletText.substring(colonIdx + 1);
+          glossaryLines.push('<div class="fbs-glossary-item"><strong>' + term + "</strong>:" + explanation + "</div>");
+        } else {
+          glossaryLines.push('<div class="fbs-glossary-item">' + bulletText + "</div>");
+        }
+        continue;
+      }
+
+      // End glossary if we hit a non-bullet, non-empty line
+      if (inGlossary && trimmed.length > 0 && !/^[·•\-]\s/.test(trimmed)) {
+        if (glossaryLines.length > 0) {
+          parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
+          glossaryLines = [];
+        }
+        inGlossary = false;
+      }
+
+      // Empty line → paragraph break
+      if (trimmed.length === 0) {
+        // Don't add break before first content or after title
+        if (parts.length > 0) parts.push('<div class="fbs-para-break"></div>');
+        continue;
+      }
+
+      // First non-empty line → title (ALL CAPS heading)
+      if (isFirstNonEmpty) {
+        isFirstNonEmpty = false;
+        // Apply inline formatting to title text
+        let titleHtml = trimmed
+          .replace(/\*\*(.*?)\*\*/g, "$1") // strip ** from title
+          .replace(/\*(.*?)\*/g, "$1"); // strip * from title
+        parts.push('<div class="fbs-title-line">' + titleHtml + "</div>");
+        continue;
+      }
+
+      // Regular bullet lines (outside glossary)
+      if (/^[·•\-]\s/.test(trimmed)) {
+        const bulletText = trimmed.replace(/^[·•\-]\s*/, "");
+        parts.push('<div class="fbs-bullet">· ' + fmtInline(bulletText) + "</div>");
+        continue;
+      }
+
+      // Numbered list items
+      if (/^\d+[\.\)]\s/.test(trimmed)) {
+        parts.push('<div class="fbs-bullet">' + fmtInline(trimmed) + "</div>");
+        continue;
+      }
+
+      // Regular paragraph
+      parts.push('<div class="fbs-para">' + fmtInline(trimmed) + "</div>");
+    }
+
+    // Flush remaining glossary
+    if (inGlossary && glossaryLines.length > 0) {
+      parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
+    }
+
+    // Flush source footer
+    if (sourceLines.length > 0) {
+      const footerText = sourceLines.filter(l => l !== "—" && l !== "---").join("<br>");
+      parts.push('<div class="fbs-source-footer">' + (footerText || "—") + "</div>");
+    }
+
+    return parts.join("");
+  }
+
+  // Inline formatting: bold, italic
+  function fmtInline(s) {
+    return s
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>");
   }
 
   // === BUTTONS ===
@@ -2140,6 +2357,7 @@
         false,
         type,
       );
+      if (panelBody) panelBody.dataset.plainText = summaryCache.get(cacheKey);
       return;
     }
 
@@ -2244,6 +2462,7 @@
           false,
           type,
         );
+        if (panelBody) panelBody.dataset.plainText = msg.full;
         // Agent mode: score đã được tính trong cùng lần gọi AI → gửi decision ngay, không cần eval riêng
         if (window._fbsAgentMode && typeof msg.agentScore === "number") {
           window.dispatchEvent(

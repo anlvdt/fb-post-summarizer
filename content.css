@@ -207,13 +207,15 @@
 }
 
 .fbs-panel-body {
-  padding: 18px 20px;
+  padding: 18px 22px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   color: #e4e6eb;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow-y: auto;
   flex: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .fbs-panel-body::-webkit-scrollbar {
@@ -234,19 +236,95 @@
 }
 
 .fbs-result {
-  white-space: pre-wrap;
+  white-space: normal;
   word-wrap: break-word;
 }
 
-.fbs-result br {
-  display: block;
-  content: "";
-  margin-top: 0.5em;
+/* Title line — ALL CAPS heading from AI output */
+.fbs-result .fbs-title-line {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: #f0e6ff;
+  margin-bottom: 2px;
+}
+
+/* Paragraph spacing */
+.fbs-result .fbs-para-break {
+  height: 10px;
+}
+
+/* Regular paragraph */
+.fbs-result .fbs-para {
+  margin-bottom: 2px;
+  line-height: 1.65;
+}
+
+/* Bullet items */
+.fbs-result .fbs-bullet {
+  padding-left: 12px;
+  text-indent: -12px;
+  margin-bottom: 3px;
+  line-height: 1.6;
+}
+
+/* Glossary section */
+.fbs-result .fbs-glossary {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(168, 85, 247, 0.06);
+  border-radius: 10px;
+  border-left: 3px solid rgba(168, 85, 247, 0.35);
+}
+
+.fbs-result .fbs-glossary-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: #d4b5ff;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 6px;
+}
+
+.fbs-result .fbs-glossary-item {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #c0c4cc;
+  padding: 2px 0;
+  padding-left: 10px;
+  text-indent: -10px;
+}
+
+.fbs-result .fbs-glossary-item::before {
+  content: "· ";
+  color: #a855f7;
+  font-weight: 700;
+}
+
+.fbs-result .fbs-glossary-item strong {
+  color: #e0d0f5;
+  font-weight: 600;
+}
+
+/* Source footer */
+.fbs-result .fbs-source-footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
 }
 
 .fbs-result strong {
   font-weight: 700;
   color: #d4b5ff;
+}
+
+.fbs-result em {
+  font-style: italic;
+  color: #c8d0e0;
 }
 
 .fbs-error {
@@ -260,23 +338,24 @@
 /* Post-processing quality warnings */
 .fbs-quality-warn {
   color: #ffa502;
-  padding: 8px 12px;
-  margin-top: 8px;
-  background: rgba(255, 165, 2, 0.1);
-  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  background: rgba(255, 165, 2, 0.08);
+  border-radius: 10px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   border-left: 3px solid #ffa502;
 }
 
 .fbs-quality-info {
   color: #74b9ff;
-  padding: 8px 12px;
-  margin-top: 8px;
-  background: rgba(116, 185, 255, 0.08);
-  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  background: rgba(116, 185, 255, 0.06);
+  border-radius: 10px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
+  border-left: 3px solid rgba(116, 185, 255, 0.5);
 }
 
 /* === TRANSLATE TOOLTIP === */
@@ -565,6 +644,43 @@
   color: #6c5ce7;
 }
 
+.fbs-panel[data-fbs-theme="light"] .fbs-result em {
+  color: #555;
+}
+
+/* Light theme: title line */
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-title-line {
+  color: #1c1e21;
+}
+
+/* Light theme: glossary */
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-glossary {
+  background: rgba(108, 92, 231, 0.05);
+  border-left-color: rgba(108, 92, 231, 0.3);
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-glossary-heading {
+  color: #6c5ce7;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-glossary-item {
+  color: #555;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-glossary-item::before {
+  color: #6c5ce7;
+}
+
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-glossary-item strong {
+  color: #333;
+}
+
+/* Light theme: source footer */
+.fbs-panel[data-fbs-theme="light"] .fbs-result .fbs-source-footer {
+  border-top-color: rgba(0, 0, 0, 0.08);
+  color: #999;
+}
+
 .fbs-panel[data-fbs-theme="light"] .fbs-loading {
   color: #65676b;
 }
@@ -589,14 +705,14 @@
   z-index: 2147483647;
   display: none;
   background: #1c1e21;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 4px;
+  padding: 4px 5px;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   animation: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .fbs-floating-toolbar.fbs-visible {
@@ -768,13 +884,13 @@
 }
 
 .fbs-sp-text {
-  padding: 12px 14px;
-  font-size: 13px;
-  line-height: 1.6;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.65;
   color: #e4e6eb;
   white-space: pre-wrap;
   word-wrap: break-word;
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
