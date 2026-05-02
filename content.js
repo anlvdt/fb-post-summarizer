@@ -562,16 +562,17 @@
         continue;
       }
 
-      // Glossary bullet items: normalize to "- Term: explanation"
-      if (inGlossary && /^[·•\-]\s/.test(clean)) {
-        const bulletText = clean.replace(/^[·•\-]\s*/, "");
-        output.push("- " + bulletText);
-        continue;
-      }
-
-      // End glossary on non-bullet line
-      if (inGlossary && !/^[·•\-]\s/.test(clean)) {
-        inGlossary = false;
+      // Glossary bullet items: add "- " to ALL lines in glossary mode
+      // Exit glossary only on footer separator (— or ---), not on non-bullet lines
+      if (inGlossary) {
+        if (clean === "—" || clean === "---") {
+          inGlossary = false;
+          // fall through to footer handling below
+        } else {
+          const bulletText = clean.replace(/^[·•\-]\s*/, "");
+          output.push("- " + bulletText);
+          continue;
+        }
       }
 
       // Source footer line: — or ---
@@ -740,9 +741,10 @@
       const dataTransfer = new DataTransfer();
       dataTransfer.setData("text/plain", text);
       // Facebook Lexical cần text/html để giữ line breaks
+      // Dùng <p><br></p> cho dòng trống — bare <br> giữa <p> bị Lexical bỏ qua
       const html = text
         .split("\n")
-        .map((line) => (line === "" ? "<br>" : "<p>" + line + "</p>"))
+        .map((line) => (line === "" ? "<p><br></p>" : "<p>" + line + "</p>"))
         .join("");
       dataTransfer.setData("text/html", html);
       if (file) dataTransfer.items.add(file);
@@ -971,7 +973,13 @@
 
     // Attempt 1: Via Canvas (fastest but fails on cross-origin taint)
     try {
-      const imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+      // Search by src, currentSrc (post-srcset resolution), or data-src
+      let imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+      if (!imgEl) {
+        imgEl = Array.from(document.querySelectorAll("img")).find(
+          (img) => img.currentSrc === imgSrc || img.getAttribute("data-src") === imgSrc,
+        ) || null;
+      }
       if (imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
         const canvas = document.createElement("canvas");
         canvas.width = imgEl.naturalWidth;
@@ -1014,9 +1022,10 @@
       const dtText = new DataTransfer();
       dtText.setData("text/plain", text);
       // Facebook Lexical cần text/html để giữ line breaks
+      // Dùng <p><br></p> cho dòng trống — bare <br> giữa <p> bị Lexical bỏ qua
       const html = text
         .split("\n")
-        .map((line) => (line === "" ? "<br>" : "<p>" + line + "</p>"))
+        .map((line) => (line === "" ? "<p><br></p>" : "<p>" + line + "</p>"))
         .join("");
       dtText.setData("text/html", html);
       element.dispatchEvent(
@@ -1915,11 +1924,25 @@
       return { w, h };
     }
 
-    // Helper: get effective image src (handles lazy loading via data-src)
+    // Helper: get best available image src
+    // Priority: currentSrc (browser-chosen after srcset) > src > data-src > srcset best
     function getImgSrc(img) {
+      // currentSrc is the URL actually rendered (respects srcset/sizes)
+      const cur = img.currentSrc || "";
+      if (cur && !cur.startsWith("data:")) return cur;
+      // Explicit src or lazy-load data attribute
       const src = img.src || img.getAttribute("data-src") || img.dataset.src || "";
-      if (!src || src.startsWith("data:")) return "";
-      return src;
+      if (src && !src.startsWith("data:")) return src;
+      // Last resort: parse srcset, pick highest-width entry for best quality
+      const srcset = img.getAttribute("srcset") || img.dataset.srcset || "";
+      if (srcset) {
+        const best = srcset.split(",")
+          .map(s => { const [u = "", d = ""] = s.trim().split(/\s+/); return { u, w: parseInt(d) || 0 }; })
+          .filter(e => e.u.startsWith("http"))
+          .sort((a, b) => b.w - a.w)[0];
+        if (best) return best.u;
+      }
+      return "";
     }
 
     // Helper: check if image is inside the post header area (avatar, author name)
@@ -1932,16 +1955,23 @@
       const parentLink = img.closest("a");
       if (parentLink) {
         const href = parentLink.href || "";
-        if (href && !href.includes("/photo") && !href.includes("/video") && !href.includes("fbid")) {
-          // Check if this link is in the first few children of the container (header area)
+        const isMediaLink = href.includes("/photo") || href.includes("/video") ||
+          href.includes("fbid") || href.includes("/reel") || href.includes("/media/") ||
+          href.includes("photo_id=") || href.includes("photo_fbid=");
+        if (href && !isMediaLink) {
+          // Profile/friends/timeline links in the header area contain avatars
+          const isProfileLink = href.includes("/friends") || href.includes("/timeline") ||
+            href.includes("profile_id=") || href.includes("/user/") ||
+            (/facebook\.com\/[^/?#]+\/?$/.test(href) && !href.includes("/groups/") && !href.includes("/pages/"));
           try {
             const linkRect = parentLink.getBoundingClientRect();
             const containerRect = container.getBoundingClientRect();
-            // If the link is in the top 120px of the container, it's likely header
-            if (linkRect.top - containerRect.top < 120) {
-              const { w } = getImgDimensions(img);
-              if (w > 0 && w < 100) return true; // Small image in header = avatar
-            }
+            const isTopArea = linkRect.top - containerRect.top < 120;
+            const { w } = getImgDimensions(img);
+            // Small image in top area = almost certainly avatar
+            if (isTopArea && w > 0 && w < 100) return true;
+            // Profile link anywhere = likely avatar/name area
+            if (isProfileLink && w > 0 && w < 150) return true;
           } catch (_) {}
         }
       }
@@ -1991,18 +2021,48 @@
 
       // 1. Look for images inside photo/video link containers (most reliable)
       const photoLinks = postContainer.querySelectorAll(
-        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="]',
+        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="photo_id="], a[href*="photo_fbid="], a[href*="/media/"]',
       );
       for (const link of photoLinks) {
         const img = link.querySelector("img");
         if (!img) continue;
+        if (isInHeaderArea(img, postContainer)) continue;
         const src = getImgSrc(img);
         if (!src) continue;
         const { w } = getImgDimensions(img);
-        if (w >= 100 || w === 0) return src; // w === 0 means not loaded yet, still likely a content image
+        if (w >= 80 || w === 0) return src;
       }
 
-      // 2. Look for large images (>200px wide) that are NOT circular (avatar)
+      // 1.5. Images with Facebook's explicit media-completion marker
+      // data-visualcompletion="media-vc-image" is set by FB on actual post media
+      const mediaMarked = postContainer.querySelectorAll(
+        'img[data-visualcompletion="media-vc-image"], img[data-visualcompletion="media_image"], img[data-imgperflogname]',
+      );
+      for (const img of mediaMarked) {
+        if (isInHeaderArea(img, postContainer)) continue;
+        if (isCircular(img)) continue;
+        const src = getImgSrc(img);
+        if (!src) continue;
+        const { w } = getImgDimensions(img);
+        if (w >= 80 || w === 0) return src;
+      }
+
+      // 1.6. Link preview cards (external URLs shared on FB) — image inside div[role="link"] or article
+      // These are often under 200px wide (card thumbnail), so the 200px threshold misses them
+      const linkPreviewImgs = postContainer.querySelectorAll(
+        'div[role="link"] img, a[target="_blank"] img, a[rel*="noopener"] img',
+      );
+      for (const img of linkPreviewImgs) {
+        if (isInHeaderArea(img, postContainer)) continue;
+        if (isCircular(img)) continue;
+        const src = getImgSrc(img);
+        if (!src) continue;
+        const { w, h } = getImgDimensions(img);
+        // Card thumbnails can be as small as 150x100
+        if ((w >= 150 && h >= 100) || w === 0) return src;
+      }
+
+      // 2. Look for large images that are NOT circular (avatar)
       const allImgs = postContainer.querySelectorAll("img");
       let bestImg = null;
       let bestArea = 0;
@@ -2010,26 +2070,26 @@
         const src = getImgSrc(img);
         if (!src) continue;
         const { w, h } = getImgDimensions(img);
-        // Must be large enough to be a content image
-        if (w > 0 && w < 200 && h > 0 && h < 200) continue;
+        // Must be large enough to be a content image (lowered from 200 to 150)
+        if (w > 0 && w < 150 && h > 0 && h < 150) continue;
         // Skip circular (avatar)
         if (isCircular(img)) continue;
         // Skip images in header area (avatar, author name area)
         if (isInHeaderArea(img, postContainer)) continue;
-        // Skip if inside a link to user profile (not photo/video)
+        // Skip if inside a non-media profile link
         const parentLink = img.closest("a");
         if (parentLink) {
           const href = parentLink.href || "";
-          if (
-            href &&
-            !href.includes("/photo") &&
-            !href.includes("/video") &&
-            !href.includes("fbid")
-          ) {
-            // Link doesn't point to photo/video — likely avatar or other UI element
+          const isMediaLink = href.includes("/photo") || href.includes("/video") ||
+            href.includes("fbid") || href.includes("/reel") || href.includes("/media/") ||
+            href.includes("photo_id=") || href.includes("photo_fbid=");
+          if (href && !isMediaLink) {
+            // Non-media link + image under 400px wide → skip (likely avatar/UI element)
             if (w > 0 && w < 400) continue;
           }
         }
+        // Skip emoji/sticker/icon images (usually in src URL)
+        if (src.includes("/emoji/") || src.includes("/sticker/") || src.includes("emoji.php")) continue;
         // Pick the largest image
         const area = w * h;
         if (area > bestArea || (area === 0 && !bestImg)) {
@@ -2040,15 +2100,27 @@
       if (bestImg) return bestImg;
 
       // 3. Check for background-image on divs (Facebook sometimes uses CSS backgrounds)
-      const bgDivs = postContainer.querySelectorAll('div[style*="background-image"]');
+      // Check both inline style and computed style (FB may apply via class)
+      const bgDivs = postContainer.querySelectorAll('div[style*="background-image"], span[style*="background-image"]');
       for (const div of bgDivs) {
         const style = div.getAttribute("style") || "";
         const match = style.match(/background-image:\s*url\(["']?(https?:\/\/[^"')]+)["']?\)/);
         if (match && match[1]) {
-          // Verify it's not a tiny icon
           const rect = div.getBoundingClientRect();
-          if (rect.width >= 200 && rect.height >= 150) return match[1];
+          if (rect.width >= 150 && rect.height >= 100) return match[1];
         }
+      }
+      // Also check computed background-image on direct children of post container
+      // (avoids scanning all descendants for perf — FB uses computed bg for story/text-post images)
+      for (const child of postContainer.children) {
+        try {
+          const rect = child.getBoundingClientRect();
+          if (rect.width < 150 || rect.height < 100) continue;
+          const computed = getComputedStyle(child).backgroundImage || "";
+          if (!computed || computed === "none") continue;
+          const match = computed.match(/url\(["']?(https?:\/\/[^"')]+)["']?\)/);
+          if (match && match[1]) return match[1];
+        } catch (_) {}
       }
     } else {
       // Non-Facebook: original logic
