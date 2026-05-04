@@ -452,10 +452,24 @@
 
       // Lấy metadata từ DOM element (nếu có)
       const _element = lastSummarizeParams?._element || null;
-      let rawUrl = _element ? extractPostPermalink(_element) : location.href;
+      let rawUrl = _element ? extractPostPermalink(_element) : "";
       const author = _element ? extractPostAuthor(_element) : "";
       const source = _element ? extractPostSource(_element) : "";
-      const imageUrl = _element ? extractPostImage(_element) : "";
+      let imageUrl = _element ? extractPostImage(_element) : "";
+
+      // Fallback ảnh: nếu không lấy được từ DOM, thử og:image
+      if (!imageUrl) {
+        const ogImg = document.querySelector('meta[property="og:image"]');
+        if (ogImg && ogImg.content) imageUrl = ogImg.content;
+      }
+
+      // Fallback: nếu không lấy được permalink từ DOM, thử URL trang hiện tại
+      if (!rawUrl) {
+        const pageUrl = location.href;
+        if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks|pfbid/.test(pageUrl)) {
+          rawUrl = pageUrl;
+        }
+      }
 
       // Filter out profile URLs (they cause "Dòng thời gian của..." when pasted)
       if (rawUrl && (rawUrl.includes("/profile.php") || rawUrl.includes("/user/") ||
@@ -627,10 +641,13 @@
       esc(text).replace(/\n/g, "<br>") +
       "</div>" +
       '<div class="fbs-sp-link-input">' +
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
-      '<input type="text" class="fbs-sp-link-field" placeholder="Paste link bài gốc (ghi nguồn ở comment đầu)" value="' +
+      '<div class="fbs-sp-link-label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Link bài gốc (ghi nguồn)</div>' +
+      '<div class="fbs-sp-link-row">' +
+      '<input type="text" class="fbs-sp-link-field' + (sourceUrl ? ' has-value' : '') + '" placeholder="Dán link bài gốc vào đây..." value="' +
       esc(sourceUrl || "") +
       '">' +
+      "</div>" +
+      '<div class="fbs-sp-link-status ' + (sourceUrl ? 'has-link' : 'no-link') + '">' + (sourceUrl ? 'Link đã sẵn sàng' : 'Chưa có link — dán link để ghi nguồn ở comment') + '</div>' +
       "</div>" +
       (cleanAuthor
         ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' +
@@ -658,16 +675,32 @@
     if (footer) footer.style.display = "none";
 
     const linkField = preview.querySelector(".fbs-sp-link-field");
+    const linkStatus = preview.querySelector(".fbs-sp-link-status");
     const commentSection = preview.querySelector(".fbs-sp-comment");
     const commentText = preview.querySelector(".fbs-sp-comment-text");
+
+    // Update link status indicator
+    function updateLinkStatus(url) {
+      if (url) {
+        linkField.classList.add("has-value");
+        linkStatus.className = "fbs-sp-link-status has-link";
+        linkStatus.textContent = "Link đã sẵn sàng";
+      } else {
+        linkField.classList.remove("has-value");
+        linkStatus.className = "fbs-sp-link-status no-link";
+        linkStatus.textContent = "Chưa có link — dán link để ghi nguồn ở comment";
+      }
+    }
 
     // Generate comment content từ link — ghi nguồn kèm tên tác giả nếu có
     function updateComment(url) {
       if (!url) {
         commentSection.style.display = "none";
+        updateLinkStatus("");
         return;
       }
       commentSection.style.display = "block";
+      updateLinkStatus(url);
       // Build source line: "Nguồn: Tên tác giả — link" hoặc "Nguồn: link"
       let sourceLine = "Nguồn: ";
       if (cleanAuthor) {
@@ -726,6 +759,7 @@
         if (!url) return;
         const clean = normalizeFbUrl(url);
         linkField.value = clean;
+        linkField.classList.add("has-value");
         updateComment(clean);
       }, 50);
     });
@@ -733,6 +767,11 @@
     // Cũng update khi user gõ tay
     linkField.addEventListener("input", () => {
       const url = linkField.value.trim();
+      if (url) {
+        linkField.classList.add("has-value");
+      } else {
+        linkField.classList.remove("has-value");
+      }
       updateComment(url);
     });
 
@@ -767,7 +806,7 @@
         await navigator.clipboard.writeText(content);
 
         btn.innerHTML =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Đang paste...';
 
         let posted = false;
         if (SITE === "facebook") {
@@ -916,15 +955,27 @@
                     : text + "\n\n—\nNguồn dưới cmt đầu";
                   const formattedText = formatForFacebook(textWithFooter);
                   if (editor) autoPasteToLexical(editor, formattedText, imgFile);
-                  btn.innerHTML =
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
+                  // Auto-copy comment nguồn vào clipboard — user chỉ cần paste vào comment sau khi đăng
+                  const commentContent = commentText.textContent;
+                  if (commentContent) {
+                    navigator.clipboard.writeText(commentContent).catch(() => {});
+                    btn.innerHTML =
+                      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã paste + nguồn đã copy!';
+                  } else {
+                    btn.innerHTML =
+                      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã paste xong!';
+                  }
                 }, 800);
                 return;
               }
             }
             window.scrollTo({ top: 0, behavior: "smooth" });
             btn.innerHTML =
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Text đã copy — paste vào ô status';
+            setTimeout(() => {
+              btn.innerHTML =
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
+            }, 4000);
           }, 200);
         }
       });
@@ -1741,7 +1792,9 @@
           href.includes("/permalink") ||
           href.includes("story_fbid") ||
           href.includes("pfbid") ||
-          href.includes("multi_permalinks");
+          href.includes("multi_permalinks") ||
+          href.includes("/reel/") ||
+          href.includes("/videos/");
 
         if (isPermalink) {
           candidates.push({ href, priority: 1, reason: "permalink_pattern" });
@@ -2099,7 +2152,31 @@
       }
       if (bestImg) return bestImg;
 
-      // 3. Check for background-image on divs (Facebook sometimes uses CSS backgrounds)
+      // 3. Check <picture> elements (Facebook sometimes uses <picture><source><img>)
+      const pictures = postContainer.querySelectorAll("picture");
+      for (const pic of pictures) {
+        const img = pic.querySelector("img");
+        if (!img) continue;
+        if (isInHeaderArea(img, postContainer)) continue;
+        if (isCircular(img)) continue;
+        // Try <source> srcset first (higher quality), then img src
+        const source = pic.querySelector("source[srcset]");
+        if (source) {
+          const srcset = source.getAttribute("srcset") || "";
+          const best = srcset.split(",")
+            .map(s => { const [u = "", d = ""] = s.trim().split(/\s+/); return { u, w: parseInt(d) || 0 }; })
+            .filter(e => e.u.startsWith("http"))
+            .sort((a, b) => b.w - a.w)[0];
+          if (best && best.u) return best.u;
+        }
+        const src = getImgSrc(img);
+        if (src) {
+          const { w } = getImgDimensions(img);
+          if (w >= 100 || w === 0) return src;
+        }
+      }
+
+      // 4. Check for background-image on divs (Facebook sometimes uses CSS backgrounds)
       // Check both inline style and computed style (FB may apply via class)
       const bgDivs = postContainer.querySelectorAll('div[style*="background-image"], span[style*="background-image"]');
       for (const div of bgDivs) {
@@ -2121,6 +2198,18 @@
           const match = computed.match(/url\(["']?(https?:\/\/[^"')]+)["']?\)/);
           if (match && match[1]) return match[1];
         } catch (_) {}
+      }
+
+      // 5. Lazy-loaded images: check data-src, data-lazy-src attributes not yet loaded
+      const lazyImgs = postContainer.querySelectorAll("img[data-src], img[data-lazy-src], img[loading='lazy']");
+      for (const img of lazyImgs) {
+        if (isInHeaderArea(img, postContainer)) continue;
+        if (isCircular(img)) continue;
+        const src = img.getAttribute("data-src") || img.getAttribute("data-lazy-src") || img.src || "";
+        if (!src || src.startsWith("data:")) continue;
+        if (src.includes("/emoji/") || src.includes("/sticker/")) continue;
+        const { w } = getImgDimensions(img);
+        if (w >= 100 || w === 0) return src;
       }
     } else {
       // Non-Facebook: original logic
