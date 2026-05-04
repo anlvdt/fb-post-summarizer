@@ -615,6 +615,8 @@
     preview.className = "fbs-status-preview";
 
     // Validate author/source — bỏ nếu chứa ký tự rác (FB anti-scraping)
+    const profileLabelRe = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
+    const cleanProfileLabel = (n) => n ? n.replace(profileLabelRe, "").trim() : "";
     const isValidName = (n) =>
       n &&
       n.length >= 2 &&
@@ -622,8 +624,8 @@
       !/[a-f0-9]{10,}/i.test(n) &&
       !/\d{8,}/.test(n) &&
       n.split(/\s+/).length <= 10;
-    const cleanAuthor = isValidName(author) ? author : "";
-    const cleanSource = isValidName(source) ? source : "";
+    const cleanAuthor = isValidName(cleanProfileLabel(author)) ? cleanProfileLabel(author) : "";
+    const cleanSource = isValidName(cleanProfileLabel(source)) ? cleanProfileLabel(source) : "";
 
     // Ảnh preview (nếu có)
     const imgHtml = imageUrl
@@ -1106,14 +1108,16 @@
 
   function buildCommentText(cleanUrl, author, source) {
     let line = "Nguồn: ";
+    const profileLabelRe = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
+    const stripLabel = (n) => n ? n.replace(profileLabelRe, "").trim() : "";
     const isValidName = (n) =>
       n &&
       n.length >= 2 &&
       n.length < 80 &&
       !/[a-f0-9]{10,}/i.test(n) &&
       !/\d{8,}/.test(n);
-    const a = isValidName(author) ? author : "";
-    const s = isValidName(source) ? source : "";
+    const a = isValidName(stripLabel(author)) ? stripLabel(author) : "";
+    const s = isValidName(stripLabel(source)) ? stripLabel(source) : "";
     if (a) {
       line += a;
       if (s && s !== a) line += " (" + s + ")";
@@ -2239,11 +2243,24 @@
   function _fbNameFromHeader(header) {
     const link = header.querySelector("a");
     if (!link) return "";
+
+    // Patterns Facebook dùng cho aria-label trên link profile — KHÔNG phải tên tác giả
+    const profileLabelPattern = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
+
     // Ưu tiên aria-label (Facebook thường set đúng tên ở đây)
-    const ariaLabel = (link.getAttribute("aria-label") || "").trim();
+    let ariaLabel = (link.getAttribute("aria-label") || "").trim();
+    // Strip "Dòng thời gian của..." prefix nếu có
+    if (profileLabelPattern.test(ariaLabel)) {
+      ariaLabel = ariaLabel.replace(profileLabelPattern, "").trim();
+    }
     if (ariaLabel.length >= 2 && ariaLabel.length < 80) return ariaLabel;
+
     // Fallback: innerText (tránh textContent vì FB chèn ký tự rác anti-scraping)
-    const name = (link.innerText || link.textContent || "").trim();
+    let name = (link.innerText || link.textContent || "").trim();
+    // Strip "Dòng thời gian của..." nếu innerText cũng bị
+    if (profileLabelPattern.test(name)) {
+      name = name.replace(profileLabelPattern, "").trim();
+    }
     // Validate: tên hợp lệ không chứa quá nhiều số/ký tự lạ
     if (
       name.length >= 2 &&
@@ -2323,7 +2340,9 @@
       const strongs = nested.querySelectorAll("strong a");
       for (const s of strongs) {
         if (s.closest('[role="article"]') !== nested) continue;
-        const name = (s.innerText || s.textContent || "").trim();
+        let name = (s.innerText || s.textContent || "").trim();
+        // Strip "Dòng thời gian của..." prefix
+        name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
         if (
           name.length >= 2 &&
           name.length < 80 &&
@@ -2347,7 +2366,9 @@
     const strongs = container.querySelectorAll("strong a");
     for (const s of strongs) {
       if (s.closest('[role="article"]') !== container) continue;
-      const name = (s.innerText || s.textContent || "").trim();
+      let name = (s.innerText || s.textContent || "").trim();
+      // Strip "Dòng thời gian của..." prefix
+      name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
       if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name))
         return name;
     }
@@ -2408,7 +2429,9 @@
         if (h.closest('[role="article"]') !== postContainer) continue;
         const links = h.querySelectorAll("a");
         if (links.length >= 2) {
-          const name = (links[1].innerText || links[1].textContent || "").trim();
+          let name = (links[1].innerText || links[1].textContent || "").trim();
+          // Strip "Dòng thời gian của..." prefix
+          name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
           if (name.length >= 3 && name.length < 100 &&
               !/[a-f0-9]{10,}/i.test(name) && !/\d{8,}/.test(name)) {
             return name;
@@ -2429,7 +2452,9 @@
       // Fallback: check for page name in "Sponsored" or page-like posts
       const pageLink = postContainer.querySelector('a[href*="/pages/"], a[aria-label][href*="facebook.com/"]');
       if (pageLink) {
-        const ariaLabel = (pageLink.getAttribute("aria-label") || "").trim();
+        let ariaLabel = (pageLink.getAttribute("aria-label") || "").trim();
+        // Strip "Dòng thời gian của..." prefix
+        ariaLabel = ariaLabel.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
         if (ariaLabel.length >= 3 && ariaLabel.length < 100) return ariaLabel;
       }
     }
