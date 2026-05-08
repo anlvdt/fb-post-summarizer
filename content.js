@@ -209,16 +209,26 @@
     if (container.querySelector(
       'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
     )) return true;
-    // text scan — handles both plain text and per-character obfuscation
+    // Portal-based detection: find any aria-describedby inside the post that
+    // references a .__fb-light-mode portal containing a sponsored keyword
     const SPONSORED_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
+    const ariaRefs = container.querySelectorAll("[aria-describedby]");
+    for (const ref of ariaRefs) {
+      const ids = (ref.getAttribute("aria-describedby") || "").split(/\s+/);
+      for (const id of ids) {
+        const portal = document.getElementById(id);
+        if (!portal) continue;
+        const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
+        if (SPONSORED_NORM.some(kw => tcNorm === kw)) return true;
+      }
+    }
+    // text scan fallback (non-portal / other structures)
     const candidates = container.querySelectorAll('a, span, div[dir="auto"]');
     for (const node of candidates) {
       const tc = node.textContent || "";
       const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
       if (tcNorm.length < 2 || tcNorm.length > 40) continue;
       if (SPONSORED_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw))) return true;
-      const t = tc.trim().toLowerCase();
-      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·") || t.startsWith(kw + " ·"))) return true;
     }
     return false;
   }
@@ -2721,28 +2731,58 @@
     if (SITE !== "facebook") return;
     injectClutterCSS();
 
-    // Scan ELEMENT nodes instead of text nodes so we handle Facebook's
-    // per-character obfuscation: "Được tài trợ" → each char in its own <span>.
-    // textContent of the parent span concatenates all chars ("Đượctàitrợ").
-    // After stripping whitespace from both sides, it matches the keyword.
-    // We also keep the plain-text path for non-obfuscated labels on other
-    // platforms (innerText with the actual spaces also matches after strip).
+    let newlyHidden = 0;
+
+    // ── Strategy 1: React portal detection (primary for Facebook) ────────────
+    // Facebook renders "Được tài trợ" / clutter labels as React portals:
+    //   <div class="__fb-light-mode">
+    //     <span id="_r_a2_">Được tài trợ</span>
+    //   </div>
+    // These portals live directly under <body>, completely detached from the
+    // feed DOM. The feed post references them via aria-describedby on a <span>
+    // inside a DIV[data-virtualized] post wrapper:
+    //   SPAN[aria-describedby="_r_a2_"] → A[role=link] → DIV[data-virtualized]
+    // So we: (1) find portals with clutter text, (2) get their span IDs,
+    // (3) find the feed element with aria-describedby pointing to that ID,
+    // (4) walk up to find DIV[data-virtualized] via findFeedWrapper.
+    const portals = document.querySelectorAll(".__fb-light-mode");
+    for (const portal of portals) {
+      if (portal.dataset.fbsPortalChecked) continue;
+      portal.dataset.fbsPortalChecked = "1";
+      const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
+      if (!_matchesClutterLabelNorm(tcNorm) && !_matchesClutterLabel(tcNorm)) continue;
+      const idEl = portal.querySelector("[id]");
+      if (!idEl || !idEl.id) continue;
+      const selector = "[aria-describedby~=" + JSON.stringify(idEl.id) + "]";
+      let ref;
+      try { ref = document.querySelector(selector); } catch (e) { continue; }
+      if (!ref) continue;
+      const wrapper = findFeedWrapper(ref);
+      if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
+      wrapper.dataset.fbsHidden = "1";
+      _hideWrapper(wrapper);
+      hiddenClutterCount++;
+      newlyHidden++;
+    }
+
+    // ── Strategy 2: element textContent scan (fallback / non-portal) ─────────
+    // Handles per-character obfuscation (each char in its own <span>) and
+    // plain-text labels on non-portal paths. textContent concatenates all
+    // child text nodes so "Đượctàitrợ" still matches after whitespace strip.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     let el;
-    let newlyHidden = 0;
     while ((el = walker.nextNode())) {
       if (el.dataset.fbsClutterChecked) continue;
+      // Skip portal containers — already handled above
+      if (el.classList.contains("__fb-light-mode")) continue;
 
-      // Quick pre-filter: textContent length without spaces must be ≤ 40
-      // (longest label "suggestedgroupsyoumightlike" = 27 chars stripped)
       const tc = el.textContent || "";
       const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
       if (tcNorm.length < 2 || tcNorm.length > 40) continue;
 
       const matched =
-        _matchesClutterLabelNorm(tcNorm) ||          // obfuscated / stripped
-        _matchesClutterLabel(tc.trim().toLowerCase()); // plain text
-
+        _matchesClutterLabelNorm(tcNorm) ||
+        _matchesClutterLabel(tc.trim().toLowerCase());
       if (!matched) continue;
       el.dataset.fbsClutterChecked = "1";
 
