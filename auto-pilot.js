@@ -222,6 +222,12 @@
         // === SKIP OWN POST ===
         if (shouldSkipPost(postNode)) continue;
 
+        // === SKIP SPONSORED / ADS ===
+        if (isSponsoredPost(postNode)) {
+          log("info", "Skipping sponsored/ad post");
+          continue;
+        }
+
         // === SKIP OFF-TOPIC CONTENT (pre-filter — saves API call) ===
         if (!isTargetContent(postNode)) continue;
 
@@ -408,6 +414,23 @@
   }
 
   // === SKIP OWN POST LOGIC ===
+  const SPONSORED_KW = [
+    "được tài trợ", "sponsored", "quảng cáo", "publicité", "gesponsert",
+    "patrocinado", "sponsorizzato", "gesponsord", "рекламная запись", "広告",
+  ];
+
+  function isSponsoredPost(postNode) {
+    try {
+      const candidates = postNode.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label]');
+      for (const node of candidates) {
+        const t = (node.innerText || node.textContent || "").trim().toLowerCase();
+        if (t.length === 0 || t.length > 30) continue;
+        if (SPONSORED_KW.some(kw => t === kw || t.startsWith(kw))) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function shouldSkipPost(postNode) {
     try {
       if (typeof window.fbsExtractAuthor === "function") {

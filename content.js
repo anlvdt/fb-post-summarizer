@@ -132,10 +132,44 @@
       if (SEE_MORE.some((kw) => t === kw || t === "..." + kw || t.startsWith(kw))) {
         el.dataset.fbsScanned = "1";
         if (isInNonPostArea(el)) continue;
+        if (isSponsored(el)) continue;
         results.push(el);
       }
     }
     return results;
+  }
+
+  const SPONSORED_KEYWORDS = [
+    "được tài trợ", "sponsored", "quảng cáo", "publicité", "gesponsert",
+    "patrocinado", "sponsorizzato", "gesponsord", "rekommenderat",
+    "рекламная запись", "広告",
+  ];
+
+  // Find the closest ancestor article[role="article"] of an element
+  function findPostArticle(el) {
+    let p = el;
+    for (let i = 0; i < 25; i++) {
+      p = p.parentElement;
+      if (!p || p === document.body) return null;
+      if (p.getAttribute("role") === "article") return p;
+    }
+    return null;
+  }
+
+  function isSponsored(el) {
+    if (SITE !== "facebook") return false;
+    const article = findPostArticle(el);
+    if (!article) return false;
+    // Facebook renders "Sponsored" as a small link/span near the author metadata.
+    // It typically lives within the first ~300px of the article (header area).
+    // Scan all short text nodes inside the article for sponsored keywords.
+    const candidates = article.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label]');
+    for (const node of candidates) {
+      const t = (node.innerText || node.textContent || "").trim().toLowerCase();
+      if (t.length === 0 || t.length > 30) continue;
+      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw))) return true;
+    }
+    return false;
   }
 
   function isInNonPostArea(el) {
@@ -2389,6 +2423,7 @@
         ancestor = ancestor.parentElement;
       }
       if (articleAncestors >= 2) continue; // skip comments/replies
+      if (isSponsored(article)) { fbAllPostInjected.add(article); continue; }
       const text = (article.innerText || "").trim();
       if (text.length < MIN_LEN) continue;
       fbAllPostInjected.add(article);
