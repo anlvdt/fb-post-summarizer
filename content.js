@@ -2717,7 +2717,7 @@
   }
 
   function _hideWrapper(wrapper) {
-    // Also hide the parent if it's a single-child pass-through div
+    // Walk up to a single-child pass-through parent if present
     let toHide = wrapper;
     const par = wrapper.parentElement;
     if (par && par !== document.body &&
@@ -2726,7 +2726,16 @@
         par.children.length === 1) {
       toHide = par;
     }
-    toHide.style.setProperty("display", "none", "important");
+    // Smooth collapse: shrink height with CSS transition → then display:none.
+    // This prevents the jarring layout jump from instant display:none.
+    const h = toHide.offsetHeight;
+    toHide.style.cssText += ";overflow:hidden!important;transition:max-height 0.22s ease,opacity 0.18s ease;max-height:" + h + "px;opacity:1";
+    // RAF ensures browser paints the starting state before we animate to 0
+    requestAnimationFrame(() => {
+      toHide.style.maxHeight = "0";
+      toHide.style.opacity = "0";
+      setTimeout(() => toHide.style.setProperty("display", "none", "important"), 240);
+    });
   }
 
   function hideFeedClutter() {
@@ -2879,19 +2888,28 @@
   setTimeout(scan, 500);
   setTimeout(scan, 1500);
 
-  // Fast-path: when a .__fb-light-mode portal is added to the DOM, immediately
-  // run hideFeedClutter without debounce so sponsored posts vanish before they
-  // are visible to the user instead of flashing briefly then disappearing.
+  // Fast-path clutter observer: fires hideFeedClutter() immediately (no debounce)
+  // whenever either:
+  //   (a) a .__fb-light-mode portal is added — sponsored label just became available
+  //   (b) a data-virtualized feed post is added — check if its portal already exists
+  // React renders post + portal in the same synchronous batch, so by the time
+  // MutationObserver fires, both are in the DOM. We just need to act fast.
+  let clutterPending = false;
   const clutterObserver = new MutationObserver((mutations) => {
-    if (SITE !== "facebook") return;
+    if (SITE !== "facebook" || clutterPending) return;
     for (const m of mutations) {
       for (const node of m.addedNodes) {
         if (node.nodeType !== 1) continue;
-        if (
-          node.classList.contains("__fb-light-mode") ||
-          node.querySelector?.(".__fb-light-mode")
-        ) {
-          hideFeedClutter();
+        const isPortal = node.classList.contains("__fb-light-mode");
+        const isPost = node.hasAttribute?.("data-virtualized");
+        const hasPortal = !isPortal && node.querySelector?.(".__fb-light-mode");
+        if (isPortal || isPost || hasPortal) {
+          // Batch multiple rapid additions into a single hideFeedClutter call
+          clutterPending = true;
+          requestAnimationFrame(() => {
+            clutterPending = false;
+            hideFeedClutter();
+          });
           return;
         }
       }
