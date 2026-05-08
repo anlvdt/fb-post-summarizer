@@ -145,6 +145,20 @@
     "рекламная запись", "広告",
   ];
 
+  // Non-organic feed labels (short text in post header, similar to "Sponsored")
+  const CLUTTER_LABELS = [
+    // Vietnamese
+    "gợi ý cho bạn", "video gợi ý", "reels gợi ý", "nhóm gợi ý",
+    "trang gợi ý", "sự kiện gợi ý", "bài viết gợi ý", "có thể bạn quan tâm",
+    "khám phá thêm", "người bạn có thể biết", "tin tức gợi ý",
+    // English
+    "suggested for you", "suggested reels", "suggested groups",
+    "suggested events", "pages you might like", "videos you might like",
+    "people you may know", "you might also like", "suggested",
+    // French/German/Spanish
+    "suggéré pour vous", "vorgeschlagen", "sugerido para ti",
+  ];
+
   // Find the closest ancestor article[role="article"] of an element
   function findPostArticle(el) {
     let p = el;
@@ -2587,37 +2601,103 @@
   });
 
   // === HIDE SPONSORED POSTS ===
-  let hiddenSponsoredCount = 0;
-  let sponsoredToast = null;
-  let sponsoredToastTimer = null;
+  // Check if an article has a clutter label (suggested, people you may know, etc.)
+  function isClutterLabel(article) {
+    const candidates = article.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label], h3, h4');
+    for (const node of candidates) {
+      const t = (node.innerText || node.textContent || "").trim().toLowerCase();
+      if (t.length === 0 || t.length > 50) continue;
+      if (CLUTTER_LABELS.some(kw => t === kw || t.startsWith(kw + " ") || t.endsWith(" " + kw))) return true;
+    }
+    return false;
+  }
 
-  function showSponsoredToast(count) {
-    if (!sponsoredToast) {
-      sponsoredToast = document.createElement("div");
-      sponsoredToast.style.cssText =
+  // Inject one-time CSS for structural non-article clutter (Stories, Reels sections, right rail)
+  function injectClutterCSS() {
+    if (document.getElementById("fbs-clutter-css")) return;
+    const style = document.createElement("style");
+    style.id = "fbs-clutter-css";
+    style.textContent = [
+      // Stories bar
+      'div[data-pagelet="Stories"]',
+      'div[data-pagelet*="Stories"]',
+      // Reels/Video sections embedded in feed (heading-based containers)
+      'div[data-pagelet*="Reels"]',
+      'div[aria-label="Reels"]',
+      'div[aria-label="Facebook Watch"]',
+      // Right rail
+      'div[data-pagelet="RightRail"]',
+      // Birthday widget
+      'div[data-pagelet="BirthdayNotifications"]',
+      // Messenger contact list sidebar
+      'div[data-pagelet*="Chat"]',
+    ].join(",\n") + " { display: none !important; }";
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  let hiddenClutterCount = 0;
+  let clutterToast = null;
+  let clutterToastTimer = null;
+
+  function showClutterToast(count) {
+    if (!clutterToast) {
+      clutterToast = document.createElement("div");
+      clutterToast.style.cssText =
         "position:fixed;bottom:72px;right:20px;z-index:2147483641;" +
         "background:rgba(20,10,40,0.92);color:#c9b8ff;font-size:12px;font-weight:600;" +
         "padding:7px 14px;border-radius:20px;border:1px solid rgba(168,85,247,0.35);" +
         "backdrop-filter:blur(6px);pointer-events:none;transition:opacity 0.3s;" +
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
-      document.body.appendChild(sponsoredToast);
+      document.body.appendChild(clutterToast);
     }
-    sponsoredToast.textContent = "🚫 Đã ẩn " + count + " bài quảng cáo";
-    sponsoredToast.style.opacity = "1";
-    clearTimeout(sponsoredToastTimer);
-    sponsoredToastTimer = setTimeout(() => {
-      if (sponsoredToast) sponsoredToast.style.opacity = "0";
-    }, 2500);
+    clutterToast.textContent = "🧹 Đã ẩn " + count + " phần tử thừa";
+    clutterToast.style.opacity = "1";
+    clearTimeout(clutterToastTimer);
+    clutterToastTimer = setTimeout(() => { if (clutterToast) clutterToast.style.opacity = "0"; }, 2500);
   }
 
-  function hideSponsoredPosts() {
+  function hideArticleClutter(article) {
+    let toHide = article;
+    const parent = article.parentElement;
+    // Hide parent wrapper too if it's a single-child container (cleaner gap removal)
+    if (parent && parent !== document.body && parent.children.length === 1
+        && parent.getAttribute("role") !== "main") {
+      toHide = parent;
+    }
+    toHide.style.setProperty("display", "none", "important");
+  }
+
+  function hideFeedClutter() {
     if (SITE !== "facebook") return;
+    injectClutterCSS();
+
     const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
+    // Scan Reels/Stories sections not caught by CSS (identified by heading text)
+    root.querySelectorAll('div[role="feed"] > div:not([data-fbs-ad-checked])').forEach(div => {
+      const heading = div.querySelector('h2, h3, [role="heading"]');
+      if (!heading) return;
+      const ht = (heading.innerText || heading.textContent || "").trim().toLowerCase();
+      const STRUCTURAL_LABELS = [
+        "reels", "videos gợi ý", "video gợi ý", "stories", "tin",
+        "người bạn có thể biết", "people you may know",
+        "nhóm gợi ý", "suggested groups", "trang gợi ý", "suggested pages",
+        "sự kiện gợi ý", "suggested events",
+        "khám phá", "discover", "facebook watch",
+      ];
+      if (STRUCTURAL_LABELS.some(kw => ht === kw || ht.startsWith(kw))) {
+        div.setAttribute("data-fbs-ad-checked", "1");
+        div.style.setProperty("display", "none", "important");
+        hiddenClutterCount++;
+        showClutterToast(hiddenClutterCount);
+      }
+    });
+
+    // Scan article[role="article"] for sponsored + clutter labels
     const articles = root.querySelectorAll('article[role="article"]:not([data-fbs-ad-checked])');
     let newlyHidden = 0;
     for (const article of articles) {
       article.setAttribute("data-fbs-ad-checked", "1");
-      // Only check top-level posts (exactly 1 ancestor article = feed container)
+      // Only top-level posts: exactly 1 ancestor article (the feed container)
       let articleAncestors = 0;
       let anc = article.parentElement;
       for (let j = 0; j < 20; j++) {
@@ -2626,19 +2706,16 @@
         anc = anc.parentElement;
       }
       if (articleAncestors !== 1) continue;
-      if (!isSponsored(article)) continue;
-      // Walk up to find the feed item wrapper (usually a div wrapping the article)
-      let toHide = article;
-      const parent = article.parentElement;
-      if (parent && parent !== document.body && parent.children.length === 1) {
-        toHide = parent; // hide the wrapper too for cleaner layout
-      }
-      toHide.style.setProperty("display", "none", "important");
-      hiddenSponsoredCount++;
+      if (!isSponsored(article) && !isClutterLabel(article)) continue;
+      hideArticleClutter(article);
+      hiddenClutterCount++;
       newlyHidden++;
     }
-    if (newlyHidden > 0) showSponsoredToast(hiddenSponsoredCount);
+    if (newlyHidden > 0) showClutterToast(hiddenClutterCount);
   }
+
+  // Keep old name as alias for auto-pilot compatibility
+  const hideSponsoredPosts = hideFeedClutter;
 
   // === REDDIT ===
   function scanRedditPosts() {
@@ -2680,7 +2757,7 @@
   function scan() {
     if (!isContextValid() || isBlocked) return;
     if (SITE === "reddit") scanRedditPosts();
-    hideSponsoredPosts();
+    hideFeedClutter();
     findNewSeeMoreElements().forEach(processSeeMore);
     scanFBAllPosts();
     scanCommentSections();
