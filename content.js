@@ -212,9 +212,9 @@
     // Portal-based detection: find any aria-describedby inside the post that
     // references a .__fb-light-mode portal containing a sponsored keyword
     const SPONSORED_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
-    const ariaRefs = container.querySelectorAll("[aria-describedby]");
+    const ariaRefs = container.querySelectorAll("[aria-describedby],[aria-labelledby]");
     for (const ref of ariaRefs) {
-      const ids = (ref.getAttribute("aria-describedby") || "").split(/\s+/);
+      const ids = ((ref.getAttribute("aria-describedby") || "") + " " + (ref.getAttribute("aria-labelledby") || "")).trim().split(/\s+/);
       for (const id of ids) {
         const portal = document.getElementById(id);
         if (!portal) continue;
@@ -2753,7 +2753,8 @@
       if (!_matchesClutterLabelNorm(tcNorm) && !_matchesClutterLabel(tcNorm)) continue;
       const idEl = portal.querySelector("[id]");
       if (!idEl || !idEl.id) continue;
-      const selector = "[aria-describedby~=" + JSON.stringify(idEl.id) + "]";
+      const qid = JSON.stringify(idEl.id);
+      const selector = "[aria-describedby~=" + qid + "],[aria-labelledby~=" + qid + "]";
       let ref;
       try { ref = document.querySelector(selector); } catch (e) { continue; }
       if (!ref) continue;
