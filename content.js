@@ -172,16 +172,30 @@
 
   function isSponsored(el) {
     if (SITE !== "facebook") return false;
-    const article = findPostArticle(el);
+    // Accept article itself OR an element inside it
+    const article = (el.getAttribute && el.getAttribute("role") === "article")
+      ? el
+      : findPostArticle(el);
     if (!article) return false;
-    // Facebook renders "Sponsored" as a small link/span near the author metadata.
-    // It typically lives within the first ~300px of the article (header area).
-    // Scan all short text nodes inside the article for sponsored keywords.
-    const candidates = article.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label]');
+    return _articleHasSponsoredLabel(article);
+  }
+
+  function _articleHasSponsoredLabel(article) {
+    // 1. Href-based: Facebook's "Về quảng cáo này" link — most reliable signal
+    if (article.querySelector(
+      'a[href*="facebook.com/ads"], a[href*="fb.com/ads"], ' +
+      'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
+    )) return true;
+
+    // 2. Text-based: scan ALL short-text elements (a, span, div)
+    //    Keep selector broad — Facebook varies element types per A/B test
+    const candidates = article.querySelectorAll('a, span, div[dir="auto"]');
     for (const node of candidates) {
+      // Skip nodes with many children (structural containers, not text labels)
+      if (node.children.length > 3) continue;
       const t = (node.innerText || node.textContent || "").trim().toLowerCase();
-      if (t.length === 0 || t.length > 30) continue;
-      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw))) return true;
+      if (t.length === 0 || t.length > 35) continue;
+      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·"))) return true;
     }
     return false;
   }
@@ -2603,11 +2617,12 @@
   // === HIDE SPONSORED POSTS ===
   // Check if an article has a clutter label (suggested, people you may know, etc.)
   function isClutterLabel(article) {
-    const candidates = article.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label], h3, h4');
+    const candidates = article.querySelectorAll('a, span, div[dir="auto"], h3, h4');
     for (const node of candidates) {
+      if (node.children.length > 3) continue;
       const t = (node.innerText || node.textContent || "").trim().toLowerCase();
       if (t.length === 0 || t.length > 50) continue;
-      if (CLUTTER_LABELS.some(kw => t === kw || t.startsWith(kw + " ") || t.endsWith(" " + kw))) return true;
+      if (CLUTTER_LABELS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·") || t.endsWith(" " + kw))) return true;
     }
     return false;
   }
