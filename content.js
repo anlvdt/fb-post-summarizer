@@ -1491,6 +1491,26 @@
   }
 
   // === POST METADATA EXTRACTION ===
+
+  // Shared helper: walk up to the nearest post-level container.
+  // Stops at role="article" (old FB) OR data-virtualized (new FB virtualised scroll).
+  // Never goes above role="feed", role="main", or document.body.
+  function _findPostContainer(element) {
+    if (!element) return null;
+    let el = element;
+    for (let i = 0; i < 30; i++) {
+      const p = el.parentElement;
+      if (!p || p === document.body) break;
+      el = p;
+      const role = el.getAttribute("role");
+      if (role === "article") return el;
+      if (el.hasAttribute("data-virtualized")) return el;
+      if (role === "feed" || role === "main") break;
+    }
+    // Fallback: return the element itself (avoids whole-page queries)
+    return element;
+  }
+
   function extractPostPermalink(element) {
     const url = location.href;
     if (SITE === "facebook") {
@@ -1501,13 +1521,8 @@
       // Đang ở newsfeed → tìm permalink trong article
       if (!element) return "";
 
-      // Tìm article container
-      let postContainer = element;
-      for (let i = 0; i < 20; i++) {
-        if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
-        postContainer = postContainer.parentElement;
-        if (postContainer.getAttribute("role") === "article") break;
-      }
+      // Tìm post container (supports both old role="article" and new data-virtualized)
+      const postContainer = _findPostContainer(element);
 
       // Lấy TẤT CẢ link trong bài
       const allLinks = postContainer.querySelectorAll("a[href]");
@@ -1643,16 +1658,7 @@
 
     // Non-Facebook platforms
     if (!element) return url;
-    let postContainer = element;
-    for (let i = 0; i < 20; i++) {
-      if (
-        !postContainer.parentElement ||
-        postContainer.parentElement === document.body
-      )
-        break;
-      postContainer = postContainer.parentElement;
-      if (postContainer.getAttribute("role") === "article") break;
-    }
+    const postContainer = _findPostContainer(element);
     const platformLinks = {
       threads: 'a[href*="/post/"]',
       x: 'a[href*="/status/"]',
@@ -1674,79 +1680,82 @@
   function extractPostImage(element) {
     if (!element) return "";
 
-    // Walk up to post container
-    let postContainer = element;
-    for (let i = 0; i < 20; i++) {
-      if (
-        !postContainer.parentElement ||
-        postContainer.parentElement === document.body
-      )
-        break;
-      postContainer = postContainer.parentElement;
-      if (postContainer.getAttribute("role") === "article") break;
+    const postContainer = _findPostContainer(element);
+
+    // Helper: get best src from img element (handles lazy-loaded data-src)
+    function _imgSrc(img) {
+      return img.getAttribute("data-src") || img.src || "";
+    }
+
+    // Helper: is this img likely an avatar/icon (circular or tiny)?
+    function _isAvatar(img) {
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      if (w > 0 && w === h && w <= 60) return true;
+      try { if (getComputedStyle(img).borderRadius === "50%") return true; } catch (_) {}
+      return false;
+    }
+
+    // Helper: is this img inside the post header (avatar row)?
+    // Facebook header is typically the FIRST child subtree of the post container.
+    // We detect it by checking if the img is inside a [role="group"] that has no
+    // photo/video link ancestor and appears before the text body.
+    function _isHeaderImg(img) {
+      const headerEl = postContainer.querySelector(
+        "h2, h3, [data-testid='story-subtitle'], [data-testid='post-header']"
+      );
+      if (headerEl && headerEl.contains(img)) return true;
+      // Also skip profile-href links near top of post
+      const parentLink = img.closest("a");
+      if (parentLink) {
+        const href = parentLink.href || "";
+        if (href.includes("/user/") || href.includes("/profile.php") ||
+            (href.includes("facebook.com") && /facebook\.com\/[^/?]+$/.test(href) &&
+             !href.includes("/posts/") && !href.includes("/photo") && !href.includes("/reel"))) {
+          return true;
+        }
+      }
+      return false;
     }
 
     if (SITE === "facebook") {
-      // Strategy: Facebook post images are inside specific containers
-      // They are NOT inside the header area (which contains avatar + author name)
-      // Post images are typically in a sibling/descendant of the text content area
-
-      // 1. Look for images inside photo/video link containers
+      // Strategy 1: images inside explicit photo/video link containers
       const photoLinks = postContainer.querySelectorAll(
         'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]',
       );
       for (const link of photoLinks) {
         const img = link.querySelector("img");
-        if (img && img.src && !img.src.startsWith("data:")) {
-          const w = img.naturalWidth || img.width || 0;
-          if (w >= 100) return img.src;
-        }
-      }
-
-      // 2. Look for large images (>300px wide) that are NOT circular (avatar)
-      const allImgs = postContainer.querySelectorAll("img");
-      for (const img of allImgs) {
-        const src = img.src || "";
+        if (!img) continue;
+        const src = _imgSrc(img);
         if (!src || src.startsWith("data:")) continue;
         const w = img.naturalWidth || img.width || 0;
+        if (w >= 80 || !w) return src; // accept even unloaded (w=0) inside photo links
+      }
+
+      // Strategy 2: large images not in avatar/header position
+      const allImgs = postContainer.querySelectorAll("img");
+      for (const img of allImgs) {
+        const src = _imgSrc(img);
+        if (!src || src.startsWith("data:")) continue;
+        if (_isAvatar(img)) continue;
+        if (_isHeaderImg(img)) continue;
+        const w = img.naturalWidth || img.width || 0;
         const h = img.naturalHeight || img.height || 0;
-        // Must be large enough to be a content image
-        if (w < 300 && h < 300) continue;
-        // Skip circular (avatar)
-        try {
-          const style = getComputedStyle(img);
-          if (style.borderRadius === "50%") continue;
-        } catch (_) {}
-        // Skip if inside a link to user profile
-        const parentLink = img.closest("a");
-        if (parentLink) {
-          const href = parentLink.href || "";
-          if (
-            href &&
-            !href.includes("/photo") &&
-            !href.includes("/video") &&
-            !href.includes("fbid")
-          ) {
-            // Link doesn't point to photo/video — likely avatar or other UI element
-            if (w < 500) continue;
-          }
-        }
+        if (w > 0 && w < 200 && h < 200) continue;
         return src;
       }
     } else {
       // Non-Facebook: original logic
       const images = postContainer.querySelectorAll("img");
       for (const img of images) {
+        const src = _imgSrc(img);
+        if (!src || src.startsWith("data:")) continue;
         const w = img.naturalWidth || img.width || 0;
         const h = img.naturalHeight || img.height || 0;
-        const src = img.src || "";
-        if (!src || src.startsWith("data:")) continue;
         if (w < 200 && h < 200) continue;
         if (src.includes("emoji") || src.includes("static")) continue;
         if (src.includes("profile") || src.includes("avatar")) continue;
-        try {
-          if (getComputedStyle(img).borderRadius === "50%") continue;
-        } catch (_) {}
+        try { if (getComputedStyle(img).borderRadius === "50%") continue; } catch (_) {}
         return src;
       }
     }
