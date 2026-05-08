@@ -2876,6 +2876,28 @@
   scan();
   setTimeout(scan, 500);
   setTimeout(scan, 1500);
+
+  // Fast-path: when a .__fb-light-mode portal is added to the DOM, immediately
+  // run hideFeedClutter without debounce so sponsored posts vanish before they
+  // are visible to the user instead of flashing briefly then disappearing.
+  const clutterObserver = new MutationObserver((mutations) => {
+    if (SITE !== "facebook") return;
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (
+          node.classList.contains("__fb-light-mode") ||
+          node.querySelector?.(".__fb-light-mode")
+        ) {
+          hideFeedClutter();
+          return;
+        }
+      }
+    }
+  });
+  clutterObserver.observe(document.body, { childList: true, subtree: true });
+  observers.push(clutterObserver);
+
   const scanObserver = new MutationObserver(() => debouncedScan());
   scanObserver.observe(document.body, {
     childList: true,
