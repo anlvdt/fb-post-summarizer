@@ -209,12 +209,15 @@
     if (container.querySelector(
       'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
     )) return true;
-    // text scan for label
+    // text scan — handles both plain text and per-character obfuscation
+    const SPONSORED_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
     const candidates = container.querySelectorAll('a, span, div[dir="auto"]');
     for (const node of candidates) {
-      if (node.children.length > 3) continue;
-      const t = (node.innerText || node.textContent || "").trim().toLowerCase();
-      if (t.length < 2 || t.length > 55) continue;
+      const tc = node.textContent || "";
+      const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
+      if (tcNorm.length < 2 || tcNorm.length > 40) continue;
+      if (SPONSORED_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw))) return true;
+      const t = tc.trim().toLowerCase();
       if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·") || t.startsWith(kw + " ·"))) return true;
     }
     return false;
@@ -2668,6 +2671,17 @@
     );
   }
 
+  // Pre-computed whitespace-stripped versions for obfuscated text matching
+  // Facebook splits "Được tài trợ" into per-character spans — stripping spaces
+  // from both sides lets textContent "Đượctàitrợ" match keyword "được tài trợ"
+  const ALL_CLUTTER_LABELS_NORM = ALL_CLUTTER_LABELS.map(kw =>
+    kw.replace(/\s+/g, "").toLowerCase()
+  );
+
+  function _matchesClutterLabelNorm(normText) {
+    return ALL_CLUTTER_LABELS_NORM.some(kw => normText === kw || normText.startsWith(kw));
+  }
+
   // ── Toast ────────────────────────────────────────────────────────────────
   let hiddenClutterCount = 0;
   let clutterToast = null;
@@ -2707,27 +2721,34 @@
     if (SITE !== "facebook") return;
     injectClutterCSS();
 
-    // ── Strategy 1: walk every TEXT NODE looking for clutter labels ──────
-    // This is DOM-structure-independent and works whether posts use
-    // article[role], div[data-virtualized], or plain divs.
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let node;
+    // Scan ELEMENT nodes instead of text nodes so we handle Facebook's
+    // per-character obfuscation: "Được tài trợ" → each char in its own <span>.
+    // textContent of the parent span concatenates all chars ("Đượctàitrợ").
+    // After stripping whitespace from both sides, it matches the keyword.
+    // We also keep the plain-text path for non-obfuscated labels on other
+    // platforms (innerText with the actual spaces also matches after strip).
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    let el;
     let newlyHidden = 0;
-    while ((node = walker.nextNode())) {
-      const t = (node.textContent || "").trim().toLowerCase();
-      if (t.length < 2 || t.length > 55) continue;
-      if (!_matchesClutterLabel(t)) continue;
+    while ((el = walker.nextNode())) {
+      if (el.dataset.fbsClutterChecked) continue;
 
-      // Confirm the label is a LEAF-LIKE element (not buried in long post body)
-      const el = node.parentElement;
-      if (!el) continue;
-      if ((el.innerText || "").trim().length > 60) continue; // too long → not a metadata label
+      // Quick pre-filter: textContent length without spaces must be ≤ 40
+      // (longest label "suggestedgroupsyoumightlike" = 27 chars stripped)
+      const tc = el.textContent || "";
+      const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
+      if (tcNorm.length < 2 || tcNorm.length > 40) continue;
+
+      const matched =
+        _matchesClutterLabelNorm(tcNorm) ||          // obfuscated / stripped
+        _matchesClutterLabel(tc.trim().toLowerCase()); // plain text
+
+      if (!matched) continue;
+      el.dataset.fbsClutterChecked = "1";
 
       const wrapper = findFeedWrapper(el);
-      if (!wrapper) continue;
-      if (wrapper.dataset.fbsHidden === "1") continue; // already processed
+      if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
       wrapper.dataset.fbsHidden = "1";
-
       _hideWrapper(wrapper);
       hiddenClutterCount++;
       newlyHidden++;
