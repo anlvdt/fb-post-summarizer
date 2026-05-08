@@ -1347,6 +1347,14 @@
       } catch (_) {}
     }
 
+    // Notify background → browser notification
+    try {
+      chrome.runtime.sendMessage({
+        action: "agent-posted",
+        preview: summaryText.substring(0, 100),
+      });
+    } catch (_) {}
+
     return { ok: true };
   };
 
@@ -1359,12 +1367,7 @@
   window.fbsExtractPermalinkAsync = async function (element) {
     try {
       if (SITE === "facebook" && element) {
-        let postContainer = element;
-        for (let i = 0; i < 20; i++) {
-          if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
-          postContainer = postContainer.parentElement;
-          if (postContainer.getAttribute("role") === "article") break;
-        }
+        const postContainer = _findPostContainer(element);
 
         const shareBtn = Array.from(postContainer.querySelectorAll('div[role="button"]')).find(b => {
           const label = (b.getAttribute("aria-label") || "").toLowerCase();
