@@ -1417,7 +1417,8 @@
   user-select: none;
 }
 article:hover .fbs-allpost-btn,
-[role="article"]:hover .fbs-allpost-btn {
+[role="article"]:hover .fbs-allpost-btn,
+[data-virtualized]:hover .fbs-allpost-btn {
   opacity: 1;
   pointer-events: auto;
 }

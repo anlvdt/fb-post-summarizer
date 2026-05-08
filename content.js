@@ -2484,20 +2484,26 @@
   function scanFBAllPosts() {
     if (SITE !== "facebook") return;
     const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
-    const articles = root.querySelectorAll('article[role="article"]');
-    for (const article of articles) {
+
+    // Support both old layout (role="article") and new virtualized layout (data-virtualized)
+    const candidates = [
+      ...root.querySelectorAll('article[role="article"]'),
+      ...root.querySelectorAll('[data-virtualized]'),
+    ];
+
+    for (const article of candidates) {
       if (fbAllPostInjected.has(article)) continue;
       // Skip if already has a regular fbs button
       if (article.querySelector(".fbs-wrap, .fbs-btn, .fbs-btn-inline, .fbs-allpost-btn")) continue;
-      // Skip comment/reply articles (2+ ancestor articles)
-      let articleAncestors = 0;
-      let ancestor = article.parentElement;
+      // Skip if this is nested inside another post container (comment articles)
+      let depth = 0;
+      let anc = article.parentElement;
       for (let j = 0; j < 20; j++) {
-        if (!ancestor || ancestor === document.body) break;
-        if (ancestor.getAttribute("role") === "article") articleAncestors++;
-        ancestor = ancestor.parentElement;
+        if (!anc || anc === document.body) break;
+        if (anc.getAttribute("role") === "article" || anc.hasAttribute("data-virtualized")) depth++;
+        anc = anc.parentElement;
       }
-      if (articleAncestors >= 2) continue; // skip comments/replies
+      if (depth >= 1) continue; // nested = comment/reply
       if (isSponsored(article)) { fbAllPostInjected.add(article); continue; }
       const text = (article.innerText || "").trim();
       if (text.length < MIN_LEN) continue;
@@ -2523,17 +2529,21 @@
   function scanCommentSections() {
     if (SITE !== "facebook") return;
     const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
-    const articles = root.querySelectorAll('article[role="article"]');
+    // Include both old (role="article") and new (data-virtualized) top-level post containers
+    const articles = [
+      ...root.querySelectorAll('article[role="article"]'),
+      ...root.querySelectorAll('[data-virtualized]'),
+    ];
     for (const article of articles) {
-      // Only top-level post articles (1 ancestor article = feed container)
-      let articleAncestors = 0;
+      // Only top-level post containers — not nested in another post
+      let depth = 0;
       let ancestor = article.parentElement;
       for (let j = 0; j < 20; j++) {
         if (!ancestor || ancestor === document.body) break;
-        if (ancestor.getAttribute("role") === "article") articleAncestors++;
+        if (ancestor.getAttribute("role") === "article" || ancestor.hasAttribute("data-virtualized")) depth++;
         ancestor = ancestor.parentElement;
       }
-      if (articleAncestors !== 1) continue; // only direct post (not feed container, not comment)
+      if (depth >= 1) continue; // nested = not a top-level post
       if (commentBtnInjected.has(article)) continue;
       // Check for comment articles inside this post
       const commentArticles = article.querySelectorAll('article[role="article"]');
