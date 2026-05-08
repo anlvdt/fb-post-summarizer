@@ -2586,6 +2586,60 @@
     }
   });
 
+  // === HIDE SPONSORED POSTS ===
+  let hiddenSponsoredCount = 0;
+  let sponsoredToast = null;
+  let sponsoredToastTimer = null;
+
+  function showSponsoredToast(count) {
+    if (!sponsoredToast) {
+      sponsoredToast = document.createElement("div");
+      sponsoredToast.style.cssText =
+        "position:fixed;bottom:72px;right:20px;z-index:2147483641;" +
+        "background:rgba(20,10,40,0.92);color:#c9b8ff;font-size:12px;font-weight:600;" +
+        "padding:7px 14px;border-radius:20px;border:1px solid rgba(168,85,247,0.35);" +
+        "backdrop-filter:blur(6px);pointer-events:none;transition:opacity 0.3s;" +
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
+      document.body.appendChild(sponsoredToast);
+    }
+    sponsoredToast.textContent = "🚫 Đã ẩn " + count + " bài quảng cáo";
+    sponsoredToast.style.opacity = "1";
+    clearTimeout(sponsoredToastTimer);
+    sponsoredToastTimer = setTimeout(() => {
+      if (sponsoredToast) sponsoredToast.style.opacity = "0";
+    }, 2500);
+  }
+
+  function hideSponsoredPosts() {
+    if (SITE !== "facebook") return;
+    const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
+    const articles = root.querySelectorAll('article[role="article"]:not([data-fbs-ad-checked])');
+    let newlyHidden = 0;
+    for (const article of articles) {
+      article.setAttribute("data-fbs-ad-checked", "1");
+      // Only check top-level posts (exactly 1 ancestor article = feed container)
+      let articleAncestors = 0;
+      let anc = article.parentElement;
+      for (let j = 0; j < 20; j++) {
+        if (!anc || anc === document.body) break;
+        if (anc.getAttribute("role") === "article") articleAncestors++;
+        anc = anc.parentElement;
+      }
+      if (articleAncestors !== 1) continue;
+      if (!isSponsored(article)) continue;
+      // Walk up to find the feed item wrapper (usually a div wrapping the article)
+      let toHide = article;
+      const parent = article.parentElement;
+      if (parent && parent !== document.body && parent.children.length === 1) {
+        toHide = parent; // hide the wrapper too for cleaner layout
+      }
+      toHide.style.setProperty("display", "none", "important");
+      hiddenSponsoredCount++;
+      newlyHidden++;
+    }
+    if (newlyHidden > 0) showSponsoredToast(hiddenSponsoredCount);
+  }
+
   // === REDDIT ===
   function scanRedditPosts() {
     const posts = document.querySelectorAll(
@@ -2626,6 +2680,7 @@
   function scan() {
     if (!isContextValid() || isBlocked) return;
     if (SITE === "reddit") scanRedditPosts();
+    hideSponsoredPosts();
     findNewSeeMoreElements().forEach(processSeeMore);
     scanFBAllPosts();
     scanCommentSections();
