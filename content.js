@@ -159,7 +159,7 @@
     "suggéré pour vous", "vorgeschlagen", "sugerido para ti",
   ];
 
-  // Find the closest ancestor article[role="article"] of an element
+  // Find the closest ancestor article[role="article"] of an element (legacy helper)
   function findPostArticle(el) {
     let p = el;
     for (let i = 0; i < 25; i++) {
@@ -170,32 +170,51 @@
     return null;
   }
 
-  function isSponsored(el) {
-    if (SITE !== "facebook") return false;
-    // Accept article itself OR an element inside it
-    const article = (el.getAttribute && el.getAttribute("role") === "article")
-      ? el
-      : findPostArticle(el);
-    if (!article) return false;
-    return _articleHasSponsoredLabel(article);
+  // ── Feed wrapper finder ──────────────────────────────────────────────────
+  // Walk UP from any element inside a post to find the direct child of the
+  // feed/main container — works regardless of layout (article[role] or divs).
+  const FEED_STOP_ROLES = new Set(["feed", "main"]);
+  const CLUTTER_STOP_ROLES = new Set(["complementary", "banner", "navigation", "dialog"]);
+
+  function findFeedWrapper(el) {
+    let cur = el;
+    for (let i = 0; i < 50; i++) {
+      const parent = cur.parentElement;
+      if (!parent || parent === document.body) return null;
+      const role = parent.getAttribute("role") || "";
+      if (CLUTTER_STOP_ROLES.has(role)) return null;
+      if (FEED_STOP_ROLES.has(role)) return cur;
+      // Legacy: article[role="article"] whose parent is feed/article
+      if (role === "article") {
+        const pRole = (parent.parentElement?.getAttribute("role")) || "";
+        if (FEED_STOP_ROLES.has(pRole) || pRole === "article") return parent;
+      }
+      cur = parent;
+    }
+    return null;
   }
 
-  function _articleHasSponsoredLabel(article) {
-    // 1. Href-based: Facebook's "Về quảng cáo này" link — most reliable signal
-    if (article.querySelector(
-      'a[href*="facebook.com/ads"], a[href*="fb.com/ads"], ' +
+  // isSponsored: used by findNewSeeMoreElements to skip injecting button on ad posts.
+  // Finds the feed wrapper for el, then scans it for any sponsored signal.
+  function isSponsored(el) {
+    if (SITE !== "facebook") return false;
+    // Get the containing post (wrapper or article)
+    const container = findFeedWrapper(el) ||
+      (el.getAttribute && el.getAttribute("role") === "article" ? el : findPostArticle(el));
+    if (!container) return false;
+    // data-ad-rendering-role="profile_name" is on the advertiser name div — most reliable
+    if (container.querySelector('[data-ad-rendering-role="profile_name"]')) return true;
+    // href to Facebook ads about page
+    if (container.querySelector(
       'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
     )) return true;
-
-    // 2. Text-based: scan ALL short-text elements (a, span, div)
-    //    Keep selector broad — Facebook varies element types per A/B test
-    const candidates = article.querySelectorAll('a, span, div[dir="auto"]');
+    // text scan for label
+    const candidates = container.querySelectorAll('a, span, div[dir="auto"]');
     for (const node of candidates) {
-      // Skip nodes with many children (structural containers, not text labels)
       if (node.children.length > 3) continue;
       const t = (node.innerText || node.textContent || "").trim().toLowerCase();
-      if (t.length === 0 || t.length > 35) continue;
-      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·"))) return true;
+      if (t.length < 2 || t.length > 55) continue;
+      if (SPONSORED_KEYWORDS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·") || t.startsWith(kw + " ·"))) return true;
     }
     return false;
   }
@@ -2615,41 +2634,40 @@
   });
 
   // === HIDE SPONSORED POSTS ===
-  // Check if an article has a clutter label (suggested, people you may know, etc.)
-  function isClutterLabel(article) {
-    const candidates = article.querySelectorAll('a, span, div[dir="auto"], h3, h4');
-    for (const node of candidates) {
-      if (node.children.length > 3) continue;
-      const t = (node.innerText || node.textContent || "").trim().toLowerCase();
-      if (t.length === 0 || t.length > 50) continue;
-      if (CLUTTER_LABELS.some(kw => t === kw || t.startsWith(kw + " ") || t.startsWith(kw + "·") || t.endsWith(" " + kw))) return true;
-    }
-    return false;
-  }
-
-  // Inject one-time CSS for structural non-article clutter (Stories, Reels sections, right rail)
+  // Inject one-time CSS for structural clutter (Stories, Reels, Right Rail, etc.)
   function injectClutterCSS() {
     if (document.getElementById("fbs-clutter-css")) return;
     const style = document.createElement("style");
     style.id = "fbs-clutter-css";
     style.textContent = [
-      // Stories bar
       'div[data-pagelet="Stories"]',
       'div[data-pagelet*="Stories"]',
-      // Reels/Video sections embedded in feed (heading-based containers)
       'div[data-pagelet*="Reels"]',
       'div[aria-label="Reels"]',
       'div[aria-label="Facebook Watch"]',
-      // Right rail
       'div[data-pagelet="RightRail"]',
-      // Birthday widget
       'div[data-pagelet="BirthdayNotifications"]',
-      // Messenger contact list sidebar
       'div[data-pagelet*="Chat"]',
     ].join(",\n") + " { display: none !important; }";
     (document.head || document.documentElement).appendChild(style);
   }
 
+  // ── All bad labels ───────────────────────────────────────────────────────
+  const ALL_CLUTTER_LABELS = [
+    ...SPONSORED_KEYWORDS,
+    ...CLUTTER_LABELS,
+  ];
+
+  function _matchesClutterLabel(t) {
+    return ALL_CLUTTER_LABELS.some(kw =>
+      t === kw ||
+      t.startsWith(kw + " ") ||
+      t.startsWith(kw + "·") ||
+      t.startsWith(kw + " ·")
+    );
+  }
+
+  // ── Toast ────────────────────────────────────────────────────────────────
   let hiddenClutterCount = 0;
   let clutterToast = null;
   let clutterToastTimer = null;
@@ -2671,13 +2689,15 @@
     clutterToastTimer = setTimeout(() => { if (clutterToast) clutterToast.style.opacity = "0"; }, 2500);
   }
 
-  function hideArticleClutter(article) {
-    let toHide = article;
-    const parent = article.parentElement;
-    // Hide parent wrapper too if it's a single-child container (cleaner gap removal)
-    if (parent && parent !== document.body && parent.children.length === 1
-        && parent.getAttribute("role") !== "main") {
-      toHide = parent;
+  function _hideWrapper(wrapper) {
+    // Also hide the parent if it's a single-child pass-through div
+    let toHide = wrapper;
+    const par = wrapper.parentElement;
+    if (par && par !== document.body &&
+        par.getAttribute("role") !== "feed" &&
+        par.getAttribute("role") !== "main" &&
+        par.children.length === 1) {
+      toHide = par;
     }
     toHide.style.setProperty("display", "none", "important");
   }
@@ -2686,50 +2706,51 @@
     if (SITE !== "facebook") return;
     injectClutterCSS();
 
-    const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
-    // Scan Reels/Stories sections not caught by CSS (identified by heading text)
-    root.querySelectorAll('div[role="feed"] > div:not([data-fbs-ad-checked])').forEach(div => {
-      const heading = div.querySelector('h2, h3, [role="heading"]');
-      if (!heading) return;
-      const ht = (heading.innerText || heading.textContent || "").trim().toLowerCase();
-      const STRUCTURAL_LABELS = [
-        "reels", "videos gợi ý", "video gợi ý", "stories", "tin",
-        "người bạn có thể biết", "people you may know",
-        "nhóm gợi ý", "suggested groups", "trang gợi ý", "suggested pages",
-        "sự kiện gợi ý", "suggested events",
-        "khám phá", "discover", "facebook watch",
-      ];
-      if (STRUCTURAL_LABELS.some(kw => ht === kw || ht.startsWith(kw))) {
-        div.setAttribute("data-fbs-ad-checked", "1");
-        div.style.setProperty("display", "none", "important");
-        hiddenClutterCount++;
-        showClutterToast(hiddenClutterCount);
-      }
-    });
-
-    // Scan article[role="article"] for sponsored + clutter labels
-    const articles = root.querySelectorAll('article[role="article"]:not([data-fbs-ad-checked])');
+    // ── Strategy 1: walk every TEXT NODE looking for clutter labels ──────
+    // This is DOM-structure-independent and works whether posts use
+    // article[role], div[data-virtualized], or plain divs.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
     let newlyHidden = 0;
-    for (const article of articles) {
-      article.setAttribute("data-fbs-ad-checked", "1");
-      // Only top-level posts: exactly 1 ancestor article (the feed container)
-      let articleAncestors = 0;
-      let anc = article.parentElement;
-      for (let j = 0; j < 20; j++) {
-        if (!anc || anc === document.body) break;
-        if (anc.getAttribute("role") === "article") articleAncestors++;
-        anc = anc.parentElement;
-      }
-      if (articleAncestors !== 1) continue;
-      if (!isSponsored(article) && !isClutterLabel(article)) continue;
-      hideArticleClutter(article);
+    while ((node = walker.nextNode())) {
+      const t = (node.textContent || "").trim().toLowerCase();
+      if (t.length < 2 || t.length > 55) continue;
+      if (!_matchesClutterLabel(t)) continue;
+
+      // Confirm the label is a LEAF-LIKE element (not buried in long post body)
+      const el = node.parentElement;
+      if (!el) continue;
+      if ((el.innerText || "").trim().length > 60) continue; // too long → not a metadata label
+
+      const wrapper = findFeedWrapper(el);
+      if (!wrapper) continue;
+      if (wrapper.dataset.fbsHidden === "1") continue; // already processed
+      wrapper.dataset.fbsHidden = "1";
+
+      _hideWrapper(wrapper);
       hiddenClutterCount++;
       newlyHidden++;
     }
+
+    // ── Strategy 2: data-ad-rendering-role (Facebook Comet ad marker) ────
+    // Facebook stamps every part of a sponsored post with data-ad-rendering-role.
+    // Organic posts do NOT have this attribute. Finding it means the post is an ad.
+    document.querySelectorAll(
+      '[data-ad-rendering-role="profile_name"]:not([data-fbs-ad-role-checked])'
+    ).forEach(el => {
+      el.setAttribute("data-fbs-ad-role-checked", "1");
+      const wrapper = findFeedWrapper(el);
+      if (!wrapper || wrapper.dataset.fbsHidden === "1") return;
+      wrapper.dataset.fbsHidden = "1";
+      _hideWrapper(wrapper);
+      hiddenClutterCount++;
+      newlyHidden++;
+    });
+
     if (newlyHidden > 0) showClutterToast(hiddenClutterCount);
   }
 
-  // Keep old name as alias for auto-pilot compatibility
+  // Alias for auto-pilot compatibility
   const hideSponsoredPosts = hideFeedClutter;
 
   // === REDDIT ===
