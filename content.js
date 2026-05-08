@@ -1428,12 +1428,14 @@
     return d.innerHTML;
   }
   function fmt(t) {
-    return esc(t)
+    // Normalize *** (old prompt artifact) to ** before escaping
+    const cleaned = t.replace(/^\*{3}\s*/gm, "**");
+    return esc(cleaned)
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
-      .replace(/^[-•]\s*/gm, "• ")
-      .replace(/\n{2,}/g, "<br>") // nhiều dòng trống -> 1 br
-      .replace(/\n/g, "<br>"); // 1 dòng -> 1 br
+      .replace(/^[-•·]\s*/gm, "· ") // normalize all bullet styles to ·
+      .replace(/\n{2,}/g, "<br><br>") // blank line = paragraph break
+      .replace(/\n/g, "<br>");
   }
 
   // === READ TIME ===

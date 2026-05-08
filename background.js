@@ -345,7 +345,7 @@ FORMAT OUTPUT:
 
 [Nội dung tóm tắt]
 
-*** Giải thích thuật ngữ:
+**Giải thích thuật ngữ:**
 · Thuật ngữ: Giải thích ngắn 1 câu.
 
 —
@@ -357,9 +357,9 @@ YÊU CẦU:
 - Tối đa 5 câu liền mạch hoặc 5 bullet points cho phần tóm tắt. KHÔNG viết dài hơn.
 - NẾU bài gốc là HƯỚNG DẪN/TUTORIAL: giữ nguyên các bước (Bước 1, Bước 2...) dạng list ngắn gọn. Mỗi bước tối đa 1-2 câu. Người đọc phải biết cách làm ngay.
 - NẾU bài gốc là TIN TỨC/PHÂN TÍCH: viết đoạn văn liền mạch 3-5 câu.
-- CẤM LẶP Ý: Mỗi câu phải mang thông tin MỚI. Không diễn đạt lại ý cũ bằng từ khác.
+- CẤM LẶP Ý: Mỗi câu phải mang thông tin MỚI. Không diễn đạt lại ý cũ bằng từ khác. Kiểm tra lại trước khi output.
 - Nếu muốn tách đoạn cho dễ đọc, cách bằng 1 dòng trống. Nhưng mỗi đoạn phải là ý KHÁC NHAU.
-- GIẢI THÍCH THUẬT NGỮ: Nếu có thuật ngữ chuyên ngành, tên công nghệ mới, viết tắt mà người đọc phổ thông có thể chưa biết → thêm mục "*** Giải thích thuật ngữ:" ở cuối (trước dòng nguồn). Mỗi thuật ngữ 1 dòng bắt đầu bằng dấu · (middle dot). Chỉ giải thích những gì thực sự mới/khó, KHÔNG giải thích từ phổ biến (iPhone, Google, WiFi, AI...). Nếu không có thuật ngữ cần giải thích thì BỎ QUA mục này.
+- GIẢI THÍCH THUẬT NGỮ: CHỈ thêm mục "**Giải thích thuật ngữ:**" khi có thuật ngữ THẬT SỰ chuyên ngành mà người đọc phổ thông chưa biết. TUYỆT ĐỐI KHÔNG giải thích: app, addon, update, plugin, extension, post, link, share, like, comment, feed, API, Chrome, Firefox, Google, Facebook, YouTube, TikTok, iPhone, Android, AI, ChatGPT, Wi-Fi, internet, website, server, cloud, crypto, NFT, CEO, startup — đây là từ người Việt dùng hàng ngày. Nếu không có thuật ngữ thực sự khó → BỎ QUA hoàn toàn mục này.
 - LUÔN kết thúc bằng dòng — rồi xuống dòng "Nguồn dưới cmt đầu".
 - Giọng tự nhiên, dễ hiểu như đang kể cho bạn bè
 - Giữ thông tin có giá trị thực, dữ liệu, kết luận
@@ -1517,10 +1517,29 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 4. Repetition detection
+  // 4. Repetition detection + auto-dedup
   const repRate = detectRepetition(processed);
   if (repRate > 0.3) {
-    issues.push("Output có nhiều câu lặp lại.");
+    // Auto-fix: remove duplicate sentences
+    const sentParts = processed.split(/([.!?。]\s*)/);
+    const seen = new Set();
+    const deduped = [];
+    for (let i = 0; i < sentParts.length; i += 2) {
+      const s = sentParts[i];
+      const punct = sentParts[i + 1] || "";
+      const key = s.toLowerCase().replace(/\s+/g, " ").trim();
+      if (key.length < 10 || !seen.has(key)) {
+        seen.add(key);
+        deduped.push(s + punct);
+      }
+    }
+    const dedupedText = deduped.join("").trim();
+    if (dedupedText !== processed) {
+      processed = dedupedText;
+      issues.push("Đã xóa câu lặp lại.");
+    } else {
+      issues.push("Output có nhiều câu lặp lại.");
+    }
   }
 
   // 5. Clean formatting artifacts
@@ -1532,6 +1551,8 @@ function postProcessOutput(output, sourceText, type) {
     .trim();
   // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
   processed = processed.replace(/^Đoạn\s*\d+\s*[:：]\s*/gim, "");
+  // Normalize "*** Giải thích" → "**Giải thích" (old prompt format)
+  processed = processed.replace(/^\*{3}\s*/gm, "**");
 
   // Xử lý tiêu đề dòng đầu tiên
   if (type && type.startsWith("summary")) {
@@ -1570,7 +1591,47 @@ function postProcessOutput(output, sourceText, type) {
     (m, mo) => "tháng " + mo.charAt(0).toUpperCase() + mo.slice(1),
   );
 
-  // 7. Fix VND long format → short format (44.990.000 đồng → gần 45 triệu đồng)
+  // 7. Brand name capitalization — fix lowercase brand names in body text.
+  // Applied before title-uppercase step so the title still gets all-caps.
+  // Only fix in body (after first line) to avoid fighting with toUpperCase().
+  const titleEnd = processed.indexOf("\n");
+  if (titleEnd > 0) {
+    const title = processed.slice(0, titleEnd);
+    let body = processed.slice(titleEnd);
+    const brandFixes = [
+      [/\bchrome\b/gi, "Chrome"],
+      [/\bfirebase\b/gi, "Firebase"],
+      [/\bgoogle\b/gi, "Google"],
+      [/\bfacebook\b/gi, "Facebook"],
+      [/\binstagram\b/gi, "Instagram"],
+      [/\byoutube\b/gi, "YouTube"],
+      [/\btiktok\b/gi, "TikTok"],
+      [/\bwhatsapp\b/gi, "WhatsApp"],
+      [/\btwitter\b/gi, "Twitter"],
+      [/\bwindows\b/gi, "Windows"],
+      [/\bmacos\b/gi, "macOS"],
+      [/\b(?<![a-z])ios\b/gi, "iOS"],
+      [/\bandroid\b/gi, "Android"],
+      [/\biphone\b/gi, "iPhone"],
+      [/\bipad\b/gi, "iPad"],
+      [/\bapple\b/gi, "Apple"],
+      [/\bmicrosoft\b/gi, "Microsoft"],
+      [/\bopenai\b/gi, "OpenAI"],
+      [/\bchatgpt\b/gi, "ChatGPT"],
+      [/\bclaude\b/gi, "Claude"],
+      [/\bgemini\b/gi, "Gemini"],
+      [/\bgpt-(\d)/gi, "GPT-$1"],
+      [/\blinkedin\b/gi, "LinkedIn"],
+      [/\bpaypal\b/gi, "PayPal"],
+      [/\bspotify\b/gi, "Spotify"],
+      [/\bnetflix\b/gi, "Netflix"],
+      [/\bamazon\b/gi, "Amazon"],
+    ];
+    for (const [re, fix] of brandFixes) body = body.replace(re, fix);
+    processed = title + body;
+  }
+
+  // 8. Fix VND long format → short format (44.990.000 đồng → gần 45 triệu đồng)
   processed = processed.replace(
     /(\d{1,3})\.(\d{3})\.(\d{3})\s*(?:đồng|VND|vnđ|VNĐ)/gi,
     (match, a, b, c) => {
@@ -1588,7 +1649,7 @@ function postProcessOutput(output, sourceText, type) {
     },
   );
 
-  // 8. Remove empty lead-in sentences at the beginning
+  // 9. Remove empty lead-in sentences at the beginning
   const leadInPatterns = [
     /^[^\n.!?]*(?:mình|tôi|mình)\s+(?:vừa|mới|đã)\s+(?:đọc|xem|thấy|nghe|biết)\s+(?:được|thấy|về)?\s*[^\n.!?]*[.!?]\s*/i,
     /^(?:gần đây|mới đây|dạo gần đây|thời gian gần đây)[,.]?\s*[^\n.!?]*[.!?]\s*/i,
@@ -1603,7 +1664,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 9. Hallucination detection: check if output contains numbers not in source
+  // 10. Hallucination detection: check if output contains numbers not in source
   if (sourceText && sourceText.length > 50) {
     const sourceNums = new Set(
       (sourceText.match(/\d[\d.,]*\d|\d+/g) || []).map((n) =>
@@ -1625,7 +1686,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 10. Detect "nói xạo" - writing as if personally experienced when sharing others' content
+  // 11. Detect "nói xạo" - writing as if personally experienced when sharing others' content
   const fakeExperiencePatterns = [
     /\b(?:mình|tôi)\s+(?:vừa|đã|mới)\s+(?:thử|test|dùng|tạo|làm|mua|cài|nâng cấp|update)\b/i,
     /\b(?:mình|tôi)\s+(?:thử|test|dùng)\s+(?:rồi|xong|thấy)\b/i,
@@ -1644,7 +1705,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 11. Detect excessive possessive "của bạn/mình/chúng ta"
+  // 12. Detect excessive possessive "của bạn/mình/chúng ta"
   const possessiveMatches =
     processed.match(/của\s+(?:bạn|mình|chúng ta)/gi) || [];
   if (possessiveMatches.length >= 3) {
@@ -1655,7 +1716,7 @@ function postProcessOutput(output, sourceText, type) {
     );
   }
 
-  // 12. Quality score
+  // 13. Quality score
   let quality = "good";
   if (issues.some((i) => i.includes("fail") || i.includes("trống")))
     quality = "fail";
