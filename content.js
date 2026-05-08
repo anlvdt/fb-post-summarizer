@@ -2794,34 +2794,26 @@
       if (didHide) portal.dataset.fbsPortalChecked = "1";
     }
 
-    // ── Strategy 2: element textContent scan (fallback / non-portal) ─────────
-    // Handles per-character obfuscation (each char in its own <span>) and
-    // plain-text labels on non-portal paths. textContent concatenates all
-    // child text nodes so "Đượctàitrợ" still matches after whitespace strip.
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-    let el;
-    while ((el = walker.nextNode())) {
-      if (el.dataset.fbsClutterChecked) continue;
-      // Skip portal containers — already handled above
-      if (el.classList.contains("__fb-light-mode")) continue;
-
-      const tc = el.textContent || "";
-      const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
-      if (tcNorm.length < 2 || tcNorm.length > 40) continue;
-
-      const matched =
-        _matchesClutterLabelNorm(tcNorm) ||
-        _matchesClutterLabel(tc.trim().toLowerCase());
-      if (!matched) continue;
+    // ── Strategy 2: aria-label substring scan on elements in the feed ───────
+    // Some Facebook ad variants put aria-label directly on a button/span in
+    // the post: e.g. the ··· button has aria-label on itself (not via portal).
+    // Only check elements whose aria-label is short enough (≤120 chars) to
+    // avoid scanning large containers. Must not be inside complementary.
+    const SPKW_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
+    document.querySelectorAll("[aria-label]").forEach(el => {
+      if (el.dataset.fbsClutterChecked) return;
+      const lbl = (el.getAttribute("aria-label") || "").replace(/\s+/g, "").toLowerCase();
+      if (lbl.length < 3 || lbl.length > 120) return;
+      if (!SPKW_NORM.some(kw => lbl.includes(kw))) return;
       el.dataset.fbsClutterChecked = "1";
-
+      if (isInNonPostArea(el)) return;
       const wrapper = findFeedWrapper(el);
-      if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
+      if (!wrapper || wrapper.dataset.fbsHidden === "1") return;
       wrapper.dataset.fbsHidden = "1";
       _hideWrapper(wrapper);
       hiddenClutterCount++;
       newlyHidden++;
-    }
+    });
 
     if (newlyHidden > 0) showClutterToast(hiddenClutterCount);
   }
