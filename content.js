@@ -171,27 +171,30 @@
   }
 
   // ── Feed wrapper finder ──────────────────────────────────────────────────
-  // Walk UP from any element inside a post to find the direct child of the
-  // feed/main container — works regardless of layout (article[role] or divs).
-  const FEED_STOP_ROLES = new Set(["feed", "main"]);
+  // Walk UP from any element inside a post to find the individual post wrapper.
+  // Stops at div[role="feed"] child or data-virtualized — does NOT stop at
+  // div[role="main"] which would match the entire newsfeed column.
   const CLUTTER_STOP_ROLES = new Set(["complementary", "banner", "navigation", "dialog"]);
 
   function findFeedWrapper(el) {
     let cur = el;
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 30; i++) {
       const parent = cur.parentElement;
       if (!parent || parent === document.body) return null;
       const role = parent.getAttribute("role") || "";
-      if (CLUTTER_STOP_ROLES.has(role)) return null;
-      if (FEED_STOP_ROLES.has(role)) return cur;
+      if (CLUTTER_STOP_ROLES.has(role)) return null; // sidebar/nav — wrong area
+      // data-virtualized = Facebook's virtual-scroll individual post wrapper
+      if (parent.hasAttribute("data-virtualized")) return parent;
+      // div[role="feed"] → cur is a single feed item
+      if (role === "feed") return cur;
       // Legacy: article[role="article"] whose parent is feed/article
       if (role === "article") {
         const pRole = (parent.parentElement?.getAttribute("role")) || "";
-        if (FEED_STOP_ROLES.has(pRole) || pRole === "article") return parent;
+        if (pRole === "feed" || pRole === "article") return parent;
       }
       cur = parent;
     }
-    return null;
+    return null; // could not find a reliable individual post boundary — don't hide
   }
 
   // isSponsored: used by findNewSeeMoreElements to skip injecting button on ad posts.
@@ -202,8 +205,6 @@
     const container = findFeedWrapper(el) ||
       (el.getAttribute && el.getAttribute("role") === "article" ? el : findPostArticle(el));
     if (!container) return false;
-    // data-ad-rendering-role="profile_name" is on the advertiser name div — most reliable
-    if (container.querySelector('[data-ad-rendering-role="profile_name"]')) return true;
     // href to Facebook ads about page
     if (container.querySelector(
       'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
@@ -2731,21 +2732,6 @@
       hiddenClutterCount++;
       newlyHidden++;
     }
-
-    // ── Strategy 2: data-ad-rendering-role (Facebook Comet ad marker) ────
-    // Facebook stamps every part of a sponsored post with data-ad-rendering-role.
-    // Organic posts do NOT have this attribute. Finding it means the post is an ad.
-    document.querySelectorAll(
-      '[data-ad-rendering-role="profile_name"]:not([data-fbs-ad-role-checked])'
-    ).forEach(el => {
-      el.setAttribute("data-fbs-ad-role-checked", "1");
-      const wrapper = findFeedWrapper(el);
-      if (!wrapper || wrapper.dataset.fbsHidden === "1") return;
-      wrapper.dataset.fbsHidden = "1";
-      _hideWrapper(wrapper);
-      hiddenClutterCount++;
-      newlyHidden++;
-    });
 
     if (newlyHidden > 0) showClutterToast(hiddenClutterCount);
   }
