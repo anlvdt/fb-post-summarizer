@@ -2745,25 +2745,53 @@
     // So we: (1) find portals with clutter text, (2) get their span IDs,
     // (3) find the feed element with aria-describedby pointing to that ID,
     // (4) walk up to find DIV[data-virtualized] via findFeedWrapper.
+    // Sponsored signals: exact label OR substring inside longer aria text
+    // e.g. "Mở menu cho nội dung được tài trợ của Kính Hải Triều Vietnam"
+    const SPONSORED_NORM_LIST = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
+    function _portalIsSponsored(tcNorm) {
+      // exact clutter label match
+      if (_matchesClutterLabelNorm(tcNorm)) return true;
+      // substring: portal text contains a sponsored keyword anywhere
+      return SPONSORED_NORM_LIST.some(kw => tcNorm.includes(kw));
+    }
+
+    // Scan .__fb-light-mode portals — these are small detached React portals.
+    // Match both exact labels ("Được tài trợ") AND portals whose text contains
+    // a sponsored keyword as substring, e.g.:
+    //   "Mở menu cho nội dung được tài trợ của Kính Hải Triều Vietnam"
+    // That portal's ID is on the ··· button inside the sponsored post.
     const portals = document.querySelectorAll(".__fb-light-mode");
     for (const portal of portals) {
       if (portal.dataset.fbsPortalChecked) continue;
-      portal.dataset.fbsPortalChecked = "1";
       const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
-      if (!_matchesClutterLabelNorm(tcNorm) && !_matchesClutterLabel(tcNorm)) continue;
-      const idEl = portal.querySelector("[id]");
-      if (!idEl || !idEl.id) continue;
-      const qid = JSON.stringify(idEl.id);
-      const selector = "[aria-describedby~=" + qid + "],[aria-labelledby~=" + qid + "]";
-      let ref;
-      try { ref = document.querySelector(selector); } catch (e) { continue; }
-      if (!ref) continue;
-      const wrapper = findFeedWrapper(ref);
-      if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
-      wrapper.dataset.fbsHidden = "1";
-      _hideWrapper(wrapper);
-      hiddenClutterCount++;
-      newlyHidden++;
+      // Mark non-sponsored portals immediately so we skip them next scan
+      if (tcNorm.length < 2 || !_portalIsSponsored(tcNorm)) {
+        portal.dataset.fbsPortalChecked = "1";
+        continue;
+      }
+      // Sponsored portal: try to find the feed post referencing it.
+      // Do NOT mark as checked until we successfully hide — the post may not
+      // be in the DOM yet (virtual scroll) and we need to retry on next scan.
+      const idEls = portal.querySelectorAll("[id]");
+      let didHide = false;
+      for (const idEl of idEls) {
+        if (!idEl.id) continue;
+        const qid = JSON.stringify(idEl.id);
+        const sel = "[aria-describedby~=" + qid + "],[aria-labelledby~=" + qid + "]";
+        let ref;
+        try { ref = document.querySelector(sel); } catch (e) { continue; }
+        if (!ref) continue;
+        const wrapper = findFeedWrapper(ref);
+        if (!wrapper) continue; // post not in DOM yet — retry next scan
+        if (wrapper.dataset.fbsHidden === "1") { didHide = true; break; } // already hidden
+        wrapper.dataset.fbsHidden = "1";
+        _hideWrapper(wrapper);
+        hiddenClutterCount++;
+        newlyHidden++;
+        didHide = true;
+        break;
+      }
+      if (didHide) portal.dataset.fbsPortalChecked = "1";
     }
 
     // ── Strategy 2: element textContent scan (fallback / non-portal) ─────────
