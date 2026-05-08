@@ -162,6 +162,7 @@ class StorageBatcher {
     this.delay = delay;
     this.pending = {};
     this.timeoutId = null;
+    this.flushing = false;
   }
 
   set(key, value) {
@@ -171,7 +172,8 @@ class StorageBatcher {
   }
 
   async flush() {
-    if (Object.keys(this.pending).length === 0) return;
+    if (this.flushing || Object.keys(this.pending).length === 0) return;
+    this.flushing = true;
     const toSave = { ...this.pending };
     this.pending = {};
     this.timeoutId = null;
@@ -180,8 +182,9 @@ class StorageBatcher {
       await chrome.storage.local.set(toSave);
     } catch (error) {
       console.error('Storage batch write failed:', error);
-      // Restore pending items on failure
       Object.assign(this.pending, toSave);
+    } finally {
+      this.flushing = false;
     }
   }
 }

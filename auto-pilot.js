@@ -19,6 +19,8 @@
   let ownProfileName = "";
   let postsToday = 0;
   let postsTodayDate = "";
+  let skippedToday = 0;
+  let postsTotal = 0;
   let agentAlwaysRun = false;
   let loopTimer = null;
 
@@ -100,7 +102,7 @@
   const MIN_POST_INTERVAL_MS = 90 * 60 * 1000; // 90 phút giữa 2 bài (cả 2 mode)
   const SUMMARY_TIMEOUT_MS = 90 * 1000;
   const EVAL_TIMEOUT_MS = 30 * 1000;
-  const EXECUTING_TIMEOUT_MS = 120 * 1000; // 2 phút cho toàn bộ post + comment flow
+  const EXECUTING_TIMEOUT_MS = 180 * 1000; // 3 phút — đủ cho upload ảnh + comment chậm
 
   // Giờ vàng Facebook Việt Nam (engagement cao nhất)
   // 7-9 sáng | 11-13 trưa | 19-22 tối — cắt 22-24 vì engagement thấp
@@ -167,6 +169,7 @@
             state = "SCANNING";
             currentPost = null;
             currentPostUrl = "";
+            pendingScore = null;
             loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
             return;
           }
@@ -195,6 +198,7 @@
         state = "SCANNING";
         currentPost = null;
         currentPostUrl = "";
+        pendingScore = null;
         loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
         return;
       }
@@ -499,9 +503,25 @@
         lastPostTime = Date.now();
         lastPostedText = summaryText;
         postsToday++;
-        if (rawSrcUrl) postedUrls.add(rawSrcUrl);
+        if (rawSrcUrl) {
+          postedUrls.add(rawSrcUrl);
+          // Trim to last 500 to prevent storage quota exhaustion
+          if (postedUrls.size > 500) {
+            const arr = Array.from(postedUrls);
+            postedUrls = new Set(arr.slice(arr.length - 500));
+          }
+        }
         try { chrome?.storage?.local?.set({ agentPostedUrls: Array.from(postedUrls) }); } catch (_) {}
+        postsTotal++;
         log("info", "Post successful!", { postsToday, nextAllowed: "90 min" });
+        try {
+          chrome.runtime.sendMessage({ action: "agent-posted", preview: summaryText.substring(0, 80) });
+        } catch (_) {}
+        try {
+          chrome.storage.local.set({
+            agentStats: { postsToday, postsTotal, skippedToday, lastPostTime: Date.now(), postsTodayDate }
+          });
+        } catch (_) {}
 
         // Defensive: đóng TẤT CẢ modal FB còn sót (fbsAgentPost Step 8 có thể chưa đủ)
         // Retry loop vì Facebook có thể mở nhiều dialog chồng nhau
@@ -611,6 +631,7 @@
           await executePost(summaryText);
         } else {
           log("info", "Score too low, skipping", { score });
+          skippedToday++;
           updateStatus("SKIP", "#b2bec3");
           await wait(humanDelay(2000, 4000));
           try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
@@ -653,11 +674,14 @@
         runAgentLoop();
         return;
       }
-      chrome.storage.local.get(["agentPostedUrls"], (data) => {
+      chrome.storage.local.get(["agentPostedUrls", "agentStats"], (data) => {
         try {
           if (!chrome.runtime.lastError && data.agentPostedUrls && Array.isArray(data.agentPostedUrls)) {
             data.agentPostedUrls.forEach((url) => postedUrls.add(url));
             log("info", "Loaded history", { count: postedUrls.size });
+          }
+          if (!chrome.runtime.lastError && data.agentStats) {
+            postsTotal = data.agentStats.postsTotal || 0;
           }
         } catch (_) {}
         runAgentLoop();

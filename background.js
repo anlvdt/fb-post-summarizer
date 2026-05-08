@@ -324,113 +324,94 @@ async function incrementBadge() {
 // TÓM TẮT TIẾNG VIỆT CHUẨN - Hybrid extractive + abstractive approach
 const SUMMARY_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt tiếng Việt, giỏi viết tiêu đề hấp dẫn.
 
-NHIỆM VỤ: Đọc kỹ nội dung, xác định thông tin quan trọng, viết tóm tắt theo format chuẩn.
+NHIỆM VỤ: Đọc kỹ nội dung, xác định thông tin quan trọng, viết TIÊU ĐỀ có hook mạnh + tóm tắt ngắn gọn.
 
-FORMAT OUTPUT BẮT BUỘC (tuân thủ chính xác):
+QUY TRÌNH:
+1. XÁC ĐỊNH: Chủ đề chính là gì? Kết luận/điểm then chốt nhất?
+2. VIẾT TIÊU ĐỀ (HOOK): Dòng đầu tiên là tiêu đề hấp dẫn, tạo tò mò. Dùng 1 trong các kỹ thuật:
+   - CURIOSITY GAP: Thông tin chưa đầy đủ khiến người đọc muốn biết thêm
+   - CONTRARIAN: Phản bác niềm tin phổ biến
+   - DATA HOOK: Con số/chi tiết cụ thể gây ấn tượng
+   - BENEFIT HOOK: Nêu ngay giá trị người đọc nhận được
+   - QUESTION HOOK: Câu hỏi cụ thể đánh vào pain point
+   Tiêu đề tối đa 15-20 từ, PHẢI chứa thông tin cụ thể từ bài gốc.
+3. TRÍCH XUẤT: Các ý quan trọng nhất (2-5 điểm)
+4. VIẾT LẠI: Hoàn toàn bằng lời của bạn, KHÔNG copy
 
-TIÊU ĐỀ VIẾT HOA, KHÔNG BOLD, KHÔNG DẤU **
+FORMAT OUTPUT:
+[Tiêu đề hook mạnh — viết bình thường, hệ thống sẽ tự viết hoa]
 
 [dòng trống]
 
-Đoạn 1: Ý chính thứ nhất (2-3 câu).
-
-Đoạn 2: Ý chính thứ hai (2-3 câu).
-
-Đoạn 3: Ý chính thứ ba hoặc nhận định tổng kết (2-3 câu).
+[Nội dung tóm tắt]
 
 *** Giải thích thuật ngữ:
-· Thuật ngữ 1: Giải thích ngắn 1 câu.
-· Thuật ngữ 2: Giải thích ngắn 1 câu.
+· Thuật ngữ: Giải thích ngắn 1 câu.
 
 —
 Nguồn dưới cmt đầu
 
-QUY TẮC:
-- TIÊU ĐỀ: Dòng đầu tiên, VIẾT HOA TOÀN BỘ, KHÔNG bọc trong ** hay bất kỳ ký tự đặc biệt nào. Tối đa 15-20 từ, PHẢI chứa thông tin cụ thể từ bài gốc. Dùng kỹ thuật hook: con số, phản bác, tò mò, câu hỏi.
+YÊU CẦU:
+- Tiêu đề PHẢI ở dòng đầu, KHÔNG bọc trong ** hay ký tự đặc biệt. Viết bình thường (hệ thống tự viết hoa).
 - SAU TIÊU ĐỀ: LUÔN 1 dòng trống.
-- NỘI DUNG: Mỗi ý chính viết thành 1 đoạn riêng (2-3 câu), các đoạn cách nhau bằng 1 dòng trống. Tổng 2-5 đoạn.
-- NẾU bài gốc là HƯỚNG DẪN/TUTORIAL: giữ nguyên các bước dạng list ngắn gọn.
+- Tối đa 5 câu liền mạch hoặc 5 bullet points cho phần tóm tắt. KHÔNG viết dài hơn.
+- NẾU bài gốc là HƯỚNG DẪN/TUTORIAL: giữ nguyên các bước (Bước 1, Bước 2...) dạng list ngắn gọn. Mỗi bước tối đa 1-2 câu. Người đọc phải biết cách làm ngay.
+- NẾU bài gốc là TIN TỨC/PHÂN TÍCH: viết đoạn văn liền mạch 3-5 câu.
+- CẤM LẶP Ý: Mỗi câu phải mang thông tin MỚI. Không diễn đạt lại ý cũ bằng từ khác.
+- Nếu muốn tách đoạn cho dễ đọc, cách bằng 1 dòng trống. Nhưng mỗi đoạn phải là ý KHÁC NHAU.
 - GIẢI THÍCH THUẬT NGỮ: Nếu có thuật ngữ chuyên ngành, tên công nghệ mới, viết tắt mà người đọc phổ thông có thể chưa biết → thêm mục "*** Giải thích thuật ngữ:" ở cuối (trước dòng nguồn). Mỗi thuật ngữ 1 dòng bắt đầu bằng dấu · (middle dot). Chỉ giải thích những gì thực sự mới/khó, KHÔNG giải thích từ phổ biến (iPhone, Google, WiFi, AI...). Nếu không có thuật ngữ cần giải thích thì BỎ QUA mục này.
 - LUÔN kết thúc bằng dòng — rồi xuống dòng "Nguồn dưới cmt đầu".
-- Giọng tự nhiên, dễ hiểu, viết lại hoàn toàn bằng lời mình.
-- CHỈ dùng thông tin CÓ TRONG bài gốc, KHÔNG bịa thêm.
-- CẤM tiêu đề nhạt: "Tin mới", "Có một điều thú vị..."
+- Giọng tự nhiên, dễ hiểu như đang kể cho bạn bè
+- Giữ thông tin có giá trị thực, dữ liệu, kết luận
+- Bỏ ví dụ dài, chi tiết lan man, rào đón
+- CHỈ dùng thông tin CÓ TRONG bài gốc, KHÔNG bịa thêm số liệu/thông số/phiên bản
+- CẤM tiêu đề nhạt không có thông tin: "Tin mới", "Có một điều thú vị..."
 - CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây..."
-- CẤM lạm dụng "của bạn", "của mình". Viết trực tiếp.
+- CẤM lạm dụng sở hữu "của bạn", "của mình", "của chúng ta". Viết trực tiếp: "iPhone báo đầy bộ nhớ" thay vì "iPhone của bạn báo đầy bộ nhớ". Chỉ dùng khi thật sự cần phân biệt sở hữu.
 - Trả lời bằng tiếng Việt`;
 
 // TÓM TẮT NGẮN - Quick overview
-const SUMMARY_SHORT_PROMPT = `Tóm tắt cực ngắn nội dung sau.
+const SUMMARY_SHORT_PROMPT = `Tóm tắt cực ngắn nội dung sau:
 
-FORMAT OUTPUT BẮT BUỘC:
-
-TIÊU ĐỀ VIẾT HOA (không bold, không **)
-
-[dòng trống]
-
-1-2 câu tóm tắt cốt lõi.
-
-—
-Nguồn dưới cmt đầu
-
-Quy tắc:
-- Tiêu đề VIẾT HOA, tối đa 15 từ, có hook mạnh
+Yêu cầu:
+- Dòng đầu tiên: tiêu đề có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ. Viết bình thường, KHÔNG bọc **, hệ thống tự viết hoa.
+- Sau tiêu đề: 1 dòng trống, rồi 1-2 câu tóm tắt
 - Nắm bắt thông điệp cốt lõi nhất
 - Viết lại bằng lời mình, KHÔNG copy
-- Nếu có thuật ngữ mới, giải thích ngắn 1 dòng bắt đầu bằng · trước dòng nguồn`;
+- Giọng tự nhiên
+- Nếu có thuật ngữ mới, giải thích ngắn 1 dòng bắt đầu bằng · trước dòng nguồn
+- Kết thúc: — rồi xuống dòng "Nguồn dưới cmt đầu"`;
 
 // TÓM TẮT CHI TIẾT - Detailed với cấu trúc
 const SUMMARY_DETAILED_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt có cấu trúc.
 
-FORMAT OUTPUT BẮT BUỘC:
+NHIỆM VỤ: Viết tiêu đề hook mạnh + tóm tắt chi tiết, giữ cấu trúc logic.
 
-TIÊU ĐỀ VIẾT HOA (không bold, không **)
-
-[dòng trống]
-
-Đoạn 1: Luận điểm chính.
-
-Đoạn 2: Các luận điểm hỗ trợ.
-
-Đoạn 3: Kết luận và hàm ý.
-
-*** Giải thích thuật ngữ:
-· Thuật ngữ: Giải thích.
-
-—
-Nguồn dưới cmt đầu
-
-Quy tắc:
-- Tiêu đề VIẾT HOA, tối đa 20 từ, có hook mạnh
+YÊU CẦU:
+- Dòng đầu tiên: tiêu đề có hook mạnh (con số, phản bác, tò mò), tối đa 20 từ. Viết bình thường, KHÔNG bọc **, hệ thống tự viết hoa.
+- Sau tiêu đề: 1 dòng trống
+- Xác định thesis/luận điểm chính
+- Các luận điểm hỗ trợ quan trọng nhất
+- Kết luận và hàm ý
+- Cấu trúc rõ ràng: Tiêu đề → Điểm chính → Kết luận
 - Mỗi đoạn cách nhau 1 dòng trống
 - Tối đa 150 từ
 - Viết lại hoàn toàn, KHÔNG copy
-- Chỉ giải thích thuật ngữ thực sự mới/khó`;
+- Nếu có thuật ngữ mới/khó, thêm "*** Giải thích thuật ngữ:" trước dòng nguồn
+- Kết thúc: — rồi xuống dòng "Nguồn dưới cmt đầu"`;
 
 // TÓM TẮT DẠNG BULLET - Easy to scan
 const SUMMARY_BULLET_PROMPT = `Tóm tắt thành các bullet points ngắn gọn.
 
-FORMAT OUTPUT BẮT BUỘC:
-
-TIÊU ĐỀ VIẾT HOA (không bold, không **)
-
-[dòng trống]
-
-· Bullet point 1
-· Bullet point 2
-· Bullet point 3
-
-*** Giải thích thuật ngữ:
-· Thuật ngữ: Giải thích.
-
-—
-Nguồn dưới cmt đầu
-
 Quy tắc:
-- Tiêu đề VIẾT HOA, tối đa 15 từ
+- Dòng đầu tiên: tiêu đề có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ. Viết bình thường, KHÔNG bọc **, hệ thống tự viết hoa.
+- Sau tiêu đề: 1 dòng trống
 - Mỗi bullet bắt đầu bằng · tối đa 15 từ
+- Ưu tiên thông tin có giá trị, dữ liệu, kết luận
+- Bỏ ví dụ, chỉ giữ kết quả
 - 5-7 bullet max
-- Chỉ giải thích thuật ngữ thực sự mới/khó`;
+- Nếu có thuật ngữ mới/khó, thêm "*** Giải thích thuật ngữ:" trước dòng nguồn
+- Kết thúc: — rồi xuống dòng "Nguồn dưới cmt đầu"`;
 
 // === QUY TẮC CHÍNH TẢ VNREVIEW (áp dụng cho mọi output tiếng Việt) ===
 const VNREVIEW_RULES = `
@@ -535,26 +516,17 @@ YÊU CẦU:
 // TÓM TẮT GIỮ CẤU TRÚC - Preserve original structure
 const SUMMARY_STRUCTURED_PROMPT = `Bạn là chuyên gia tóm tắt có cấu trúc.
 
-FORMAT OUTPUT BẮT BUỘC:
+NHIỆM VỤ: Viết tiêu đề hook mạnh, giữ nguyên cấu trúc bài viết, chỉ rút gọn nội dung.
 
-TIÊU ĐỀ VIẾT HOA (không bold, không **)
-
-[dòng trống]
-
-[Giữ headings, bullet points, numbering từ bài gốc, rút gọn nội dung]
-
-*** Giải thích thuật ngữ:
-· Thuật ngữ: Giải thích.
-
-—
-Nguồn dưới cmt đầu
-
-Quy tắc:
-- Tiêu đề VIẾT HOA, tối đa 20 từ, có hook mạnh
-- Giữ cấu trúc gốc, mỗi section rút còn 1-3 ý
+YÊU CẦU:
+- Dòng đầu tiên: tiêu đề có hook mạnh, tối đa 20 từ. Viết bình thường, KHÔNG bọc **, hệ thống tự viết hoa.
+- Sau tiêu đề: 1 dòng trống
+- Giữ headings, bullet points, numbering từ bài gốc
+- Mỗi section: rút còn 1-3 ý quan trọng nhất
 - Giảm 50-70% nội dung
 - Viết lại, không copy
-- Chỉ giải thích thuật ngữ thực sự mới/khó`;
+- Nếu có thuật ngữ mới/khó, thêm "*** Giải thích thuật ngữ:" trước dòng nguồn
+- Kết thúc: — rồi xuống dòng "Nguồn dưới cmt đầu"`;
 
 // PROMPT MAP - All available templates
 const PROMPT_TEMPLATES = {
@@ -584,7 +556,7 @@ const PROVIDER_PRIORITY = [
 ];
 
 // Get the best available key across ALL providers
-async function getAvailableKey() {
+async function getAvailableKey(preferredProvider = null) {
   const data = await chrome.storage.sync.get(["apiKeys", "apiKey", "provider"]);
   const localData = await chrome.storage.local.get([
     "keyStatus",
@@ -643,8 +615,11 @@ async function getAvailableKey() {
   const rotationIndex = localData.keyRotationIndex || {};
   const now = Date.now();
 
-  // Try each provider in priority order
-  for (const provider of PROVIDER_PRIORITY) {
+  // Try each provider in priority order, hoisting preferredProvider to front
+  const orderedProviders = preferredProvider && PROVIDER_PRIORITY.includes(preferredProvider)
+    ? [preferredProvider, ...PROVIDER_PRIORITY.filter(p => p !== preferredProvider)]
+    : PROVIDER_PRIORITY;
+  for (const provider of orderedProviders) {
     const keys = apiKeys[provider] || [];
     if (keys.length === 0) continue;
 
@@ -722,6 +697,7 @@ async function getSystemPrompt(
   sourceUrl,
   postTitle,
   postSource,
+  tone = null,
 ) {
   const data = await chrome.storage.sync.get([
     "customSummaryPrompt",
@@ -792,7 +768,19 @@ async function getSystemPrompt(
     "\n\nTRƯỚC KHI VIẾT, hãy tự xác định loại nội dung (tin tức/ý kiến cá nhân/review sản phẩm/hướng dẫn/câu chuyện) và điều chỉnh giọng văn phù hợp.";
 
   if (baseType === "summary") {
-    // Prompt mới đã yêu cầu AI viết hoa tiêu đề sẵn, postProcessOutput cũng auto-uppercase dòng đầu
+    prompt +=
+      "\n- Tiêu đề (dòng đầu tiên) viết bình thường, hệ thống sẽ tự động viết hoa.";
+  }
+
+  // Tone override (from overlay tone buttons)
+  if (tone) {
+    const toneMap = {
+      short: "\n\nRÚT NGẮN: Viết kết quả tối đa 2-3 câu, cực kỳ súc tích.",
+      academic: "\n\nPHONG CÁCH HỌC THUẬT: Viết chuyên nghiệp, dùng thuật ngữ chuyên ngành, cấu trúc mạch lạc, khách quan.",
+      viral: "\n\nPHONG CÁCH VIRAL: Mở đầu bằng câu gây sốc/tò mò, nhấn mạnh con số nổi bật, kết thúc bằng câu hỏi mở hoặc call-to-action.",
+      bullet: "\n\nDẠNG BULLET: Trình bày dưới dạng 4-6 bullet points ngắn gọn (dùng dấu • hoặc -), mỗi điểm 1 ý chính.",
+    };
+    if (toneMap[tone]) prompt += toneMap[tone];
   }
 
   // Add custom instructions if provided
@@ -836,6 +824,8 @@ chrome.runtime.onConnect.addListener((port) => {
         msg.postTitle,
         msg.postSource,
         msg.agentMode,
+        msg.tone || null,
+        msg.preferredProvider || null,
       );
       if (result && result.error)
         port.postMessage({ action: "error", error: result.error });
@@ -865,6 +855,19 @@ chrome.runtime.onConnect.addListener((port) => {
 if (chrome?.runtime?.onMessage) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "ping") {
+    sendResponse({ ok: true });
+    return true;
+  }
+  // === AGENT POSTED — show browser notification ===
+  if (request.action === "agent-posted") {
+    const preview = (request.preview || "").substring(0, 80);
+    chrome.notifications.create("agent-posted-" + Date.now(), {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: "FeedWriter Agent đã đăng bài ✓",
+      message: preview + (preview.length >= 80 ? "…" : ""),
+      priority: 1,
+    });
     sendResponse({ ok: true });
     return true;
   }
@@ -1420,6 +1423,7 @@ function validateInput(text) {
 
 // N-gram overlap: detect if output copies too much from source
 function computeNgramOverlap(source, output, n = 4) {
+  if (!source || !output) return 0;
   const normalize = (s) =>
     s
       .toLowerCase()
@@ -1674,6 +1678,8 @@ async function handleStream(
   postTitle = "",
   postSource = "",
   agentMode = false,
+  tone = null,
+  preferredProvider = null,
 ) {
   // === INPUT GUARDRAILS ===
   const inputCheck = validateInput(text);
@@ -1697,6 +1703,7 @@ async function handleStream(
     sourceUrl,
     postTitle,
     postSource,
+    tone,
   );
 
   // Agent mode: check if user prefers heuristic-only eval (skip AI scoring)
@@ -1707,7 +1714,7 @@ async function handleStream(
   // Nếu useHeuristicEval = true → bỏ qua, dùng heuristic sau khi có summary
   if (agentMode && !useHeuristicOnly) {
     systemPrompt +=
-      "\n\nAGENT MODE: Trước khi viết tóm tắt, chấm điểm bài theo tiêu chí sau:\n- 8-9: Tin AI hot (Claude/ChatGPT/Gemini/Anthropic/OpenAI/DeepSeek ra tính năng mới, đăng ký AI miễn phí/giá rẻ), sự cố bảo mật nghiêm trọng (data breach, ransomware, lỗ hổng lớn)\n- 7: Sản phẩm tech nổi bật, startup gọi vốn lớn, lập trình/tool dev quan trọng\n- 4-6: Tech liên quan nhưng không nổi bật\n- 1-3: Status cá nhân, drama, quảng cáo bán hàng, ẩm thực, thể thao, giải trí không liên quan tech\nĐặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là 1-9), xuống dòng rồi viết tóm tắt theo format đã quy định. Ví dụ:\n[SCORE:8]\nCLAUDE 4 OPUS RA MẮT: VƯỢT GPT-4O VỀ LẬP TRÌNH\n\nNội dung tóm tắt...";
+      "\n\nAGENT MODE: Trước khi viết tóm tắt, chấm điểm bài theo tiêu chí sau:\n- 8-9: Tin AI hot (Claude/ChatGPT/Gemini/Anthropic/OpenAI/DeepSeek ra tính năng mới, đăng ký AI miễn phí/giá rẻ), sự cố bảo mật nghiêm trọng (data breach, ransomware, lỗ hổng lớn)\n- 7: Sản phẩm tech nổi bật, startup gọi vốn lớn, lập trình/tool dev quan trọng\n- 4-6: Tech liên quan nhưng không nổi bật\n- 1-3: Status cá nhân, drama, quảng cáo bán hàng, ẩm thực, thể thao, giải trí không liên quan tech\nĐặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là 1-9), xuống dòng rồi viết tóm tắt (tiêu đề viết bình thường, hệ thống tự viết hoa). Ví dụ:\n[SCORE:8]\nClaude 4 Opus ra mắt: vượt GPT-4o về lập trình\n\nNội dung tóm tắt...";
   }
   const streamFns = {
     groq: callGroqStream,
@@ -1724,7 +1731,7 @@ async function handleStream(
     if (signal.aborted) return { error: "Đã hủy." };
 
     // Get best available key across all providers
-    const keyInfo = await getAvailableKey();
+    const keyInfo = await getAvailableKey(attempt === 0 ? preferredProvider : null);
     if (!keyInfo.key) {
       if (keyInfo.noKeys)
         return { error: "Chưa có API Key. Thêm ở tab API Keys." };

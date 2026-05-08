@@ -5,6 +5,7 @@
   // Author: Le An (anlvdt)
 
   let MIN_LEN = 400;
+  let isBlocked = false;
   let scanTimer = null;
   const injected = new WeakSet();
   const summaryCache = new LRUCache(50);
@@ -25,13 +26,19 @@
     }
   }
 
-  // Cleanup on extension reload
+  // Cleanup on extension reload or page unload
   if (chrome.runtime?.onConnect) {
     chrome.runtime.onConnect.addListener(() => cleanup());
   }
+  window.addEventListener("beforeunload", cleanup, { once: true });
 
-  chrome.storage.sync.get("minLength", (d) => {
+  chrome.storage.sync.get(["minLength", "blockedDomains"], (d) => {
     if (d.minLength) MIN_LEN = d.minLength;
+    if (d.blockedDomains) {
+      const href = location.href;
+      const blocked = d.blockedDomains.split("\n").map(s => s.trim()).filter(Boolean);
+      if (blocked.some(pattern => href.includes(pattern))) isBlocked = true;
+    }
   });
 
   function hashText(text) {
@@ -114,16 +121,15 @@
       document.querySelector('div[id^="mount_0_0"]') ||
       document.querySelector("main") ||
       document.body;
-    // Use more specific selector to reduce DOM traversal
     const els = root.querySelectorAll(
       'div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]',
     );
     for (const el of els) {
       if (el.dataset.fbsScanned) continue;
-      if (el.children.length > 3) continue;
-      const t = (el.textContent || "").trim().toLowerCase();
+      if (el.children.length > 6) continue;
+      const t = (el.innerText || el.textContent || "").trim().toLowerCase();
       if (t.length > 30 || t.length < 4) continue;
-      if (SEE_MORE.some((kw) => t === kw || t === "..." + kw)) {
+      if (SEE_MORE.some((kw) => t === kw || t === "..." + kw || t.startsWith(kw))) {
         el.dataset.fbsScanned = "1";
         if (isInNonPostArea(el)) continue;
         results.push(el);
@@ -140,14 +146,19 @@
       const role = p.getAttribute("role") || "";
       if (["navigation", "banner", "dialog", "complementary"].includes(role))
         return true;
-      // Skip comment areas on Facebook — comments use role="article" nested inside another role="article" (the post)
+      // Skip comment areas on Facebook.
+      // Old FB structure: post=article, comment=article inside post (1 ancestor article = comment).
+      // New FB structure: feed=article, post=article inside feed, comment=article inside post.
+      // Now need 2+ ancestor articles to be a comment (post has 1 ancestor article = feed container).
       if (SITE === "facebook" && role === "article") {
+        let articleAncestors = 0;
         let ancestor = p.parentElement;
-        for (let j = 0; j < 10; j++) {
+        for (let j = 0; j < 15; j++) {
           if (!ancestor || ancestor === document.body) break;
-          if (ancestor.getAttribute("role") === "article") return true; // nested article = comment
+          if (ancestor.getAttribute("role") === "article") articleAncestors++;
           ancestor = ancestor.parentElement;
         }
+        if (articleAncestors >= 2) return true; // deeply nested = comment/reply
       }
       // Only check computed style for elements that might be fixed/sticky (cheaper than always calling getComputedStyle)
       if (p.style.position === "fixed" || p.style.position === "sticky")
@@ -260,9 +271,24 @@
       '" width="16" height="16" style="vertical-align:-3px"> <span class="fbs-title-text">Tóm tắt AI</span></span>' +
       '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
       '<div class="fbs-panel-body"></div>' +
+      '<div class="fbs-tone-row">' +
+      '<span class="fbs-tone-label">Tone:</span>' +
+      '<button class="fbs-tone-btn" data-tone="short">Ngắn hơn</button>' +
+      '<button class="fbs-tone-btn" data-tone="academic">Học thuật</button>' +
+      '<button class="fbs-tone-btn" data-tone="viral">Viral</button>' +
+      '<button class="fbs-tone-btn" data-tone="bullet">Bullet points</button>' +
+      "</div>" +
       '<div class="fbs-panel-footer">' +
       '<button class="fbs-edit-btn" title="Chỉnh sửa trước khi copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa</button>' +
       '<button class="fbs-stop-btn">Dừng</button>' +
+      '<select class="fbs-model-select" title="Chọn provider cho Viết lại">' +
+      '<option value="">Auto</option>' +
+      '<option value="groq">Groq</option>' +
+      '<option value="gemini">Gemini</option>' +
+      '<option value="cerebras">Cerebras</option>' +
+      '<option value="sambanova">SambaNova</option>' +
+      '<option value="openrouter">OpenRouter</option>' +
+      "</select>" +
       '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
       '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
       '<button class="fbs-post-status-btn" title="Đăng lên Facebook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg> Đăng</button>' +
@@ -279,6 +305,16 @@
       .addEventListener("click", stopSummarize);
     panel.querySelector(".fbs-regen-btn").addEventListener("click", regenerate);
     panel.querySelector(".fbs-edit-btn").addEventListener("click", toggleEdit);
+    panel.querySelectorAll(".fbs-tone-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!lastSummarizeParams) return;
+        const tone = btn.dataset.tone;
+        panel.querySelectorAll(".fbs-tone-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const { text, type, _element } = lastSummarizeParams;
+        summarizeText(text, type, _element, tone);
+      });
+    });
   }
 
   let lastSummarizeParams = null;
@@ -315,13 +351,12 @@
 
   function regenerate() {
     if (!lastSummarizeParams) return;
-    const { text, type } = lastSummarizeParams;
-    // Clear all cache entries for this text+type (any settings combo)
+    const { text, type, _element, tone } = lastSummarizeParams;
     const prefix = hashText(text) + "_" + type;
     for (const k of summaryCache.keys()) {
       if (k.startsWith(prefix)) summaryCache.delete(k);
     }
-    summarizeText(text, type);
+    summarizeText(text, type, _element, tone);
   }
 
   function openOverlay(html, streaming, type = "summary") {
@@ -377,6 +412,12 @@
       !isSummarizing && !streaming && html.includes("fbs-result")
         ? "inline-flex"
         : "none";
+    panel.querySelector(".fbs-model-select").style.display =
+      !isSummarizing && !streaming ? "inline-block" : "none";
+    const toneRow = panel.querySelector(".fbs-tone-row");
+    const showTone = !isSummarizing && !streaming && html.includes("fbs-result") && type === "summary";
+    toneRow.classList.toggle("fbs-tone-visible", showTone);
+    if (!showTone) panel.querySelectorAll(".fbs-tone-btn").forEach((b) => b.classList.remove("active"));
     if (streaming && panelBody.scrollHeight - panelBody.scrollTop < 500)
       panelBody.scrollTop = panelBody.scrollHeight;
   }
@@ -409,13 +450,11 @@
   }
 
   function copyResult() {
-    // If in edit mode, get text from textarea; otherwise use stored plain text
+    // If in edit mode, get text from textarea; otherwise use edited cache or display text
     const textarea = panelBody?.querySelector(".fbs-edit-textarea");
-    const rawText = textarea
+    const text = textarea
       ? textarea.value
-      : panelBody?.dataset?.editedText || panelBody?.dataset?.plainText || panelBody?.innerText || "";
-    // Format cho Facebook khi copy
-    const text = formatForFacebook(rawText);
+      : panelBody?.dataset?.editedText || panelBody?.innerText || "";
     navigator.clipboard.writeText(text).then(() => {
       const btn = panel.querySelector(".fbs-copy-btn");
       const orig = btn.innerHTML;
@@ -434,48 +473,26 @@
     if (isSummarizing || !panelBody) return;
 
     try {
-      // Lấy text từ panel — ưu tiên edited text, rồi plain text gốc (tránh innerText bị lỗi format)
+      // Lấy text từ panel — ưu tiên edited text, rồi fbs-result element (tránh lấy text nút bấm)
       const textarea = panelBody.querySelector(".fbs-edit-textarea");
+      const resultEl = panelBody.querySelector(".fbs-result");
       let text = "";
       if (textarea) {
         text = textarea.value;
       } else if (panelBody.dataset.editedText) {
         text = panelBody.dataset.editedText;
-      } else if (panelBody.dataset.plainText) {
-        text = panelBody.dataset.plainText;
-      } else {
-        const resultEl = panelBody.querySelector(".fbs-result");
-        text = resultEl ? resultEl.innerText : "";
+      } else if (resultEl) {
+        text = resultEl.innerText;
       }
       text = text.trim();
       if (!text) return;
 
       // Lấy metadata từ DOM element (nếu có)
       const _element = lastSummarizeParams?._element || null;
-      let rawUrl = _element ? extractPostPermalink(_element) : "";
+      const rawUrl = _element ? extractPostPermalink(_element) : location.href;
       const author = _element ? extractPostAuthor(_element) : "";
       const source = _element ? extractPostSource(_element) : "";
-      let imageUrl = _element ? extractPostImage(_element) : "";
-
-      // Fallback ảnh: nếu không lấy được từ DOM, thử og:image
-      if (!imageUrl) {
-        const ogImg = document.querySelector('meta[property="og:image"]');
-        if (ogImg && ogImg.content) imageUrl = ogImg.content;
-      }
-
-      // Fallback: nếu không lấy được permalink từ DOM, thử URL trang hiện tại
-      if (!rawUrl) {
-        const pageUrl = location.href;
-        if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks|pfbid/.test(pageUrl)) {
-          rawUrl = pageUrl;
-        }
-      }
-
-      // Filter out profile URLs (they cause "Dòng thời gian của..." when pasted)
-      if (rawUrl && (rawUrl.includes("/profile.php") || rawUrl.includes("/user/") ||
-          /facebook\.com\/[^/]+\/?$/.test(rawUrl))) {
-        rawUrl = "";
-      }
+      const imageUrl = _element ? extractPostImage(_element) : "";
 
       // Không append nguồn vào text — nguồn sẽ ghi ở comment đầu tiên
 
@@ -518,96 +535,13 @@
       if (backdrop) backdrop.classList.remove("fbs-visible");
       openFacebookComposer(text, cleanUrl, imageUrl, author, source);
     } catch (_) {
-      // Fallback — ưu tiên plain text gốc
-      const text = panelBody?.dataset?.plainText || panelBody?.querySelector(".fbs-result")?.innerText || panelBody?.innerText || "";
+      // Fallback
+      const resultEl = panelBody?.querySelector(".fbs-result");
+      const text = resultEl ? resultEl.innerText : panelBody?.innerText || "";
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
       openFacebookComposer(text.trim(), "", "", "", "");
     }
-  }
-
-  // === FORMAT TEXT FOR FACEBOOK STATUS ===
-  // Chuẩn hóa plain text trước khi paste vào Facebook composer
-  // Đảm bảo: tiêu đề VIẾT HOA, đoạn cách dòng trống, glossary format đúng, nguồn cuối bài
-  function formatForFacebook(rawText) {
-    if (!rawText || !rawText.trim()) return rawText;
-    const lines = rawText.split("\n");
-    const output = [];
-    let isFirstNonEmpty = true;
-    let prevWasEmpty = false;
-    let inGlossary = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-
-      // Empty line
-      if (trimmed.length === 0) {
-        // Collapse multiple empty lines into one
-        if (!prevWasEmpty && output.length > 0) {
-          output.push("");
-          prevWasEmpty = true;
-        }
-        continue;
-      }
-      prevWasEmpty = false;
-
-      // Strip markdown bold ** from any line
-      let clean = trimmed.replace(/\*\*(.*?)\*\*/g, "$1");
-      // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
-      clean = clean.replace(/^Đoạn\s*\d+\s*[:：]\s*/i, "");
-
-      // First non-empty line → ensure UPPERCASE title
-      if (isFirstNonEmpty) {
-        isFirstNonEmpty = false;
-        clean = clean.toUpperCase();
-        output.push(clean);
-        continue;
-      }
-
-      // Glossary heading: *** Giải thích thuật ngữ:
-      if (/^\*\*\*/.test(clean)) {
-        inGlossary = true;
-        // Ensure blank line before glossary
-        if (output.length > 0 && output[output.length - 1] !== "") {
-          output.push("");
-        }
-        const heading = clean.replace(/^\*\*\*\s*/, "").toUpperCase();
-        output.push("*** " + heading);
-        continue;
-      }
-
-      // Glossary bullet items: add "- " to ALL lines in glossary mode
-      // Exit glossary only on footer separator (— or ---), not on non-bullet lines
-      if (inGlossary) {
-        if (clean === "—" || clean === "---") {
-          inGlossary = false;
-          // fall through to footer handling below
-        } else {
-          const bulletText = clean.replace(/^[·•\-]\s*/, "");
-          output.push("- " + bulletText);
-          continue;
-        }
-      }
-
-      // Source footer line: — or ---
-      if (clean === "—" || clean === "---") {
-        // Ensure blank line before footer
-        if (output.length > 0 && output[output.length - 1] !== "") {
-          output.push("");
-        }
-        output.push("—");
-        continue;
-      }
-
-      // Regular bullet lines outside glossary: normalize to "- "
-      if (/^[·•]\s/.test(clean)) {
-        clean = "- " + clean.replace(/^[·•]\s*/, "");
-      }
-
-      output.push(clean);
-    }
-
-    return output.join("\n");
   }
 
   function openFacebookComposer(text, sourceUrl, imageUrl, author, source) {
@@ -615,8 +549,6 @@
     preview.className = "fbs-status-preview";
 
     // Validate author/source — bỏ nếu chứa ký tự rác (FB anti-scraping)
-    const profileLabelRe = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
-    const cleanProfileLabel = (n) => n ? n.replace(profileLabelRe, "").trim() : "";
     const isValidName = (n) =>
       n &&
       n.length >= 2 &&
@@ -624,8 +556,8 @@
       !/[a-f0-9]{10,}/i.test(n) &&
       !/\d{8,}/.test(n) &&
       n.split(/\s+/).length <= 10;
-    const cleanAuthor = isValidName(cleanProfileLabel(author)) ? cleanProfileLabel(author) : "";
-    const cleanSource = isValidName(cleanProfileLabel(source)) ? cleanProfileLabel(source) : "";
+    const cleanAuthor = isValidName(author) ? author : "";
+    const cleanSource = isValidName(source) ? source : "";
 
     // Ảnh preview (nếu có)
     const imgHtml = imageUrl
@@ -643,13 +575,10 @@
       esc(text).replace(/\n/g, "<br>") +
       "</div>" +
       '<div class="fbs-sp-link-input">' +
-      '<div class="fbs-sp-link-label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Link bài gốc (ghi nguồn)</div>' +
-      '<div class="fbs-sp-link-row">' +
-      '<input type="text" class="fbs-sp-link-field' + (sourceUrl ? ' has-value' : '') + '" placeholder="Dán link bài gốc vào đây..." value="' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
+      '<input type="text" class="fbs-sp-link-field" placeholder="Paste link bài gốc (ghi nguồn ở comment đầu)" value="' +
       esc(sourceUrl || "") +
       '">' +
-      "</div>" +
-      '<div class="fbs-sp-link-status ' + (sourceUrl ? 'has-link' : 'no-link') + '">' + (sourceUrl ? 'Link đã sẵn sàng' : 'Chưa có link — dán link để ghi nguồn ở comment') + '</div>' +
       "</div>" +
       (cleanAuthor
         ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' +
@@ -677,32 +606,16 @@
     if (footer) footer.style.display = "none";
 
     const linkField = preview.querySelector(".fbs-sp-link-field");
-    const linkStatus = preview.querySelector(".fbs-sp-link-status");
     const commentSection = preview.querySelector(".fbs-sp-comment");
     const commentText = preview.querySelector(".fbs-sp-comment-text");
-
-    // Update link status indicator
-    function updateLinkStatus(url) {
-      if (url) {
-        linkField.classList.add("has-value");
-        linkStatus.className = "fbs-sp-link-status has-link";
-        linkStatus.textContent = "Link đã sẵn sàng";
-      } else {
-        linkField.classList.remove("has-value");
-        linkStatus.className = "fbs-sp-link-status no-link";
-        linkStatus.textContent = "Chưa có link — dán link để ghi nguồn ở comment";
-      }
-    }
 
     // Generate comment content từ link — ghi nguồn kèm tên tác giả nếu có
     function updateComment(url) {
       if (!url) {
         commentSection.style.display = "none";
-        updateLinkStatus("");
         return;
       }
       commentSection.style.display = "block";
-      updateLinkStatus(url);
       // Build source line: "Nguồn: Tên tác giả — link" hoặc "Nguồn: link"
       let sourceLine = "Nguồn: ";
       if (cleanAuthor) {
@@ -761,7 +674,6 @@
         if (!url) return;
         const clean = normalizeFbUrl(url);
         linkField.value = clean;
-        linkField.classList.add("has-value");
         updateComment(clean);
       }, 50);
     });
@@ -769,11 +681,6 @@
     // Cũng update khi user gõ tay
     linkField.addEventListener("input", () => {
       const url = linkField.value.trim();
-      if (url) {
-        linkField.classList.add("has-value");
-      } else {
-        linkField.classList.remove("has-value");
-      }
       updateComment(url);
     });
 
@@ -781,13 +688,6 @@
       element.focus();
       const dataTransfer = new DataTransfer();
       dataTransfer.setData("text/plain", text);
-      // Facebook Lexical cần text/html để giữ line breaks
-      // Dùng <p><br></p> cho dòng trống — bare <br> giữa <p> bị Lexical bỏ qua
-      const html = text
-        .split("\n")
-        .map((line) => (line === "" ? "<p><br></p>" : "<p>" + line + "</p>"))
-        .join("");
-      dataTransfer.setData("text/html", html);
       if (file) dataTransfer.items.add(file);
       element.dispatchEvent(
         new ClipboardEvent("paste", {
@@ -808,7 +708,7 @@
         await navigator.clipboard.writeText(content);
 
         btn.innerHTML =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Đang paste...';
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> ...';
 
         let posted = false;
         if (SITE === "facebook") {
@@ -906,13 +806,7 @@
       .querySelector(".fbs-sp-open-fb")
       .addEventListener("click", async () => {
         const btn = preview.querySelector(".fbs-sp-open-fb");
-        // Format text cho Facebook trước khi copy
-        const fbText = formatForFacebook(
-          text.includes("Nguồn dưới cmt đầu")
-            ? text
-            : text + "\n\n—\nNguồn dưới cmt đầu"
-        );
-        await navigator.clipboard.writeText(fbText);
+        await navigator.clipboard.writeText(text);
         btn.innerHTML =
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
         if (SITE === "facebook") {
@@ -951,33 +845,18 @@
                       console.warn("Image paste failed", e);
                     }
                   }
-                  // Thêm footer "Nguồn dưới cmt đầu" vào text trước khi paste (nếu chưa có)
-                  const textWithFooter = text.includes("Nguồn dưới cmt đầu")
-                    ? text
-                    : text + "\n\n—\nNguồn dưới cmt đầu";
-                  const formattedText = formatForFacebook(textWithFooter);
-                  if (editor) autoPasteToLexical(editor, formattedText, imgFile);
-                  // Auto-copy comment nguồn vào clipboard — user chỉ cần paste vào comment sau khi đăng
-                  const commentContent = commentText.textContent;
-                  if (commentContent) {
-                    navigator.clipboard.writeText(commentContent).catch(() => {});
-                    btn.innerHTML =
-                      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã paste + nguồn đã copy!';
-                  } else {
-                    btn.innerHTML =
-                      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đã paste xong!';
-                  }
+                  // Thêm footer "Nguồn dưới cmt đầu" vào text trước khi paste
+                  const textWithFooter = text + "\n\n—\nNguồn dưới cmt đầu";
+                  if (editor) autoPasteToLexical(editor, textWithFooter, imgFile);
+                  btn.innerHTML =
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
                 }, 800);
                 return;
               }
             }
             window.scrollTo({ top: 0, behavior: "smooth" });
             btn.innerHTML =
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Text đã copy — paste vào ô status';
-            setTimeout(() => {
-              btn.innerHTML =
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
-            }, 4000);
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
           }, 200);
         }
       });
@@ -1025,45 +904,32 @@
     if (!imgSrc) return null;
 
     // Attempt 1: Via Canvas (fastest but fails on cross-origin taint)
-    try {
-      // Search by src, currentSrc (post-srcset resolution), or data-src
-      let imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
-      if (!imgEl) {
-        imgEl = Array.from(document.querySelectorAll("img")).find(
-          (img) => img.currentSrc === imgSrc || img.getAttribute("data-src") === imgSrc,
-        ) || null;
-      }
-      if (imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
+    const imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+    if (imgEl && imgEl.naturalWidth > 0) {
+      try {
         const canvas = document.createElement("canvas");
         canvas.width = imgEl.naturalWidth;
         canvas.height = imgEl.naturalHeight;
         canvas.getContext("2d").drawImage(imgEl, 0, 0);
         const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-        if (blob && blob.size > 1000) return new File([blob], "image.png", { type: "image/png" });
-      }
-    } catch (canvasErr) {
-      console.log("[Agent] Canvas capture failed (CORS):", canvasErr.message);
+        if (blob) return new File([blob], "image.png", { type: "image/png" });
+      } catch (_) {}
     }
 
-    // Attempt 2: Via Background.js fetch (bypasses CORS) — with timeout
+    // Attempt 2: Via Background.js fetch (bypasses CORS)
     try {
-      const resp = await Promise.race([
-        new Promise((resolve) =>
-          chrome.runtime.sendMessage(
-            { action: "fetch-image", url: imgSrc },
-            resolve,
-          ),
+      const resp = await new Promise((resolve) =>
+        chrome.runtime.sendMessage(
+          { action: "fetch-image", url: imgSrc },
+          resolve,
         ),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Image fetch timeout")), 15000)),
-      ]);
+      );
       if (resp && resp.base64) {
         const fetchResp = await fetch(resp.base64);
         const blob = await fetchResp.blob();
-        if (blob && blob.size > 1000) return new File([blob], "image.png", { type: "image/png" });
+        if (blob) return new File([blob], "image.png", { type: "image/png" });
       }
-    } catch (fetchErr) {
-      console.warn("[Agent] Background image fetch failed:", fetchErr.message);
-    }
+    } catch (_) {}
 
     return null;
   }
@@ -1074,13 +940,6 @@
     if (text) {
       const dtText = new DataTransfer();
       dtText.setData("text/plain", text);
-      // Facebook Lexical cần text/html để giữ line breaks
-      // Dùng <p><br></p> cho dòng trống — bare <br> giữa <p> bị Lexical bỏ qua
-      const html = text
-        .split("\n")
-        .map((line) => (line === "" ? "<p><br></p>" : "<p>" + line + "</p>"))
-        .join("");
-      dtText.setData("text/html", html);
       element.dispatchEvent(
         new ClipboardEvent("paste", {
           clipboardData: dtText,
@@ -1108,16 +967,14 @@
 
   function buildCommentText(cleanUrl, author, source) {
     let line = "Nguồn: ";
-    const profileLabelRe = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
-    const stripLabel = (n) => n ? n.replace(profileLabelRe, "").trim() : "";
     const isValidName = (n) =>
       n &&
       n.length >= 2 &&
       n.length < 80 &&
       !/[a-f0-9]{10,}/i.test(n) &&
       !/\d{8,}/.test(n);
-    const a = isValidName(stripLabel(author)) ? stripLabel(author) : "";
-    const s = isValidName(stripLabel(source)) ? stripLabel(source) : "";
+    const a = isValidName(author) ? author : "";
+    const s = isValidName(source) ? source : "";
     if (a) {
       line += a;
       if (s && s !== a) line += " (" + s + ")";
@@ -1134,13 +991,6 @@
     if (SITE !== "facebook") return { ok: false, reason: "not_facebook" };
 
     const cleanUrl = cleanSourceUrl(rawSourceUrl);
-    // Validate: KHÔNG dùng link profile làm source URL (gây ra "Dòng thời gian của...")
-    const isProfileUrl = cleanUrl && (
-      cleanUrl.includes("/profile.php") ||
-      cleanUrl.includes("/user/") ||
-      /facebook\.com\/[^/]+\/?$/.test(cleanUrl) // bare username URL like facebook.com/username
-    );
-    const validUrl = isProfileUrl ? "" : cleanUrl;
     // Lấy author + source (group/page name) từ DOM
     const postAuthor =
       postElement && typeof window.fbsExtractAuthor === "function"
@@ -1153,19 +1003,19 @@
 
     // LUÔN tạo commentText — bắt buộc comment nguồn
     let commentText = "";
-    const isUsefulUrl = validUrl && validUrl !== "https://www.facebook.com" && validUrl.length > 30;
+    const isUsefulUrl = cleanUrl && cleanUrl !== "https://www.facebook.com" && cleanUrl.length > 30;
 
     if (isUsefulUrl) {
       // Có link chính xác → dùng link + tên tác giả
-      commentText = buildCommentText(validUrl, postAuthor, postSource);
+      commentText = buildCommentText(cleanUrl, postAuthor, postSource);
     } else {
       // Không có link chính xác → build comment từ thông tin có sẵn
       let parts = [];
       parts.push("Nguồn:");
       if (postAuthor) parts.push(postAuthor);
       if (postSource && postSource !== postAuthor) parts.push("(" + postSource + ")");
-      if (validUrl && validUrl.length > 30) {
-        parts.push("\n" + validUrl);
+      if (cleanUrl && cleanUrl.length > 30) {
+        parts.push("\n" + cleanUrl);
       } else {
         // Dùng URL trang hiện tại nếu có ý nghĩa (group/page)
         const pageUrl = location.href;
@@ -1180,16 +1030,12 @@
       }
     }
     console.log("[Agent] Comment text prepared:", commentText);
-    console.log("[Agent] Author:", postAuthor || "(unknown)", "| Source:", postSource || "(unknown)", "| URL:", validUrl || "(none)", isProfileUrl ? "| REJECTED profile URL: " + cleanUrl : "");
+    console.log("[Agent] Author:", postAuthor || "(unknown)", "| Source:", postSource || "(unknown)", "| URL:", cleanUrl || "(none)");
 
     // Build final post text
     let postText = summaryText.trim();
-    // Thêm dòng "Nguồn dưới cmt đầu" nếu chưa có (AI prompt có thể đã thêm sẵn)
-    if (!postText.includes("Nguồn dưới cmt đầu")) {
-      postText += "\n\n—\nNguồn dưới cmt đầu";
-    }
-    // Format cho Facebook: chuẩn hóa tiêu đề, đoạn, glossary, nguồn
-    postText = formatForFacebook(postText);
+    // LUÔN thêm dòng "Nguồn dưới cmt đầu" — bất kể nội dung summary
+    postText += "\n\n—\nNguồn dưới cmt đầu";
 
     console.log("[Agent] fbsAgentPost called:", {
       textLength: postText.length,
@@ -1301,16 +1147,12 @@
     // Step 6: Chờ post xuất hiện trên Feed
     console.log("[Agent] === STEP 6: Bài đã đăng, chờ feed refresh ===");
     console.log("[Agent] commentText:", commentText.substring(0, 80));
-    // Chờ lâu hơn nếu có ảnh (upload mất thời gian)
-    await new Promise((r) => setTimeout(r, imgFile ? 15000 : 10000));
+    await new Promise((r) => setTimeout(r, 10000));
 
     // Step 7: Comment nguồn — bài vừa đăng nằm ngay đầu feed
-    // Scroll lên đầu feed trước để tìm bài vừa đăng
     {
       try {
         console.log("[Agent] === STEP 7: Comment nguồn ===");
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        await new Promise((r) => setTimeout(r, 2000));
 
         // Tìm nút "Viết bình luận" trực tiếp bằng aria-label (chính xác nhất)
         let commentBtn = null;
@@ -1385,50 +1227,29 @@
       }
     }
 
-    // Step 8: Đóng TẤT CẢ modal/dialog mà Facebook mở sau khi đăng/comment
-    // Facebook có thể mở nhiều dialog chồng nhau — cần đóng hết để quay về newsfeed.
+    // Step 8: Đóng modal "Bài viết" mà Facebook mở sau khi đăng/comment
+    // Facebook tự mở post dialog sau khi đăng — agent cần đóng để tiếp tục scroll feed.
     {
-      await new Promise((r) => setTimeout(r, 2000));
-      // Retry loop: đóng tất cả dialog còn mở (tối đa 5 lần)
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          const dialogs = document.querySelectorAll('div[role="dialog"]');
-          if (dialogs.length === 0) {
-            console.log("[Agent] Step 8: Không còn dialog nào mở");
-            break;
-          }
-          // Tìm nút đóng trong dialog gần nhất (cuối cùng trong DOM = trên cùng z-index)
-          const lastDialog = dialogs[dialogs.length - 1];
-          const closeBtn =
-            lastDialog.querySelector('[aria-label="Đóng"][role="button"]') ||
-            lastDialog.querySelector('[aria-label="Close"][role="button"]') ||
-            lastDialog.querySelector('[aria-label="Đóng"]') ||
-            lastDialog.querySelector('[aria-label="Close"]');
-          if (closeBtn) {
-            console.log("[Agent] Step 8: Đóng dialog #" + (attempt + 1));
-            closeBtn.click();
-            await new Promise((r) => setTimeout(r, 800));
-          } else {
-            // Fallback: Escape key
-            console.log("[Agent] Step 8: Escape để đóng dialog #" + (attempt + 1));
-            document.dispatchEvent(
-              new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
-            );
-            await new Promise((r) => setTimeout(r, 800));
-          }
-        } catch (_) { break; }
-      }
-
-      // Final check: nếu vẫn còn dialog, thử navigate back
-      await new Promise((r) => setTimeout(r, 500));
-      const remainingDialogs = document.querySelectorAll('div[role="dialog"]');
-      if (remainingDialogs.length > 0) {
-        console.warn("[Agent] Step 8: Vẫn còn " + remainingDialogs.length + " dialog, thử Escape lần cuối");
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
-        );
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        // Ưu tiên: nút Đóng trong dialog (aria-label tiếng Việt và tiếng Anh)
+        const closeBtn =
+          document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"]') ||
+          document.querySelector('div[role="dialog"] [aria-label="Close"][role="button"]') ||
+          document.querySelector('[aria-label="Đóng"][role="button"]') ||
+          document.querySelector('[aria-label="Close"][role="button"]');
+        if (closeBtn) {
+          console.log("[Agent] Step 8: Đóng modal FB post");
+          closeBtn.click();
+          await new Promise((r) => setTimeout(r, 800));
+        } else {
+          // Fallback: Escape key
+          document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }),
+          );
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      } catch (_) {}
     }
 
     return { ok: true };
@@ -1443,8 +1264,12 @@
   window.fbsExtractPermalinkAsync = async function (element) {
     try {
       if (SITE === "facebook" && element) {
-        const postContainer = findPostContainer(element);
-        if (!postContainer) throw new Error("No post container found");
+        let postContainer = element;
+        for (let i = 0; i < 20; i++) {
+          if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+          postContainer = postContainer.parentElement;
+          if (postContainer.getAttribute("role") === "article") break;
+        }
 
         const shareBtn = Array.from(postContainer.querySelectorAll('div[role="button"]')).find(b => {
           const label = (b.getAttribute("aria-label") || "").toLowerCase();
@@ -1452,12 +1277,9 @@
         });
 
         if (shareBtn) {
-          // Save clipboard content to restore later (avoid corrupting user's clipboard)
-          let oldClip = "";
-          try { oldClip = await navigator.clipboard.readText(); } catch (_) {}
-
+          const oldClip = await navigator.clipboard.readText().catch(() => "");
           shareBtn.click();
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 800));
 
           const dialog = document.querySelector('div[role="dialog"]');
           if (dialog) {
@@ -1465,8 +1287,7 @@
              const spans = Array.from(dialog.querySelectorAll('span[dir="auto"], div[dir="auto"]'));
              for (const el of spans) {
                 const t = (el.textContent || "").toLowerCase().trim();
-                // Match "Sao chép liên kết" (Vietnamese) or "Copy link" (English)
-                if ((t === "sao chép liên kết" || t === "copy link" || t === "copy") && t.length >= 4) {
+                if (("sao chép liên kết copy link").includes(t) && t.length > 5) {
                    copyBtn = el.closest('[role="button"], [role="menuitem"], div[tabindex="0"], div.x1i10hfl');
                    if (copyBtn) break;
                 }
@@ -1474,55 +1295,33 @@
 
              if (copyBtn) {
                copyBtn.click();
-               await new Promise(r => setTimeout(r, 1500));
+               await new Promise(r => setTimeout(r, 1200));
                
-               let newClip = "";
-               try { newClip = await navigator.clipboard.readText(); } catch (_) {}
-               
-               // Always close dialog first
-               try {
-                 const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
-                 if (closeBtn) closeBtn.click();
-                 else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
-               } catch (_) {}
-               await new Promise(r => setTimeout(r, 300));
-
-               // Restore old clipboard content
-               if (oldClip) {
-                 try { await navigator.clipboard.writeText(oldClip); } catch (_) {}
-               }
-
+               const newClip = await navigator.clipboard.readText().catch(() => "");
                if (newClip && newClip.includes("facebook.com") && newClip !== oldClip) {
                  try {
+                   const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
+                   if (closeBtn) closeBtn.click();
+                 } catch (_) {}
+                 
+                 try {
                    const u = new URL(newClip);
-                   // Clean tracking params
-                   for (const k of [...u.searchParams.keys()]) {
-                     if (k.startsWith("__") || k.startsWith("utm_") ||
-                         ["fbclid", "ref", "mibextid", "notif_id", "notif_t"].includes(k))
-                       u.searchParams.delete(k);
-                   }
                    return u.origin + u.pathname + (u.searchParams.has("fbid") ? "?fbid=" + u.searchParams.get("fbid") : "");
                  } catch (_) {
                    return newClip;
                  }
                }
-             } else {
-               // No copy button found — close dialog and fallback
-               try {
-                 const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
-                 if (closeBtn) closeBtn.click();
-                 else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
-               } catch (_) {}
              }
-          } else {
-            // Dialog didn't open — try Escape to dismiss any partial UI
-            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+             
+             try {
+               const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
+               if (closeBtn) closeBtn.click();
+               else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+             } catch (_) {}
           }
         }
       }
-    } catch (err) {
-      console.warn("[PermalinkAsync] Error:", err.message);
-    }
+    } catch (_) {}
 
     return extractPostPermalink(element) || "";
   };
@@ -1534,149 +1333,56 @@
     return d.innerHTML;
   }
   function fmt(t) {
-    const escaped = esc(t);
-    const lines = escaped.split("\n");
-    const parts = [];
-    let isFirstNonEmpty = true;
-    let inGlossary = false;
-    let inSourceFooter = false;
-    let glossaryLines = [];
-    let sourceLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
-      const trimmed = line.trim().replace(/^Đoạn\s*\d+\s*[:：]\s*/i, "");
-
-      // Detect source footer: line starting with — (em dash) or "Nguồn"
-      if (!inSourceFooter && (trimmed === "—" || trimmed === "---")) {
-        // Flush glossary if open
-        if (inGlossary && glossaryLines.length > 0) {
-          parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
-          glossaryLines = [];
-          inGlossary = false;
-        }
-        inSourceFooter = true;
-        sourceLines.push(trimmed);
-        continue;
-      }
-      if (inSourceFooter) {
-        sourceLines.push(trimmed);
-        continue;
-      }
-
-      // Detect glossary section: *** Giải thích thuật ngữ:
-      if (/^\*\*\*/.test(trimmed)) {
-        inGlossary = true;
-        const heading = trimmed.replace(/^\*\*\*\s*/, "");
-        glossaryLines.push('<div class="fbs-glossary-heading">' + heading + "</div>");
-        continue;
-      }
-
-      // Glossary bullet items: · Term: explanation
-      if (inGlossary && /^[·•\-]\s/.test(trimmed)) {
-        const bulletText = trimmed.replace(/^[·•\-]\s*/, "");
-        // Bold the term before the colon
-        const colonIdx = bulletText.indexOf(":");
-        if (colonIdx > 0) {
-          const term = bulletText.substring(0, colonIdx);
-          const explanation = bulletText.substring(colonIdx + 1);
-          glossaryLines.push('<div class="fbs-glossary-item"><strong>' + term + "</strong>:" + explanation + "</div>");
-        } else {
-          glossaryLines.push('<div class="fbs-glossary-item">' + bulletText + "</div>");
-        }
-        continue;
-      }
-
-      // End glossary if we hit a non-bullet, non-empty line
-      if (inGlossary && trimmed.length > 0 && !/^[·•\-]\s/.test(trimmed)) {
-        if (glossaryLines.length > 0) {
-          parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
-          glossaryLines = [];
-        }
-        inGlossary = false;
-      }
-
-      // Empty line → paragraph break
-      if (trimmed.length === 0) {
-        // Don't add break before first content or after title
-        if (parts.length > 0) parts.push('<div class="fbs-para-break"></div>');
-        continue;
-      }
-
-      // First non-empty line → title (ALL CAPS heading)
-      if (isFirstNonEmpty) {
-        isFirstNonEmpty = false;
-        // Apply inline formatting to title text
-        let titleHtml = trimmed
-          .replace(/\*\*(.*?)\*\*/g, "$1") // strip ** from title
-          .replace(/\*(.*?)\*/g, "$1"); // strip * from title
-        parts.push('<div class="fbs-title-line">' + titleHtml + "</div>");
-        continue;
-      }
-
-      // Regular bullet lines (outside glossary)
-      if (/^[·•\-]\s/.test(trimmed)) {
-        const bulletText = trimmed.replace(/^[·•\-]\s*/, "");
-        parts.push('<div class="fbs-bullet">· ' + fmtInline(bulletText) + "</div>");
-        continue;
-      }
-
-      // Numbered list items
-      if (/^\d+[\.\)]\s/.test(trimmed)) {
-        parts.push('<div class="fbs-bullet">' + fmtInline(trimmed) + "</div>");
-        continue;
-      }
-
-      // Regular paragraph
-      parts.push('<div class="fbs-para">' + fmtInline(trimmed) + "</div>");
-    }
-
-    // Flush remaining glossary
-    if (inGlossary && glossaryLines.length > 0) {
-      parts.push('<div class="fbs-glossary">' + glossaryLines.join("") + "</div>");
-    }
-
-    // Flush source footer
-    if (sourceLines.length > 0) {
-      const footerText = sourceLines.filter(l => l !== "—" && l !== "---").join("<br>");
-      parts.push('<div class="fbs-source-footer">' + (footerText || "—") + "</div>");
-    }
-
-    return parts.join("");
+    return esc(t)
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      .replace(/^[-•]\s*/gm, "• ")
+      .replace(/\n{2,}/g, "<br>") // nhiều dòng trống -> 1 br
+      .replace(/\n/g, "<br>"); // 1 dòng -> 1 br
   }
 
-  // Inline formatting: bold, italic
-  function fmtInline(s) {
-    return s
-      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.*?)\*/g, "<em>$1</em>");
+  // === READ TIME ===
+  function calcReadTime(el) {
+    if (!el) return null;
+    const words = (el.innerText || "").trim().split(/\s+/).filter(Boolean).length;
+    if (words < 80) return null;
+    return { words, mins: Math.max(1, Math.round(words / 200)) };
   }
 
   // === BUTTONS ===
-  function createBtn() {
+  function createBtn(stats) {
     const d = document.createElement("div");
     d.className = "fbs-btn";
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
+    const statsHtml = stats
+      ? '<span class="fbs-btn-stats"> · ~' + stats.mins + " phút · " + stats.words.toLocaleString("vi-VN") + " từ</span>"
+      : "";
     d.innerHTML =
       '<img src="' +
       ICON_BASE64 +
-      '" width="12" height="12" style="vertical-align:-2px"><span title="Tóm tắt nội dung"> Tóm tắt</span>';
+      '" width="12" height="12" style="vertical-align:-2px"><span title="Tóm tắt nội dung"> Tóm tắt' +
+      statsHtml +
+      "</span>";
     return d;
   }
 
-  function createInlineBtn() {
+  function createInlineBtn(stats) {
     const d = document.createElement("span");
     d.className = "fbs-btn-inline";
     d.setAttribute("role", "button");
     d.setAttribute("tabindex", "0");
     d.style.cssText =
       "cursor:pointer;font-size:inherit;font-family:inherit;background:none;border:none;padding:0;margin:0;display:inline;line-height:inherit;vertical-align:baseline;";
+    const statsHtml = stats
+      ? '<span class="fbs-btn-inline-stats"> · ~' + stats.mins + " phút</span>"
+      : "";
     d.innerHTML =
       ' · <span title="Tóm tắt nội dung" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;vertical-align:baseline;color:#4fc3f7;font-weight:600;font-size:0.92em;background:rgba(79,195,247,0.13);padding:0px 6px 1px;border-radius:8px;transition:background 0.15s"><img src="' +
       ICON_BASE64 +
-      '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt</span>';
+      '" style="width:11px;height:11px;vertical-align:-1px;flex-shrink:0">Tóm tắt' +
+      statsHtml +
+      "</span>";
     const pill = d.querySelector("span");
     d.addEventListener("mouseenter", () => {
       pill.style.background = "rgba(79,195,247,0.28)";
@@ -1688,45 +1394,6 @@
   }
 
   // === POST METADATA EXTRACTION ===
-
-  // Helper: find the article container for a given element.
-  // If element is already an article, use it directly (avoid double walk-up).
-  // This prevents extracting metadata from the WRONG post when element
-  // is already a postNode from auto-pilot (which uses btn.closest('[role="article"]')).
-  function findPostContainer(element) {
-    if (!element) return null;
-    // Already an article? Use it directly.
-    if (element.getAttribute && element.getAttribute("role") === "article") return element;
-
-    // Strategy 1: Use closest() for role="article" (fastest, most reliable)
-    const closestArticle = element.closest && element.closest('[role="article"]');
-    if (closestArticle) return closestArticle;
-
-    // Strategy 2: Walk up manually (for elements where closest doesn't work)
-    let el = element;
-    for (let i = 0; i < 25; i++) {
-      if (!el.parentElement || el.parentElement === document.body) break;
-      el = el.parentElement;
-      if (el.getAttribute("role") === "article") return el;
-      // Facebook sometimes uses data-ad-preview for sponsored posts
-      if (el.getAttribute("data-ad-preview") === "message") return el;
-    }
-
-    // Strategy 3: Look for Facebook's feed story container patterns
-    // Facebook wraps each post in a div with specific class patterns
-    let candidate = element;
-    for (let i = 0; i < 25; i++) {
-      if (!candidate.parentElement || candidate.parentElement === document.body) break;
-      candidate = candidate.parentElement;
-      // Facebook feed items often have these attributes
-      if (candidate.getAttribute("data-pagelet")?.startsWith("FeedUnit")) return candidate;
-      if (candidate.getAttribute("data-virtualized")) return candidate;
-    }
-
-    // Fallback: return the element we walked up to (best effort)
-    return el;
-  }
-
   function extractPostPermalink(element) {
     const url = location.href;
     if (SITE === "facebook") {
@@ -1738,46 +1405,16 @@
       if (!element) return "";
 
       // Tìm article container
-      const postContainer = findPostContainer(element);
-      if (!postContainer) return "";
+      let postContainer = element;
+      for (let i = 0; i < 20; i++) {
+        if (!postContainer.parentElement || postContainer.parentElement === document.body) break;
+        postContainer = postContainer.parentElement;
+        if (postContainer.getAttribute("role") === "article") break;
+      }
 
       // Lấy TẤT CẢ link trong bài
       const allLinks = postContainer.querySelectorAll("a[href]");
       const candidates = [];
-
-      // === SHARED POST: Ưu tiên lấy permalink từ bài gốc (nested article) ===
-      // Khi ai đó share bài, bài gốc nằm trong nested article và thường có permalink rõ ràng
-      const nestedArticles = postContainer.querySelectorAll('[role="article"]');
-      for (const nested of nestedArticles) {
-        if (nested === postContainer) continue;
-        // Skip comment articles
-        if (_fbIsCommentArticle(nested, postContainer)) continue;
-        // Tìm permalink trong nested article (bài gốc)
-        const nestedLinks = nested.querySelectorAll("a[href]");
-        for (const link of nestedLinks) {
-          const href = link.href || "";
-          if (href.includes("/posts/") || href.includes("/permalink") ||
-              href.includes("story_fbid") || href.includes("pfbid")) {
-            try {
-              const u = new URL(href);
-              for (const k of [...u.searchParams.keys()]) {
-                if (k.startsWith("__") || k.startsWith("utm_") ||
-                    ["fbclid", "ref", "comment_id", "reply_comment_id", "notif_id", "notif_t", "mibextid"].includes(k))
-                  u.searchParams.delete(k);
-              }
-              const clean = u.searchParams.toString()
-                ? u.origin + u.pathname + "?" + u.searchParams.toString()
-                : u.origin + u.pathname;
-              console.log("[Permalink] Found in shared post nested article:", clean.substring(0, 70));
-              return clean.replace(/\/$/, "");
-            } catch (_) {
-              return href;
-            }
-          }
-        }
-      }
-
-      console.log("[Permalink] Scanning", allLinks.length, "links in article");
 
       for (const link of allLinks) {
         const href = link.href || "";
@@ -1787,7 +1424,7 @@
         if (href.includes("/photo") || href.includes("/reel/") || href.includes("/hashtag/") ||
             href.includes("/events/") || href.includes("/marketplace/") ||
             href.includes("facebook.com/policies") || href.includes("facebook.com/help") ||
-            (href.includes("/groups/") && !href.includes("/posts/")) ||
+            href.includes("/groups/") && !href.includes("/posts/") ||
             href.includes("l.facebook.com/") || href.includes("/share") ||
             href === "https://www.facebook.com/" || href === "https://www.facebook.com") continue;
 
@@ -1796,56 +1433,24 @@
           href.includes("/permalink") ||
           href.includes("story_fbid") ||
           href.includes("pfbid") ||
-          href.includes("multi_permalinks") ||
-          href.includes("/reel/") ||
-          href.includes("/videos/");
+          href.includes("multi_permalinks");
 
         if (isPermalink) {
           candidates.push({ href, priority: 1, reason: "permalink_pattern" });
           continue;
         }
 
-        // Link có text ngắn giống timestamp — đây thường là permalink ẩn
-        const text = (link.textContent || link.innerText || "").trim();
+        // Link có text ngắn giống timestamp
+        const text = (link.textContent || "").trim();
         const ariaLabel = (link.getAttribute("aria-label") || "").trim();
-        // Also check parent's aria-label (Facebook sometimes puts timestamp on parent)
-        const parentAriaLabel = (link.parentElement?.getAttribute("aria-label") || "").trim();
-        const allLabels = text + " " + ariaLabel + " " + parentAriaLabel;
-
         const isTimestamp =
           /^\d+\s*(giờ|phút|ngày|giây|tháng|năm|h|m|d|w|s|hr|min|tuần|week)/i.test(text) ||
-          /^(hôm qua|yesterday|just now|vừa xong|hôm kia|hôm nay|today)/i.test(text) ||
-          /\d+\s*(giờ|phút|ngày|hour|minute|day|month|year)/i.test(allLabels) ||
-          // Facebook sometimes shows date like "1 tháng 5" or "May 1"
-          /^\d{1,2}\s+tháng\s+\d{1,2}/i.test(text) ||
-          /^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d/i.test(text) ||
-          /^tháng\s+\d/i.test(text) ||
-          // Short text that looks like relative time
-          /^(\d+\s*[hmdwsy]|now|\d+\s*phút|\d+\s*giờ)$/i.test(text);
+          /^(hôm qua|yesterday|just now|vừa xong|hôm kia)/i.test(text) ||
+          /\d+\s*(giờ|phút|ngày|hour|minute|day|month|year)/i.test(ariaLabel);
 
-        if (isTimestamp && text.length < 40 && href.includes("facebook.com")) {
+        if (isTimestamp && text.length < 30 && href.includes("facebook.com")) {
           candidates.push({ href, priority: 2, reason: "timestamp:" + text });
           continue;
-        }
-
-        // Link with very short text inside the header area (h2/h3/h4) — likely timestamp
-        // Facebook puts the timestamp link right after the author name in the header
-        const isInHeader = !!link.closest("h2, h3, h4");
-        if (!isInHeader && link.closest('[data-ad-preview]')) {
-          // Skip ad elements
-        } else if (text.length > 0 && text.length < 20 && href.includes("facebook.com/") &&
-                   !href.includes("/photo") && !href.includes("/hashtag") &&
-                   !href.endsWith("facebook.com/") && !href.endsWith("facebook.com")) {
-          // Short text link that's not a known non-permalink pattern
-          // Could be a timestamp or other permalink indicator
-          try {
-            const u = new URL(href);
-            const parts = u.pathname.split("/").filter(Boolean);
-            // Must have at least a username segment
-            if (parts.length >= 1 && parts[0].length > 1) {
-              candidates.push({ href, priority: 3, reason: "short_link:" + text });
-            }
-          } catch (_) {}
         }
 
         // Link ngắn trỏ đến user profile + post (dạng /username/posts/ hoặc /username/pfbid)
@@ -1863,7 +1468,6 @@
 
       if (candidates.length > 0) {
         candidates.sort((a, b) => a.priority - b.priority);
-        console.log("[Permalink] Found", candidates.length, "candidates:", candidates.slice(0, 3).map(c => c.reason + " → " + c.href.substring(0, 60)));
         const best = candidates[0];
         try {
           const u = new URL(best.href);
@@ -1897,7 +1501,6 @@
             const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
             if (ft.top_level_post_id) {
               const permalink = groupUrl + "/posts/" + ft.top_level_post_id;
-              console.log("[Permalink] Constructed from data-ft:", permalink);
               return permalink;
             }
           } catch (_) {}
@@ -1911,9 +1514,7 @@
         ].join(" ");
         const idMatch = idSources.match(/(\d{10,})/);
         if (idMatch) {
-          const permalink = groupUrl + "/posts/" + idMatch[1];
-          console.log("[Permalink] Constructed from element ID:", permalink);
-          return permalink;
+          return groupUrl + "/posts/" + idMatch[1];
         }
 
         // Tìm trong innerHTML: Facebook đôi khi embed post ID trong hidden elements
@@ -1921,34 +1522,40 @@
         for (const el of hiddenInputs) {
           const val = el.value || el.getAttribute("data-story-id") || el.getAttribute("data-post-id") || "";
           if (/^\d{10,}$/.test(val)) {
-            const permalink = groupUrl + "/posts/" + val;
-            console.log("[Permalink] Constructed from hidden input:", permalink);
-            return permalink;
+            return groupUrl + "/posts/" + val;
           }
         }
 
-        // Fallback: dùng group URL (ít nhất cho biết nguồn từ group nào)
-        console.log("[Permalink] Using group URL as fallback:", groupUrl);
         return groupUrl;
       }
 
-      // === FALLBACK CUỐI: KHÔNG trả về author profile link ===
-      // Trước đây trả về /user/ hoặc /profile.php nhưng gây ra lỗi hiển thị
-      // "Dòng thời gian của [tên]" khi Facebook resolve link profile.
-      // Tốt hơn là trả về "" để fbsAgentPost dùng page URL hoặc async fallback.
+      // === FALLBACK CUỐI: Link profile tác giả ===
+      for (const link of allLinks) {
+        const href = link.href || "";
+        if (href.includes("facebook.com") && (href.includes("/user/") || href.includes("/profile.php"))) {
+          try {
+            const u = new URL(href);
+            for (const k of [...u.searchParams.keys()]) { if (k.startsWith("__")) u.searchParams.delete(k); }
+            return u.toString().replace(/\?$/, "");
+          } catch (_) {}
+        }
+      }
 
-      console.warn("[Permalink] No candidates found in article with", allLinks.length, "links");
-      const sample = Array.from(allLinks).slice(0, 8).map(l => {
-        const t = (l.textContent || "").trim().substring(0, 20);
-        return (t ? t + " → " : "") + l.href.substring(0, 80);
-      });
-      console.warn("[Permalink] Sample links:", sample);
       return "";
     }
 
     // Non-Facebook platforms
     if (!element) return url;
-    const postContainer = findPostContainer(element);
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
+    }
     const platformLinks = {
       threads: 'a[href*="/post/"]',
       x: 'a[href*="/status/"]',
@@ -1970,84 +1577,16 @@
   function extractPostImage(element) {
     if (!element) return "";
 
-    // Walk up to post container (uses helper to avoid double walk-up)
-    const postContainer = findPostContainer(element);
-    if (!postContainer) return "";
-
-    // Helper: get effective image dimensions (handles lazy-loaded images)
-    function getImgDimensions(img) {
-      const w = img.naturalWidth || parseInt(img.getAttribute("width")) || img.width || 0;
-      const h = img.naturalHeight || parseInt(img.getAttribute("height")) || img.height || 0;
-      return { w, h };
-    }
-
-    // Helper: get best available image src
-    // Priority: currentSrc (browser-chosen after srcset) > src > data-src > srcset best
-    function getImgSrc(img) {
-      // currentSrc is the URL actually rendered (respects srcset/sizes)
-      const cur = img.currentSrc || "";
-      if (cur && !cur.startsWith("data:")) return cur;
-      // Explicit src or lazy-load data attribute
-      const src = img.src || img.getAttribute("data-src") || img.dataset.src || "";
-      if (src && !src.startsWith("data:")) return src;
-      // Last resort: parse srcset, pick highest-width entry for best quality
-      const srcset = img.getAttribute("srcset") || img.dataset.srcset || "";
-      if (srcset) {
-        const best = srcset.split(",")
-          .map(s => { const [u = "", d = ""] = s.trim().split(/\s+/); return { u, w: parseInt(d) || 0 }; })
-          .filter(e => e.u.startsWith("http"))
-          .sort((a, b) => b.w - a.w)[0];
-        if (best) return best.u;
-      }
-      return "";
-    }
-
-    // Helper: check if image is inside the post header area (avatar, author name)
-    // Facebook header contains: avatar (small circular img) + author name + timestamp
-    // Content images are BELOW the header
-    function isInHeaderArea(img, container) {
-      // Check if img is inside h2/h3/h4 (author header)
-      if (img.closest("h2, h3, h4")) return true;
-      // Check if img is inside a link that points to a user profile (not photo/video)
-      const parentLink = img.closest("a");
-      if (parentLink) {
-        const href = parentLink.href || "";
-        const isMediaLink = href.includes("/photo") || href.includes("/video") ||
-          href.includes("fbid") || href.includes("/reel") || href.includes("/media/") ||
-          href.includes("photo_id=") || href.includes("photo_fbid=");
-        if (href && !isMediaLink) {
-          // Profile/friends/timeline links in the header area contain avatars
-          const isProfileLink = href.includes("/friends") || href.includes("/timeline") ||
-            href.includes("profile_id=") || href.includes("/user/") ||
-            (/facebook\.com\/[^/?#]+\/?$/.test(href) && !href.includes("/groups/") && !href.includes("/pages/"));
-          try {
-            const linkRect = parentLink.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            const isTopArea = linkRect.top - containerRect.top < 120;
-            const { w } = getImgDimensions(img);
-            // Small image in top area = almost certainly avatar
-            if (isTopArea && w > 0 && w < 100) return true;
-            // Profile link anywhere = likely avatar/name area
-            if (isProfileLink && w > 0 && w < 150) return true;
-          } catch (_) {}
-        }
-      }
-      return false;
-    }
-
-    // Helper: check if image is circular (avatar)
-    function isCircular(img) {
-      try {
-        const style = getComputedStyle(img);
-        if (style.borderRadius === "50%") return true;
-        // Also check for very high border-radius values (e.g., "999px")
-        const br = parseInt(style.borderRadius);
-        if (br > 0) {
-          const { w, h } = getImgDimensions(img);
-          if (w > 0 && h > 0 && br >= Math.min(w, h) / 2) return true;
-        }
-      } catch (_) {}
-      return false;
+    // Walk up to post container
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
     }
 
     if (SITE === "facebook") {
@@ -2055,177 +1594,62 @@
       // They are NOT inside the header area (which contains avatar + author name)
       // Post images are typically in a sibling/descendant of the text content area
 
-      // 0. Video posts: extract thumbnail from <video poster="..."> or cover image
-      const videos = postContainer.querySelectorAll("video[poster]");
-      for (const video of videos) {
-        const poster = video.getAttribute("poster");
-        if (poster && !poster.startsWith("data:") && poster.startsWith("http")) {
-          return poster;
-        }
-      }
-      // Also check for video thumbnail images (Facebook wraps video in a div with a preview img)
-      const videoLinks = postContainer.querySelectorAll('a[href*="/videos/"], a[href*="/reel/"], a[href*="/watch"]');
-      for (const link of videoLinks) {
-        const img = link.querySelector("img");
-        if (img) {
-          const src = getImgSrc(img);
-          if (src) {
-            const { w } = getImgDimensions(img);
-            if (w >= 100 || w === 0) return src;
-          }
-        }
-      }
-
-      // 1. Look for images inside photo/video link containers (most reliable)
+      // 1. Look for images inside photo/video link containers
       const photoLinks = postContainer.querySelectorAll(
-        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="photo_id="], a[href*="photo_fbid="], a[href*="/media/"]',
+        'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]',
       );
       for (const link of photoLinks) {
         const img = link.querySelector("img");
-        if (!img) continue;
-        if (isInHeaderArea(img, postContainer)) continue;
-        const src = getImgSrc(img);
-        if (!src) continue;
-        const { w } = getImgDimensions(img);
-        if (w >= 80 || w === 0) return src;
+        if (img && img.src && !img.src.startsWith("data:")) {
+          const w = img.naturalWidth || img.width || 0;
+          if (w >= 100) return img.src;
+        }
       }
 
-      // 1.5. Images with Facebook's explicit media-completion marker
-      // data-visualcompletion="media-vc-image" is set by FB on actual post media
-      const mediaMarked = postContainer.querySelectorAll(
-        'img[data-visualcompletion="media-vc-image"], img[data-visualcompletion="media_image"], img[data-imgperflogname]',
-      );
-      for (const img of mediaMarked) {
-        if (isInHeaderArea(img, postContainer)) continue;
-        if (isCircular(img)) continue;
-        const src = getImgSrc(img);
-        if (!src) continue;
-        const { w } = getImgDimensions(img);
-        if (w >= 80 || w === 0) return src;
-      }
-
-      // 1.6. Link preview cards (external URLs shared on FB) — image inside div[role="link"] or article
-      // These are often under 200px wide (card thumbnail), so the 200px threshold misses them
-      const linkPreviewImgs = postContainer.querySelectorAll(
-        'div[role="link"] img, a[target="_blank"] img, a[rel*="noopener"] img',
-      );
-      for (const img of linkPreviewImgs) {
-        if (isInHeaderArea(img, postContainer)) continue;
-        if (isCircular(img)) continue;
-        const src = getImgSrc(img);
-        if (!src) continue;
-        const { w, h } = getImgDimensions(img);
-        // Card thumbnails can be as small as 150x100
-        if ((w >= 150 && h >= 100) || w === 0) return src;
-      }
-
-      // 2. Look for large images that are NOT circular (avatar)
+      // 2. Look for large images (>300px wide) that are NOT circular (avatar)
       const allImgs = postContainer.querySelectorAll("img");
-      let bestImg = null;
-      let bestArea = 0;
       for (const img of allImgs) {
-        const src = getImgSrc(img);
-        if (!src) continue;
-        const { w, h } = getImgDimensions(img);
-        // Must be large enough to be a content image (lowered from 200 to 150)
-        if (w > 0 && w < 150 && h > 0 && h < 150) continue;
+        const src = img.src || "";
+        if (!src || src.startsWith("data:")) continue;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        // Must be large enough to be a content image
+        if (w < 300 && h < 300) continue;
         // Skip circular (avatar)
-        if (isCircular(img)) continue;
-        // Skip images in header area (avatar, author name area)
-        if (isInHeaderArea(img, postContainer)) continue;
-        // Skip if inside a non-media profile link
+        try {
+          const style = getComputedStyle(img);
+          if (style.borderRadius === "50%") continue;
+        } catch (_) {}
+        // Skip if inside a link to user profile
         const parentLink = img.closest("a");
         if (parentLink) {
           const href = parentLink.href || "";
-          const isMediaLink = href.includes("/photo") || href.includes("/video") ||
-            href.includes("fbid") || href.includes("/reel") || href.includes("/media/") ||
-            href.includes("photo_id=") || href.includes("photo_fbid=");
-          if (href && !isMediaLink) {
-            // Non-media link + image under 400px wide → skip (likely avatar/UI element)
-            if (w > 0 && w < 400) continue;
+          if (
+            href &&
+            !href.includes("/photo") &&
+            !href.includes("/video") &&
+            !href.includes("fbid")
+          ) {
+            // Link doesn't point to photo/video — likely avatar or other UI element
+            if (w < 500) continue;
           }
         }
-        // Skip emoji/sticker/icon images (usually in src URL)
-        if (src.includes("/emoji/") || src.includes("/sticker/") || src.includes("emoji.php")) continue;
-        // Pick the largest image
-        const area = w * h;
-        if (area > bestArea || (area === 0 && !bestImg)) {
-          bestImg = src;
-          bestArea = area;
-        }
-      }
-      if (bestImg) return bestImg;
-
-      // 3. Check <picture> elements (Facebook sometimes uses <picture><source><img>)
-      const pictures = postContainer.querySelectorAll("picture");
-      for (const pic of pictures) {
-        const img = pic.querySelector("img");
-        if (!img) continue;
-        if (isInHeaderArea(img, postContainer)) continue;
-        if (isCircular(img)) continue;
-        // Try <source> srcset first (higher quality), then img src
-        const source = pic.querySelector("source[srcset]");
-        if (source) {
-          const srcset = source.getAttribute("srcset") || "";
-          const best = srcset.split(",")
-            .map(s => { const [u = "", d = ""] = s.trim().split(/\s+/); return { u, w: parseInt(d) || 0 }; })
-            .filter(e => e.u.startsWith("http"))
-            .sort((a, b) => b.w - a.w)[0];
-          if (best && best.u) return best.u;
-        }
-        const src = getImgSrc(img);
-        if (src) {
-          const { w } = getImgDimensions(img);
-          if (w >= 100 || w === 0) return src;
-        }
-      }
-
-      // 4. Check for background-image on divs (Facebook sometimes uses CSS backgrounds)
-      // Check both inline style and computed style (FB may apply via class)
-      const bgDivs = postContainer.querySelectorAll('div[style*="background-image"], span[style*="background-image"]');
-      for (const div of bgDivs) {
-        const style = div.getAttribute("style") || "";
-        const match = style.match(/background-image:\s*url\(["']?(https?:\/\/[^"')]+)["']?\)/);
-        if (match && match[1]) {
-          const rect = div.getBoundingClientRect();
-          if (rect.width >= 150 && rect.height >= 100) return match[1];
-        }
-      }
-      // Also check computed background-image on direct children of post container
-      // (avoids scanning all descendants for perf — FB uses computed bg for story/text-post images)
-      for (const child of postContainer.children) {
-        try {
-          const rect = child.getBoundingClientRect();
-          if (rect.width < 150 || rect.height < 100) continue;
-          const computed = getComputedStyle(child).backgroundImage || "";
-          if (!computed || computed === "none") continue;
-          const match = computed.match(/url\(["']?(https?:\/\/[^"')]+)["']?\)/);
-          if (match && match[1]) return match[1];
-        } catch (_) {}
-      }
-
-      // 5. Lazy-loaded images: check data-src, data-lazy-src attributes not yet loaded
-      const lazyImgs = postContainer.querySelectorAll("img[data-src], img[data-lazy-src], img[loading='lazy']");
-      for (const img of lazyImgs) {
-        if (isInHeaderArea(img, postContainer)) continue;
-        if (isCircular(img)) continue;
-        const src = img.getAttribute("data-src") || img.getAttribute("data-lazy-src") || img.src || "";
-        if (!src || src.startsWith("data:")) continue;
-        if (src.includes("/emoji/") || src.includes("/sticker/")) continue;
-        const { w } = getImgDimensions(img);
-        if (w >= 100 || w === 0) return src;
+        return src;
       }
     } else {
       // Non-Facebook: original logic
       const images = postContainer.querySelectorAll("img");
       for (const img of images) {
-        const { w, h } = getImgDimensions(img);
-        const src = getImgSrc(img);
-        if (!src) continue;
-        if (w > 0 && w < 200 && h > 0 && h < 200) continue;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        const src = img.src || "";
+        if (!src || src.startsWith("data:")) continue;
+        if (w < 200 && h < 200) continue;
         if (src.includes("emoji") || src.includes("static")) continue;
         if (src.includes("profile") || src.includes("avatar")) continue;
-        if (isCircular(img)) continue;
+        try {
+          if (getComputedStyle(img).borderRadius === "50%") continue;
+        } catch (_) {}
         return src;
       }
     }
@@ -2243,24 +1667,11 @@
   function _fbNameFromHeader(header) {
     const link = header.querySelector("a");
     if (!link) return "";
-
-    // Patterns Facebook dùng cho aria-label trên link profile — KHÔNG phải tên tác giả
-    const profileLabelPattern = /^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i;
-
     // Ưu tiên aria-label (Facebook thường set đúng tên ở đây)
-    let ariaLabel = (link.getAttribute("aria-label") || "").trim();
-    // Strip "Dòng thời gian của..." prefix nếu có
-    if (profileLabelPattern.test(ariaLabel)) {
-      ariaLabel = ariaLabel.replace(profileLabelPattern, "").trim();
-    }
+    const ariaLabel = (link.getAttribute("aria-label") || "").trim();
     if (ariaLabel.length >= 2 && ariaLabel.length < 80) return ariaLabel;
-
     // Fallback: innerText (tránh textContent vì FB chèn ký tự rác anti-scraping)
-    let name = (link.innerText || link.textContent || "").trim();
-    // Strip "Dòng thời gian của..." nếu innerText cũng bị
-    if (profileLabelPattern.test(name)) {
-      name = name.replace(profileLabelPattern, "").trim();
-    }
+    const name = (link.innerText || link.textContent || "").trim();
     // Validate: tên hợp lệ không chứa quá nhiều số/ký tự lạ
     if (
       name.length >= 2 &&
@@ -2340,9 +1751,7 @@
       const strongs = nested.querySelectorAll("strong a");
       for (const s of strongs) {
         if (s.closest('[role="article"]') !== nested) continue;
-        let name = (s.innerText || s.textContent || "").trim();
-        // Strip "Dòng thời gian của..." prefix
-        name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
+        const name = (s.innerText || s.textContent || "").trim();
         if (
           name.length >= 2 &&
           name.length < 80 &&
@@ -2366,9 +1775,7 @@
     const strongs = container.querySelectorAll("strong a");
     for (const s of strongs) {
       if (s.closest('[role="article"]') !== container) continue;
-      let name = (s.innerText || s.textContent || "").trim();
-      // Strip "Dòng thời gian của..." prefix
-      name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
+      const name = (s.innerText || s.textContent || "").trim();
       if (name.length >= 2 && name.length < 80 && !/[a-f0-9]{10,}/i.test(name))
         return name;
     }
@@ -2379,8 +1786,16 @@
     if (!element) return "";
 
     // Walk up to the outermost post article
-    const postContainer = findPostContainer(element);
-    if (!postContainer) return "";
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
+    }
 
     if (SITE === "facebook") {
       // 1. Try to find original author from a shared/embedded post inside this article.
@@ -2418,44 +1833,37 @@
   function extractPostSource(element) {
     if (!element) return "";
 
-    const postContainer = findPostContainer(element);
-    if (!postContainer) return "";
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
+    }
 
     if (SITE === "facebook") {
-      // Tìm group/page name từ header — pattern "Author › Group/Page"
-      // Facebook hiển thị: "Tên người đăng" > "Tên group/page" trong header
-      const headers = postContainer.querySelectorAll("h2, h3, h4");
-      for (const h of headers) {
-        if (h.closest('[role="article"]') !== postContainer) continue;
-        const links = h.querySelectorAll("a");
-        if (links.length >= 2) {
-          let name = (links[1].innerText || links[1].textContent || "").trim();
-          // Strip "Dòng thời gian của..." prefix
-          name = name.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
-          if (name.length >= 3 && name.length < 100 &&
-              !/[a-f0-9]{10,}/i.test(name) && !/\d{8,}/.test(name)) {
-            return name;
-          }
-        }
-      }
-
-      // Fallback: check URL for group context
+      // Chỉ trả về group name nếu thực sự đang xem trong group
+      // Kiểm tra URL trang hoặc pattern "Author › Group" trong header
       const isInGroup = location.href.includes("/groups/");
       if (isInGroup) {
+        // Tìm group name: thường là link thứ 2 trong header (sau author)
+        const headers = postContainer.querySelectorAll("h2, h3, h4");
+        for (const h of headers) {
+          const links = h.querySelectorAll("a");
+          if (links.length >= 2) {
+            const name = (links[1].textContent || "").trim();
+            if (name.length >= 3 && name.length < 100) return name;
+          }
+        }
+        // Fallback: lấy từ group link
         const groupLink = postContainer.querySelector('a[href*="/groups/"]');
         if (groupLink) {
-          const name = (groupLink.innerText || groupLink.textContent || "").trim();
+          const name = (groupLink.textContent || "").trim();
           if (name.length >= 3 && name.length < 100) return name;
         }
-      }
-
-      // Fallback: check for page name in "Sponsored" or page-like posts
-      const pageLink = postContainer.querySelector('a[href*="/pages/"], a[aria-label][href*="facebook.com/"]');
-      if (pageLink) {
-        let ariaLabel = (pageLink.getAttribute("aria-label") || "").trim();
-        // Strip "Dòng thời gian của..." prefix
-        ariaLabel = ariaLabel.replace(/^(Dòng thời gian của|Timeline of|Trang cá nhân của|Profile of|Hồ sơ của)\s+/i, "").trim();
-        if (ariaLabel.length >= 3 && ariaLabel.length < 100) return ariaLabel;
       }
     }
 
@@ -2466,8 +1874,16 @@
     if (!element) return "";
 
     // Walk up to post container
-    const postContainer = findPostContainer(element);
-    if (!postContainer) return "";
+    let postContainer = element;
+    for (let i = 0; i < 20; i++) {
+      if (
+        !postContainer.parentElement ||
+        postContainer.parentElement === document.body
+      )
+        break;
+      postContainer = postContainer.parentElement;
+      if (postContainer.getAttribute("role") === "article") break;
+    }
 
     // Reddit has explicit title
     const redditTitle = postContainer.querySelector(
@@ -2496,7 +1912,7 @@
     } catch (_) {}
   }
 
-  async function summarizeText(text, type = "summary", contextElement = null) {
+  async function summarizeText(text, type = "summary", contextElement = null, tone = null) {
     if (!text || text.length < 50) {
       openOverlay(
         '<div class="fbs-error">Text quá ngắn để tóm tắt.</div>',
@@ -2535,7 +1951,8 @@
       "_" +
       (settings.summaryLength || "medium") +
       "_" +
-      (settings.promptStyle || "default");
+      (settings.promptStyle || "default") +
+      (tone ? "_" + tone : "");
 
     if (summaryCache.has(cacheKey)) {
       openOverlay(
@@ -2543,11 +1960,10 @@
         false,
         type,
       );
-      if (panelBody) panelBody.dataset.plainText = summaryCache.get(cacheKey);
       return;
     }
 
-    lastSummarizeParams = { text, type, _element: contextElement };
+    lastSummarizeParams = { text, type, _element: contextElement, tone };
     isSummarizing = true;
     const title =
       type === "affiliate"
@@ -2581,11 +1997,15 @@
     const _author = extractPostAuthor(_el);
     const _title = extractPostTitle(_el);
     const _source = extractPostSource(_el);
+    const _modelSelect = panel && panel.querySelector(".fbs-model-select");
+    const _preferredProvider = _modelSelect ? _modelSelect.value : "";
     currentPort.postMessage({
       action: "summarize",
       text,
       site: SITE,
       type,
+      tone: tone || null,
+      preferredProvider: _preferredProvider || null,
       sourceUrl: _sourceUrl,
       imageUrl: _imageUrl,
       author: _author,
@@ -2648,7 +2068,6 @@
           false,
           type,
         );
-        if (panelBody) panelBody.dataset.plainText = msg.full;
         // Agent mode: score đã được tính trong cùng lần gọi AI → gửi decision ngay, không cần eval riêng
         if (window._fbsAgentMode && typeof msg.agentScore === "number") {
           window.dispatchEvent(
@@ -2744,12 +2163,6 @@
     if (injected.has(target)) return;
     injected.add(target);
 
-    // === CRITICAL: Capture the article element NOW at inject time ===
-    // This is the ONLY reliable moment to find the correct article container.
-    // Later, when user clicks the button, DOM may have changed or the element
-    // reference may walk up to the wrong container.
-    const articleElement = findPostContainer(seeMoreOriginal || textContainer || target);
-
     const isInline = !!(seeMoreOriginal && seeMoreOriginal.parentElement);
     const wrap = document.createElement("span");
     if (isInline) {
@@ -2758,7 +2171,8 @@
     } else {
       wrap.className = "fbs-wrap";
     }
-    wrap.appendChild(isInline ? createInlineBtn() : createBtn());
+    const readStats = calcReadTime(textContainer || target);
+    wrap.appendChild(isInline ? createInlineBtn(readStats) : createBtn(readStats));
 
     let inserted = false;
 
@@ -2828,18 +2242,35 @@
           "",
       );
 
-      // Collapse back: Facebook no longer has "Ẩn bớt" button.
-      // Re-click the same "Xem thêm" element to toggle back.
-      if (seeMoreClickable) {
+      // Collapse back: try "Ẩn bớt" button first (FB re-added it), fallback to toggle click
+      const collapseBtn = findCollapseBtn(textContainer || target);
+      if (collapseBtn) {
+        try {
+          collapseBtn.click();
+        } catch (_) {}
+      } else if (seeMoreClickable) {
         try {
           seeMoreClickable.click();
         } catch (_) {}
       }
 
-      // Pass the captured article element — NOT textContainer
-      // This ensures extractPostImage/Permalink/Author all work on the correct post
-      await summarizeText(text, type, articleElement);
+      await summarizeText(text, type, textContainer || target);
     });
+  }
+
+  const COLLAPSE_KEYWORDS = ["ẩn bớt", "hide", "show less", "voir moins", "weniger anzeigen", "접기"];
+
+  function findCollapseBtn(container) {
+    if (!container) return null;
+    const els = container.querySelectorAll(
+      'div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]',
+    );
+    for (const el of els) {
+      const t = (el.innerText || el.textContent || "").trim().toLowerCase();
+      if (t.length > 20 || t.length < 3) continue;
+      if (COLLAPSE_KEYWORDS.some((kw) => t === kw || t.startsWith(kw))) return el;
+    }
+    return null;
   }
 
   function processSeeMore(sm) {
@@ -2866,7 +2297,8 @@
       '<button class="fbs-floating-btn fbs-btn-highlight" data-action="summary"><img src="' +
       ICON_BASE64 +
       '" width="13" height="13" style="vertical-align:-2px"> Tóm tắt</button>' +
-      '<button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>';
+      '<button class="fbs-floating-btn" data-action="affiliate"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg> Affiliate</button>' +
+      (SITE === "facebook" ? '<button class="fbs-floating-btn" data-action="batch" title="Chọn nhiều bài để tóm tắt (Alt+B)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Batch</button>' : '');
     document.body.appendChild(floatingToolbar);
 
     floatingToolbar.addEventListener("mousedown", (e) => e.preventDefault());
@@ -2875,6 +2307,11 @@
       const btn = e.target.closest("[data-action]");
       if (!btn) return;
       const action = btn.getAttribute("data-action");
+      if (action === "batch") {
+        floatingToolbar.classList.remove("fbs-visible");
+        if (batchMode) exitBatchMode(); else enterBatchMode();
+        return;
+      }
       const sel = window.getSelection();
       const text = sel.toString().trim();
       if (text) {
@@ -2933,6 +2370,187 @@
   document.addEventListener("mousedown", mousedownHandler);
   listeners.push({ element: document, event: "mousedown", handler: mousedownHandler });
 
+  // === FB ALL POSTS (Feature 6) — hover "Tóm tắt" for posts without "Xem thêm" ===
+  const fbAllPostInjected = new WeakSet();
+  function scanFBAllPosts() {
+    if (SITE !== "facebook") return;
+    const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
+    const articles = root.querySelectorAll('article[role="article"]');
+    for (const article of articles) {
+      if (fbAllPostInjected.has(article)) continue;
+      // Skip if already has a regular fbs button
+      if (article.querySelector(".fbs-wrap, .fbs-btn, .fbs-btn-inline, .fbs-allpost-btn")) continue;
+      // Skip comment/reply articles (2+ ancestor articles)
+      let articleAncestors = 0;
+      let ancestor = article.parentElement;
+      for (let j = 0; j < 20; j++) {
+        if (!ancestor || ancestor === document.body) break;
+        if (ancestor.getAttribute("role") === "article") articleAncestors++;
+        ancestor = ancestor.parentElement;
+      }
+      if (articleAncestors >= 2) continue; // skip comments/replies
+      const text = (article.innerText || "").trim();
+      if (text.length < MIN_LEN) continue;
+      fbAllPostInjected.add(article);
+      const pos = getComputedStyle(article).position;
+      if (pos === "static" || pos === "") article.style.position = "relative";
+      const btn = document.createElement("button");
+      btn.className = "fbs-allpost-btn";
+      btn.innerHTML = '<img src="' + ICON_BASE64 + '" width="12" height="12" style="vertical-align:-1px"> Tóm tắt';
+      btn.title = "Tóm tắt bài này";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const t = (article.innerText || "").trim();
+        if (t.length >= MIN_LEN) summarizeText(t, "summary", article);
+      });
+      article.appendChild(btn);
+    }
+  }
+
+  // === COMMENT THREAD SUMMARY (Feature 11) ===
+  const commentBtnInjected = new WeakSet();
+  function scanCommentSections() {
+    if (SITE !== "facebook") return;
+    const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
+    const articles = root.querySelectorAll('article[role="article"]');
+    for (const article of articles) {
+      // Only top-level post articles (1 ancestor article = feed container)
+      let articleAncestors = 0;
+      let ancestor = article.parentElement;
+      for (let j = 0; j < 20; j++) {
+        if (!ancestor || ancestor === document.body) break;
+        if (ancestor.getAttribute("role") === "article") articleAncestors++;
+        ancestor = ancestor.parentElement;
+      }
+      if (articleAncestors !== 1) continue; // only direct post (not feed container, not comment)
+      if (commentBtnInjected.has(article)) continue;
+      // Check for comment articles inside this post
+      const commentArticles = article.querySelectorAll('article[role="article"]');
+      if (commentArticles.length < 2) continue; // need at least 2 visible comments
+      commentBtnInjected.add(article);
+      // Collect comment text
+      const commentTexts = [];
+      for (const ca of commentArticles) {
+        const t = (ca.innerText || "").trim();
+        if (t.length > 10) commentTexts.push(t);
+      }
+      if (commentTexts.length < 2) continue;
+      const btn = document.createElement("button");
+      btn.className = "fbs-comment-summary-btn";
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg> Tóm tắt ' + commentTexts.length + ' bình luận';
+      btn.title = "Tóm tắt toàn bộ thread bình luận";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const currentComments = Array.from(article.querySelectorAll('article[role="article"]'))
+          .map(ca => (ca.innerText || "").trim()).filter(t => t.length > 10);
+        if (currentComments.length === 0) return;
+        const combined = "THREAD BÌNH LUẬN (" + currentComments.length + " comments):\n\n" +
+          currentComments.map((t, i) => (i + 1) + ". " + t).join("\n\n");
+        summarizeText(combined, "summary", article);
+      });
+      // Insert before the first comment article
+      const firstComment = commentArticles[0];
+      firstComment.parentElement?.insertBefore(btn, firstComment);
+    }
+  }
+
+  // === BATCH QUEUE (Feature 12) ===
+  let batchMode = false;
+  let batchQueue = []; // [{text, el}]
+  let batchBar = null;
+  const batchCheckboxes = new WeakMap(); // article → checkbox el
+
+  function createBatchBar() {
+    if (batchBar) return;
+    batchBar = document.createElement("div");
+    batchBar.className = "fbs-batch-bar";
+    batchBar.innerHTML =
+      '<span class="fbs-batch-count">0 bài đã chọn</span>' +
+      '<button class="fbs-batch-run-btn">Tóm tắt tất cả</button>' +
+      '<button class="fbs-batch-cancel-btn" title="Thoát Batch Mode">✕</button>';
+    document.body.appendChild(batchBar);
+    batchBar.querySelector(".fbs-batch-run-btn").addEventListener("click", runBatch);
+    batchBar.querySelector(".fbs-batch-cancel-btn").addEventListener("click", exitBatchMode);
+  }
+
+  function updateBatchBar() {
+    if (!batchBar) return;
+    batchBar.querySelector(".fbs-batch-count").textContent = batchQueue.length + " bài đã chọn";
+  }
+
+  function enterBatchMode() {
+    batchMode = true;
+    batchQueue = [];
+    createBatchBar();
+    batchBar.classList.add("fbs-batch-visible");
+    document.body.classList.add("fbs-batch-mode");
+    // Add checkboxes to all visible post articles
+    const root = document.querySelector('div[role="main"]') || document.body;
+    root.querySelectorAll('article[role="article"]').forEach(article => {
+      let articleAncestors = 0;
+      let anc = article.parentElement;
+      for (let j = 0; j < 20; j++) {
+        if (!anc || anc === document.body) break;
+        if (anc.getAttribute("role") === "article") articleAncestors++;
+        anc = anc.parentElement;
+      }
+      if (articleAncestors !== 1) return;
+      if (batchCheckboxes.has(article)) return;
+      const pos = getComputedStyle(article).position;
+      if (pos === "static" || pos === "") article.style.position = "relative";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "fbs-batch-checkbox";
+      cb.addEventListener("change", () => {
+        if (cb.checked) {
+          cb.classList.add("fbs-checked");
+          const text = (article.innerText || "").trim();
+          if (text.length >= MIN_LEN) batchQueue.push({ text, el: article, cb });
+        } else {
+          cb.classList.remove("fbs-checked");
+          batchQueue = batchQueue.filter(item => item.cb !== cb);
+        }
+        updateBatchBar();
+      });
+      article.appendChild(cb);
+      batchCheckboxes.set(article, cb);
+    });
+    updateBatchBar();
+  }
+
+  function exitBatchMode() {
+    batchMode = false;
+    batchQueue = [];
+    document.body.classList.remove("fbs-batch-mode");
+    if (batchBar) {
+      batchBar.classList.remove("fbs-batch-visible");
+    }
+    // Remove all checkboxes
+    document.querySelectorAll(".fbs-batch-checkbox").forEach(cb => cb.remove());
+  }
+
+  async function runBatch() {
+    if (batchQueue.length === 0) return;
+    const items = [...batchQueue];
+    exitBatchMode();
+    for (let i = 0; i < items.length; i++) {
+      const { text, el } = items[i];
+      await summarizeText(text, "summary", el);
+      // Small delay between items so UI is responsive
+      await new Promise(r => setTimeout(r, 800));
+    }
+  }
+
+  // Alt+B toggles batch mode
+  document.addEventListener("keydown", (e) => {
+    if (e.altKey && e.key === "b") {
+      e.preventDefault();
+      if (batchMode) exitBatchMode(); else enterBatchMode();
+    }
+  });
+
   // === REDDIT ===
   function scanRedditPosts() {
     const posts = document.querySelectorAll(
@@ -2971,9 +2589,11 @@
   }
 
   function scan() {
-    if (!isContextValid()) return;
+    if (!isContextValid() || isBlocked) return;
     if (SITE === "reddit") scanRedditPosts();
     findNewSeeMoreElements().forEach(processSeeMore);
+    scanFBAllPosts();
+    scanCommentSections();
     scanShopeeLinks();
   }
 

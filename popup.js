@@ -30,7 +30,7 @@ allTabs.forEach((tab) => {
     allTabContents.forEach((c) => c.classList.remove("active"));
     tab.classList.add("active");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
-    if (tab.dataset.tab === "history") loadHistory();
+    if (tab.dataset.tab === "history") { loadHistory(); loadAgentStats(); }
     if (tab.dataset.tab === "review") loadReviewTab();
     if (tab.dataset.tab === "apikeys") loadKeyLists();
   });
@@ -46,6 +46,7 @@ const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const sourceTemplateEl = document.getElementById("sourceTemplate");
 const useHeuristicEvalEl = document.getElementById("useHeuristicEval");
+const blockedDomainsEl = document.getElementById("blockedDomains");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
 
@@ -60,6 +61,7 @@ chrome.storage.sync.get(
     "customAffPrompt",
     "sourceTemplate",
     "useHeuristicEval",
+    "blockedDomains",
     "apiKeys",
   ],
   (d) => {
@@ -73,6 +75,7 @@ chrome.storage.sync.get(
     if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
     if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
     if (d.useHeuristicEval) useHeuristicEvalEl.checked = true;
+    if (d.blockedDomains) blockedDomainsEl.value = d.blockedDomains;
     const total = Object.values(d.apiKeys || {}).reduce(
       (s, a) => s + (a ? a.length : 0),
       0,
@@ -94,6 +97,7 @@ saveBtn.addEventListener("click", () => {
       customAffPrompt: customAffPromptEl.value.trim(),
       sourceTemplate: sourceTemplateEl.value.trim(),
       useHeuristicEval: useHeuristicEvalEl.checked,
+      blockedDomains: blockedDomainsEl.value.trim(),
     },
     () => showStatus("Đã lưu", "success"),
   );
@@ -636,6 +640,27 @@ document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
   setAlarmButtonState(false);
   chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => {});
 });
+
+// === AGENT STATS (Feature 7) ===
+async function loadAgentStats() {
+  try {
+    const data = await chrome.storage.local.get(["agentStats", "agentPostedUrls"]);
+    const stats = data.agentStats;
+    const box = document.getElementById("agentStatsBox");
+    if (!stats && (!data.agentPostedUrls || data.agentPostedUrls.length === 0)) {
+      box.style.display = "none";
+      return;
+    }
+    box.style.display = "block";
+    const today = new Date().toDateString();
+    const postsToday = (stats && stats.postsTodayDate === today) ? (stats.postsToday || 0) : 0;
+    document.getElementById("statPostsToday").textContent = postsToday;
+    document.getElementById("statPostsTotal").textContent = stats ? (stats.postsTotal || 0) : (data.agentPostedUrls ? data.agentPostedUrls.length : 0);
+    document.getElementById("statSkipped").textContent = (stats && stats.postsTodayDate === today) ? (stats.skippedToday || 0) : 0;
+    const lastPost = stats && stats.lastPostTime ? new Date(stats.lastPostTime).toLocaleString("vi") : "–";
+    document.getElementById("statLastPost").textContent = lastPost;
+  } catch (_) {}
+}
 
 // === ABOUT: load version from manifest ===
 const ver = chrome.runtime.getManifest().version;

@@ -31,6 +31,7 @@
     {
       "matches": [
         "https://www.facebook.com/*",
+        "https://web.facebook.com/*",
         "https://m.facebook.com/*",
         "https://*.threads.net/*",
         "https://x.com/*",
@@ -45,6 +46,7 @@
     {
       "matches": [
         "https://www.facebook.com/*",
+        "https://web.facebook.com/*",
         "https://m.facebook.com/*",
         "https://*.threads.net/*",
         "https://x.com/*",
