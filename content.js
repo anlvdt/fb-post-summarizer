@@ -116,47 +116,63 @@
   // === SCAN LOGIC ===
   function findNewSeeMoreElements() {
     const results = [];
-    const root =
+    const roots = (typeof visiblePosts !== "undefined" && visiblePosts.size > 0) ? Array.from(visiblePosts) : [
       document.querySelector('div[role="main"]') ||
       document.querySelector('div[id^="mount_0_0"]') ||
       document.querySelector("main") ||
-      document.body;
-    const els = root.querySelectorAll(
-      'div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]',
-    );
-    for (const el of els) {
-      if (el.dataset.fbsScanned) continue;
-      if (el.children.length > 6) continue;
-      const t = (el.innerText || el.textContent || "").trim().toLowerCase();
-      if (t.length > 30 || t.length < 4) continue;
-      if (SEE_MORE.some((kw) => t === kw || t === "..." + kw || t.startsWith(kw))) {
-        el.dataset.fbsScanned = "1";
-        if (isInNonPostArea(el)) continue;
-        if (isSponsored(el)) continue;
-        results.push(el);
+      document.body
+    ];
+    for (const root of roots) {
+      const els = root.querySelectorAll(
+        'div[role="button"], span[role="button"], span[dir="auto"], div[dir="auto"]',
+      );
+      for (const el of els) {
+        if (el.dataset.fbsScanned) continue;
+        if (el.children.length > 6) continue;
+        const t = (el.innerText || el.textContent || "").trim().toLowerCase();
+        if (t.length > 30 || t.length < 4) continue;
+        if (SEE_MORE.some((kw) => t === kw || t === "..." + kw || t.startsWith(kw))) {
+          el.dataset.fbsScanned = "1";
+          if (isInNonPostArea(el)) continue;
+          if (isSponsored(el)) continue;
+          results.push(el);
+        }
       }
     }
     return results;
   }
 
   const SPONSORED_KEYWORDS = [
-    "được tài trợ", "sponsored", "quảng cáo", "publicité", "gesponsert",
-    "patrocinado", "sponsorizzato", "gesponsord", "rekommenderat",
-    "рекламная запись", "広告",
+    // Vietnamese
+    "được tài trợ", "quảng cáo", "tài trợ", "nội dung được tài trợ",
+    // English
+    "sponsored", "paid partnership", "promoted", "paid ad",
+    // Other languages
+    "publicité", "gesponsert", "gesponsord", "sponsorisé",
+    "patrocinado", "sponsorizzato", "rekommenderat",
+    "реклама", "рекламная запись", "広告", "スポンサー",
+    "光告", "赞助内容", "贊助", "광고", "협찬",
   ];
 
   // Non-organic feed labels (short text in post header, similar to "Sponsored")
   const CLUTTER_LABELS = [
-    // Vietnamese
+    // Vietnamese — gợi ý / đề xuất
     "gợi ý cho bạn", "video gợi ý", "reels gợi ý", "nhóm gợi ý",
     "trang gợi ý", "sự kiện gợi ý", "bài viết gợi ý", "có thể bạn quan tâm",
     "khám phá thêm", "người bạn có thể biết", "tin tức gợi ý",
-    // English
+    "dành cho bạn", "được đề xuất", "nội dung liên quan",
+    "được xem nhiều", "xu hướng", "trending",
+    // Vietnamese — reel / memory noise
+    "kỷ niệm", "memories", "trong ngày này",
+    // English — suggested / recommended
     "suggested for you", "suggested reels", "suggested groups",
     "suggested events", "pages you might like", "videos you might like",
     "people you may know", "you might also like", "suggested",
+    "recommended", "recommended for you", "on this day",
+    "reels and short videos", "friend suggestions",
     // French/German/Spanish
     "suggéré pour vous", "vorgeschlagen", "sugerido para ti",
+    "recommandé pour vous", "empfohlen", "recomendado",
   ];
 
   // Find the closest ancestor article[role="article"] of an element (legacy helper)
@@ -199,30 +215,48 @@
 
   // isSponsored: used by findNewSeeMoreElements to skip injecting button on ad posts.
   // Finds the feed wrapper for el, then scans it for any sponsored signal.
+  // isSponsored: used by findNewSeeMoreElements to skip injecting button on ad posts.
+  // Finds the feed wrapper for el, then scans it for any sponsored signal.
   function isSponsored(el) {
     if (SITE !== "facebook") return false;
     // Get the containing post (wrapper or article)
     const container = findFeedWrapper(el) ||
       (el.getAttribute && el.getAttribute("role") === "article" ? el : findPostArticle(el));
     if (!container) return false;
-    // href to Facebook ads about page
+
+    // 1. href to Facebook ads about page (strong signal)
     if (container.querySelector(
-      'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"]'
+      'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"], a[href*="/ads/preferences"]'
     )) return true;
-    // Portal-based detection: find any aria-describedby inside the post that
-    // references a .__fb-light-mode portal containing a sponsored keyword
+
+    // 2. "Why am I seeing this?" / "Tại sao tôi thấy" link (FB ad disclosure)
+    if (container.querySelector(
+      'a[aria-label*="Why am I seeing"], a[aria-label*="Tại sao tôi"], a[aria-label*="Vì sao"], span[aria-label*="Why am I"]'
+    )) return true;
+
+    // 3. Portal-based detection
     const SPONSORED_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
     const ariaRefs = container.querySelectorAll("[aria-describedby],[aria-labelledby]");
     for (const ref of ariaRefs) {
       const ids = ((ref.getAttribute("aria-describedby") || "") + " " + (ref.getAttribute("aria-labelledby") || "")).trim().split(/\s+/);
       for (const id of ids) {
+        if (!id) continue;
         const portal = document.getElementById(id);
         if (!portal) continue;
         const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
-        if (SPONSORED_NORM.some(kw => tcNorm === kw)) return true;
+        if (SPONSORED_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw))) return true;
       }
     }
-    // text scan fallback (non-portal / other structures)
+
+    // 4. aria-label substring scan (for buttons/spans with sponsored label)
+    const ariaLabelEls = container.querySelectorAll("[aria-label]");
+    for (const el of ariaLabelEls) {
+      const lbl = (el.getAttribute("aria-label") || "").replace(/\s+/g, "").toLowerCase();
+      if (lbl.length < 3 || lbl.length > 120) continue;
+      if (SPONSORED_NORM.some(kw => lbl.includes(kw))) return true;
+    }
+
+    // 5. text scan fallback (non-portal / other structures)
     const candidates = container.querySelectorAll('a, span, div[dir="auto"]');
     for (const node of candidates) {
       const tc = node.textContent || "";
@@ -310,9 +344,10 @@
     // Clone to avoid modifying DOM
     const clone = element.cloneNode(true);
 
-    // Remove unwanted elements (only structural noise, not content)
+    // Remove unwanted elements (structural noise + potentially dangerous embeds)
     const unwanted = clone.querySelectorAll(
-      "script, style, nav, footer, aside, " +
+      "script, style, nav, footer, aside, iframe, object, embed, " +
+        "noscript, template, svg[aria-hidden], " +
         '[role="navigation"], [role="banner"], [role="complementary"], ' +
         ".related-posts, .recommended, .recommendation",
     );
@@ -348,6 +383,11 @@
   let backdrop = null,
     panel = null,
     panelBody = null;
+
+  // Module-level: store the most recently extracted image list for callers
+  // that need multi-image support. Populated by extractPostImage() and read
+  // by extractPostImages() helper exposed on window.
+  let _lastExtractedImages = [];
   let isSummarizing = false,
     currentPort = null;
 
@@ -477,8 +517,25 @@
       } else {
         panelBody.innerHTML = html;
       }
+
+      // Streaming progress indicator — hiển thị số ký tự đã nhận
+      const resultEl = panelBody.querySelector(".fbs-result");
+      if (resultEl) {
+        const chars = (resultEl.textContent || "").length;
+        let progressEl = panel.querySelector(".fbs-stream-progress");
+        if (!progressEl) {
+          progressEl = document.createElement("span");
+          progressEl.className = "fbs-stream-progress";
+          const headSpan = panel.querySelector(".fbs-panel-head span");
+          if (headSpan) headSpan.appendChild(progressEl);
+        }
+        progressEl.textContent = chars > 0 ? `(${chars} ký tự)` : "";
+      }
     } else {
       panelBody.innerHTML = html;
+      // Remove progress indicator when streaming ends
+      const progressEl = panel.querySelector(".fbs-stream-progress");
+      if (progressEl) progressEl.remove();
     }
 
     // Clear edited text cache when new content loads
@@ -588,6 +645,10 @@
       const author = _element ? extractPostAuthor(_element) : "";
       const source = _element ? extractPostSource(_element) : "";
       const imageUrl = _element ? extractPostImage(_element) : "";
+      // Lấy TẤT CẢ ảnh để user có thể chọn paste multi-image
+      const allImages = _element && typeof window.fbsExtractImages === "function"
+        ? window.fbsExtractImages(_element)
+        : (imageUrl ? [imageUrl] : []);
 
       // Không append nguồn vào text — nguồn sẽ ghi ở comment đầu tiên
 
@@ -628,20 +689,27 @@
       // Dịch panel sang phải, ẩn backdrop
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
-      openFacebookComposer(text, cleanUrl, imageUrl, author, source);
+      openFacebookComposer(text, cleanUrl, imageUrl, author, source, allImages);
     } catch (_) {
       // Fallback
       const resultEl = panelBody?.querySelector(".fbs-result");
       const text = resultEl ? resultEl.innerText : panelBody?.innerText || "";
       panel.classList.add("fbs-panel-left");
       if (backdrop) backdrop.classList.remove("fbs-visible");
-      openFacebookComposer(text.trim(), "", "", "", "");
+      openFacebookComposer(text.trim(), "", "", "", "", []);
     }
   }
 
-  function openFacebookComposer(text, sourceUrl, imageUrl, author, source) {
+  function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImages) {
     const preview = document.createElement("div");
     preview.className = "fbs-status-preview";
+
+    // Normalize allImages: ensure it's an array with primary imageUrl first
+    const imageList = Array.isArray(allImages) && allImages.length > 0
+      ? allImages.slice(0, 10)
+      : (imageUrl ? [imageUrl] : []);
+    // Ensure primary imageUrl luôn ở đầu để backward compat với old code
+    if (imageUrl && !imageList.includes(imageUrl)) imageList.unshift(imageUrl);
 
     // Validate author/source — bỏ nếu chứa ký tự rác (FB anti-scraping)
     const isValidName = (n) =>
@@ -654,12 +722,24 @@
     const cleanAuthor = isValidName(author) ? author : "";
     const cleanSource = isValidName(source) ? source : "";
 
-    // Ảnh preview (nếu có)
-    const imgHtml = imageUrl
-      ? '<div class="fbs-sp-image"><img src="' +
-        esc(imageUrl) +
-        '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh</button></div>'
-      : "";
+    // Ảnh preview: nếu có nhiều ảnh → gallery lưới; nếu 1 ảnh → single preview
+    let imgHtml = "";
+    if (imageList.length > 1) {
+      // Multi-image gallery — tất cả ảnh checked by default, user có thể uncheck
+      const thumbsHtml = imageList.map((url, i) =>
+        '<label class="fbs-sp-thumb"><input type="checkbox" class="fbs-sp-thumb-cb" data-url="' +
+        esc(url) + '" checked><img src="' + esc(url) + '" loading="lazy" onerror="this.parentElement.style.display=\'none\'"></label>'
+      ).join("");
+      imgHtml =
+        '<div class="fbs-sp-image fbs-sp-multi">' +
+        '<div class="fbs-sp-multi-header">' + imageList.length + ' ảnh — bỏ tick ảnh không muốn đăng</div>' +
+        '<div class="fbs-sp-thumbs">' + thumbsHtml + '</div>' +
+        '</div>';
+    } else if (imageList.length === 1) {
+      imgHtml = '<div class="fbs-sp-image"><img src="' +
+        esc(imageList[0]) +
+        '" crossorigin="anonymous" onerror="this.parentElement.style.display=\'none\'"><button class="fbs-sp-copy-img"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Copy ảnh</button></div>';
+    }
 
     preview.innerHTML =
       '<div class="fbs-sp-header"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Preview Status <span class="fbs-sp-charcount">' +
@@ -705,11 +785,10 @@
     const commentText = preview.querySelector(".fbs-sp-comment-text");
 
     // Generate comment content từ link — ghi nguồn kèm tên tác giả nếu có
+    // LUÔN hiển thị section comment (kể cả khi chưa có URL) để user biết
+    // cần paste link. Nếu thiếu link mà có author/source → vẫn show "Nguồn: X"
     function updateComment(url) {
-      if (!url) {
-        commentSection.style.display = "none";
-        return;
-      }
+      // Luôn hiện section comment — giúp user thấy rõ cần ghi nguồn
       commentSection.style.display = "block";
       // Build source line: "Nguồn: Tên tác giả — link" hoặc "Nguồn: link"
       let sourceLine = "Nguồn: ";
@@ -717,17 +796,21 @@
         sourceLine += cleanAuthor;
         if (cleanSource && cleanSource !== cleanAuthor)
           sourceLine += " (" + cleanSource + ")";
-        sourceLine += "\n" + url;
+        if (url) sourceLine += "\n" + url;
       } else if (cleanSource) {
-        sourceLine += cleanSource + "\n" + url;
-      } else {
+        sourceLine += cleanSource;
+        if (url) sourceLine += "\n" + url;
+      } else if (url) {
         sourceLine += url;
+      } else {
+        // Không có gì cả → hint user paste link
+        sourceLine = "Nguồn: (chưa có — paste link vào ô phía trên)";
       }
       commentText.textContent = sourceLine;
     }
 
-    // Nếu đã có link sẵn
-    if (sourceUrl) updateComment(sourceUrl);
+    // LUÔN render section comment ngay khi mở composer — kể cả khi chưa có link
+    updateComment(sourceUrl || "");
 
     // Normalize Facebook URL
     function normalizeFbUrl(raw) {
@@ -896,63 +979,139 @@
       });
     }
 
-    // Đăng status — auto-copy text + mở Facebook composer
+    // Đăng status — chỉ tự động hóa: mở composer + paste text + paste ảnh.
+    // User tự click "Đăng" và tự comment nguồn (đã copy sẵn vào clipboard).
     preview
       .querySelector(".fbs-sp-open-fb")
       .addEventListener("click", async () => {
         const btn = preview.querySelector(".fbs-sp-open-fb");
-        await navigator.clipboard.writeText(text);
+        if (SITE !== "facebook") {
+          await navigator.clipboard.writeText(text);
+          btn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied (FB only supported)';
+          return;
+        }
+
+        btn.disabled = true;
         btn.innerHTML =
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Đang tự đăng...';
-        if (SITE === "facebook") {
-          setTimeout(() => {
-            const allButtons = document.querySelectorAll(
-              'div[role="main"] div[role="button"]',
-            );
-            for (const b of allButtons) {
-              const t = (b.textContent || "").toLowerCase();
-              if (
-                t.includes("bạn đang nghĩ gì") ||
+          '<div class="fbs-spinner" style="width:14px;height:14px;border-width:2px"></div> Mở Composer...';
+
+        const setStatus = (msg) => {
+          btn.innerHTML = '<div class="fbs-spinner" style="width:14px;height:14px;border-width:2px"></div> ' + msg;
+        };
+        const setDone = (msg) => {
+          btn.disabled = false;
+          btn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> ' + msg;
+        };
+        const setFail = (msg) => {
+          btn.disabled = false;
+          btn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> ' + msg;
+        };
+
+        try {
+          // Prep comment text để copy vào clipboard (user tự paste khi cmt)
+          let sourceLine = "Nguồn: ";
+          if (cleanAuthor) {
+            sourceLine += cleanAuthor;
+            if (cleanSource && cleanSource !== cleanAuthor) sourceLine += " (" + cleanSource + ")";
+            if (sourceUrl) sourceLine += "\n" + sourceUrl;
+          } else if (cleanSource) {
+            sourceLine += cleanSource;
+            if (sourceUrl) sourceLine += "\n" + sourceUrl;
+          } else if (sourceUrl) {
+            sourceLine += sourceUrl;
+          } else {
+            sourceLine = "";
+          }
+
+          // Bước 1: Xác định ảnh user muốn đăng
+          let selectedUrls = [];
+          const thumbCheckboxes = preview.querySelectorAll(".fbs-sp-thumb-cb");
+          if (thumbCheckboxes.length > 0) {
+            selectedUrls = Array.from(thumbCheckboxes)
+              .filter(cb => cb.checked)
+              .map(cb => cb.dataset.url)
+              .filter(Boolean);
+          } else if (imageList.length > 0) {
+            selectedUrls = imageList;
+          }
+
+          // Bước 2: Tìm và click nút "Bạn đang nghĩ gì?"
+          const allButtons = document.querySelectorAll('div[role="main"] div[role="button"]');
+          let composerBtn = null;
+          for (const b of allButtons) {
+            const t = (b.textContent || "").toLowerCase();
+            if (t.includes("bạn đang nghĩ gì") ||
                 t.includes("what's on your mind") ||
-                t.includes("write something")
-              ) {
-                b.click();
-                setTimeout(async () => {
-                  const editor = document.querySelector(
-                    'div[role="dialog"] div[role="textbox"][contenteditable="true"]',
-                  );
-                  let imgFile = null;
-                  const imgEl = preview.querySelector(".fbs-sp-image img");
-                  if (imgEl && imgEl.naturalWidth > 0) {
-                    try {
-                      const canvas = document.createElement("canvas");
-                      canvas.width = imgEl.naturalWidth;
-                      canvas.height = imgEl.naturalHeight;
-                      canvas.getContext("2d").drawImage(imgEl, 0, 0);
-                      const blob = await new Promise((r) =>
-                        canvas.toBlob(r, "image/png"),
-                      );
-                      if (blob)
-                        imgFile = new File([blob], "image.png", {
-                          type: "image/png",
-                        });
-                    } catch (e) {
-                      console.warn("Image paste failed", e);
-                    }
-                  }
-                  // Thêm footer "Nguồn dưới cmt đầu" vào text trước khi paste
-                  const textWithFooter = text + "\n\n—\nNguồn dưới cmt đầu";
-                  if (editor) autoPasteToLexical(editor, textWithFooter, imgFile);
-                  btn.innerHTML =
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đã đăng xong!';
-                }, 800);
-                return;
-              }
+                t.includes("write something") ||
+                t.includes("viết gì đó")) {
+              composerBtn = b;
+              break;
             }
+          }
+          if (!composerBtn) {
             window.scrollTo({ top: 0, behavior: "smooth" });
-            btn.innerHTML =
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Đăng status';
-          }, 200);
+            setFail("Không thấy ô 'Bạn đang nghĩ gì?' — cuộn lên đầu feed rồi thử lại");
+            return;
+          }
+          composerBtn.click();
+
+          // Bước 3: Chờ editor xuất hiện
+          setStatus("Chờ dialog mở...");
+          let editor = null;
+          for (let i = 0; i < 25 && !editor; i++) {
+            editor = document.querySelector(
+              'div[role="dialog"] div[role="textbox"][contenteditable="true"]'
+            );
+            if (!editor) await new Promise(r => setTimeout(r, 200));
+          }
+          if (!editor) {
+            setFail("Không tìm thấy editor");
+            return;
+          }
+          editor.click();
+          editor.focus();
+          await new Promise(r => setTimeout(r, 600));
+
+          // Bước 4: Fetch ảnh parallel
+          let imgFiles = [];
+          if (selectedUrls.length > 0) {
+            setStatus("Tải " + selectedUrls.length + " ảnh...");
+            imgFiles = await fetchImageBlobs(selectedUrls, 10);
+            console.log("[Manual Post] Fetched", imgFiles.length, "/", selectedUrls.length, "images");
+          }
+
+          // Bước 5: Paste text + ảnh
+          setStatus("Dán nội dung...");
+          const cleanedText = text.replace(
+            /\s*(?:[—-]\s*\n\s*)?Nguồn\s+dưới\s+cmt\s+đầu\s*$/gi,
+            ""
+          ).trim();
+          const textWithFooter = cleanedText + "\n\n—\nNguồn dưới cmt đầu";
+          pasteToLexical(editor, textWithFooter, imgFiles.length > 0 ? imgFiles : null);
+
+          // Chờ upload hoàn tất (để user thấy ảnh đã render trước khi bấm Đăng)
+          const uploadWait = imgFiles.length > 1 ? 1500 + imgFiles.length * 1000 :
+                            imgFiles.length === 1 ? 2000 : 800;
+          await new Promise(r => setTimeout(r, uploadWait));
+
+          // Bước 6: Copy câu "Nguồn:" vào clipboard để user paste khi comment
+          // User TỰ bấm "Đăng" và TỰ comment.
+          if (sourceLine) {
+            try {
+              await navigator.clipboard.writeText(sourceLine);
+              setDone("Sẵn sàng — bấm Đăng, rồi Ctrl+V ở cmt");
+            } catch (_) {
+              setDone("Sẵn sàng — bấm Đăng (Copy nguồn thủ công)");
+            }
+          } else {
+            setDone("Sẵn sàng — bấm Đăng");
+          }
+        } catch (err) {
+          console.error("[Manual Post] Error:", err);
+          setFail("Lỗi: " + (err.message || err));
         }
       });
   }
@@ -995,11 +1154,29 @@
     }
   }
 
-  async function fetchImageBlob(imgSrc) {
+  async function fetchImageBlob(imgSrc, filename = "image.png") {
     if (!imgSrc) return null;
 
     // Attempt 1: Via Canvas (fastest but fails on cross-origin taint)
-    const imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+    // Tìm img element theo src OR currentSrc OR srcset (srcset có thể là URL chúng ta lấy)
+    let imgEl = null;
+    try {
+      imgEl = document.querySelector(`img[src="${CSS.escape(imgSrc)}"]`);
+      if (!imgEl) {
+        // Fallback: scan tất cả img để tìm element có currentSrc match hoặc srcset chứa url
+        const allImgs = document.querySelectorAll("img");
+        for (const img of allImgs) {
+          if (img.currentSrc === imgSrc || img.src === imgSrc) {
+            imgEl = img; break;
+          }
+          const srcset = img.srcset || "";
+          if (srcset && srcset.includes(imgSrc)) {
+            imgEl = img; break;
+          }
+        }
+      }
+    } catch (_) {}
+
     if (imgEl && imgEl.naturalWidth > 0) {
       try {
         const canvas = document.createElement("canvas");
@@ -1007,8 +1184,10 @@
         canvas.height = imgEl.naturalHeight;
         canvas.getContext("2d").drawImage(imgEl, 0, 0);
         const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-        if (blob) return new File([blob], "image.png", { type: "image/png" });
-      } catch (_) {}
+        if (blob) return new File([blob], filename, { type: "image/png" });
+      } catch (_) {
+        // Cross-origin taint — fall through to network fetch
+      }
     }
 
     // Attempt 2: Via Background.js fetch (bypasses CORS)
@@ -1022,11 +1201,28 @@
       if (resp && resp.base64) {
         const fetchResp = await fetch(resp.base64);
         const blob = await fetchResp.blob();
-        if (blob) return new File([blob], "image.png", { type: "image/png" });
+        if (blob) {
+          const ext = blob.type.includes("jpeg") ? "jpg" :
+                     blob.type.includes("webp") ? "webp" :
+                     blob.type.includes("png") ? "png" : "jpg";
+          return new File([blob], filename.replace(/\.\w+$/, "." + ext), { type: blob.type || "image/jpeg" });
+        }
       }
     } catch (_) {}
 
     return null;
+  }
+
+  // Parallel fetch nhiều ảnh cùng lúc, returns array of File (null entries filtered out)
+  // Max parallel: 5, timeout per image handled by background.js (30s)
+  async function fetchImageBlobs(imgSrcs, maxCount = 10) {
+    if (!imgSrcs || imgSrcs.length === 0) return [];
+    // Facebook limit 10 ảnh/post; giới hạn maxCount
+    const targets = imgSrcs.slice(0, maxCount);
+    const results = await Promise.all(
+      targets.map((src, i) => fetchImageBlob(src, `image_${i + 1}.png`))
+    );
+    return results.filter(f => f !== null);
   }
 
   function pasteToLexical(element, text, file = null) {
@@ -1043,12 +1239,17 @@
         }),
       );
     }
-    // Paste file riêng sau (nếu có)
+    // Paste file riêng sau (nếu có). Hỗ trợ cả single file và array of files.
     if (file) {
+      const files = Array.isArray(file) ? file : [file];
+      if (files.length === 0) return;
       setTimeout(() => {
         element.focus();
         const dtFile = new DataTransfer();
-        dtFile.items.add(file);
+        for (const f of files) {
+          if (f) dtFile.items.add(f);
+        }
+        if (dtFile.files.length === 0) return;
         element.dispatchEvent(
           new ClipboardEvent("paste", {
             clipboardData: dtFile,
@@ -1098,38 +1299,69 @@
 
     // LUÔN tạo commentText — bắt buộc comment nguồn
     let commentText = "";
-    const isUsefulUrl = cleanUrl && cleanUrl !== "https://www.facebook.com" && cleanUrl.length > 30;
+    // URL hữu ích: phải có permalink pattern (không chỉ là homepage FB hoặc URL ngắn)
+    // Giảm threshold từ 30 → 25 để bắt được group URL có slug ngắn
+    const hasPostPattern = cleanUrl && (
+      cleanUrl.includes("/posts/") ||
+      cleanUrl.includes("/permalink") ||
+      cleanUrl.includes("story_fbid") ||
+      cleanUrl.includes("pfbid") ||
+      cleanUrl.includes("multi_permalinks") ||
+      cleanUrl.includes("/videos/") ||
+      cleanUrl.includes("/photos/")
+    );
+    const isUsefulUrl = cleanUrl &&
+      cleanUrl !== "https://www.facebook.com" &&
+      cleanUrl !== "https://www.facebook.com/" &&
+      (hasPostPattern || cleanUrl.length > 30);
 
     if (isUsefulUrl) {
       // Có link chính xác → dùng link + tên tác giả
       commentText = buildCommentText(cleanUrl, postAuthor, postSource);
     } else {
       // Không có link chính xác → build comment từ thông tin có sẵn
-      let parts = [];
-      parts.push("Nguồn:");
-      if (postAuthor) parts.push(postAuthor);
-      if (postSource && postSource !== postAuthor) parts.push("(" + postSource + ")");
-      if (cleanUrl && cleanUrl.length > 30) {
-        parts.push("\n" + cleanUrl);
+      // Sử dụng buildCommentText để format nhất quán
+      let fallbackUrl = "";
+      if (cleanUrl && cleanUrl.length > 20) {
+        fallbackUrl = cleanUrl;
       } else {
-        // Dùng URL trang hiện tại nếu có ý nghĩa (group/page)
+        // Dùng URL trang hiện tại nếu có ý nghĩa (group/page/profile)
         const pageUrl = location.href;
-        if (pageUrl.includes("/groups/") || pageUrl.includes("/pages/")) {
-          parts.push("\n" + pageUrl.split("?")[0]);
+        if (pageUrl.includes("/groups/") || pageUrl.includes("/pages/") || pageUrl.match(/facebook\.com\/[^\/?]+\/?$/)) {
+          fallbackUrl = pageUrl.split("?")[0];
         }
       }
-      commentText = parts.join(" ").trim();
-      // Nếu vẫn chỉ có "Nguồn:" thì thêm tên trang
-      if (commentText === "Nguồn:") {
-        commentText = "Nguồn: Facebook";
+
+      if (fallbackUrl) {
+        commentText = buildCommentText(fallbackUrl, postAuthor, postSource);
+      } else {
+        // Không có URL nào → vẫn build comment với author/source (không link)
+        const isValidName = (n) => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n);
+        const a = isValidName(postAuthor) ? postAuthor : "";
+        const s = isValidName(postSource) ? postSource : "";
+        if (a) {
+          commentText = "Nguồn: " + a + (s && s !== a ? " (" + s + ")" : "");
+        } else if (s) {
+          commentText = "Nguồn: " + s;
+        } else {
+          commentText = "Nguồn: Facebook";
+        }
       }
     }
     console.log("[Agent] Comment text prepared:", commentText);
     console.log("[Agent] Author:", postAuthor || "(unknown)", "| Source:", postSource || "(unknown)", "| URL:", cleanUrl || "(none)");
 
     // Build final post text
+    // AI thường đã include "—\nNguồn dưới cmt đầu" theo prompt yêu cầu.
+    // Strip mọi instance có sẵn (nhiều format) rồi append đúng 1 lần.
     let postText = summaryText.trim();
-    // LUÔN thêm dòng "Nguồn dưới cmt đầu" — bất kể nội dung summary
+    // Regex: match "—\nNguồn dưới cmt đầu" hoặc "-\nNguồn dưới cmt đầu" hoặc
+    // chỉ "Nguồn dưới cmt đầu" ở cuối (có thể có/không dấu gạch), case-insensitive
+    postText = postText.replace(
+      /\s*(?:[—-]\s*\n\s*)?Nguồn\s+dưới\s+cmt\s+đầu\s*$/gi,
+      ""
+    ).trim();
+    // Append đúng 1 lần footer chuẩn
     postText += "\n\n—\nNguồn dưới cmt đầu";
 
     console.log("[Agent] fbsAgentPost called:", {
@@ -1182,14 +1414,39 @@
     editor.focus();
     await new Promise((r) => setTimeout(r, 1000));
 
-    // Step 3: Fetch image blob nếu có
-    const imgFile = await fetchImageBlob(imageUrl);
+    // Step 3: Fetch image blobs — agent cố lấy TẤT CẢ ảnh từ bài gốc
+    // để post giống bài gốc nhất có thể. Fetch song song để tiết kiệm thời gian.
+    let imgFiles = [];
+    try {
+      // Lấy danh sách tất cả ảnh từ postElement (bao gồm bài share gốc)
+      let allImages = [];
+      if (postElement && typeof window.fbsExtractImages === "function") {
+        allImages = window.fbsExtractImages(postElement);
+      } else if (imageUrl) {
+        allImages = [imageUrl];
+      }
+      // Ensure imageUrl (primary) là ảnh đầu tiên nếu có
+      if (imageUrl && !allImages.includes(imageUrl)) {
+        allImages.unshift(imageUrl);
+      }
+      if (allImages.length > 0) {
+        console.log("[Agent] Fetching", allImages.length, "image(s) in parallel...");
+        imgFiles = await fetchImageBlobs(allImages, 10);
+        console.log("[Agent] Fetched", imgFiles.length, "image file(s) successfully");
+      }
+    } catch (imgErr) {
+      console.warn("[Agent] Multi-image fetch failed, fallback to single:", imgErr.message);
+      const singleFile = await fetchImageBlob(imageUrl);
+      if (singleFile) imgFiles = [singleFile];
+    }
 
-    // Step 4: Paste text (+ image) — giả lập gõ chậm
-    console.log("[Agent] Pasting text...", { length: postText.length });
-    pasteToLexical(editor, postText, imgFile);
-    // Chờ text render + image upload (người thật mất 3-8s để review trước khi đăng)
-    await new Promise((r) => setTimeout(r, imgFile ? 5000 : 3000));
+    // Step 4: Paste text (+ images) — giả lập gõ chậm
+    console.log("[Agent] Pasting text...", { length: postText.length, images: imgFiles.length });
+    pasteToLexical(editor, postText, imgFiles.length > 0 ? imgFiles : null);
+    // Chờ text render + image upload (multi-image cần nhiều thời gian hơn)
+    const uploadWaitMs = imgFiles.length > 1 ? 3000 + imgFiles.length * 1500 :
+                        imgFiles.length === 1 ? 5000 : 3000;
+    await new Promise((r) => setTimeout(r, uploadWaitMs));
 
     // Step 5: Chờ nút Tiếp hoặc Đăng native không bị disabled (đợi upload ảnh)
     let fbPostBtn = null;
@@ -1253,16 +1510,20 @@
         let commentBtn = null;
         let commentBox = null;
 
-        // Poll tìm nút comment trong 15s (bài có thể chưa render xong)
-        for (let poll = 0; poll < 30 && !commentBtn && !commentBox; poll++) {
+        // Tăng thời gian poll lên 20s (40 * 500ms) — bài vừa đăng có thể cần
+        // thời gian để render xong trong feed, đặc biệt khi có ảnh
+        for (let poll = 0; poll < 40 && !commentBtn && !commentBox; poll++) {
           // Ưu tiên: tìm aria-label="Viết bình luận" hoặc "Write a comment"
           commentBtn = document.querySelector('[aria-label="Viết bình luận"][role="button"]') ||
                        document.querySelector('[aria-label="Write a comment"][role="button"]') ||
-                       document.querySelector('[aria-label="Comment"][role="button"]');
+                       document.querySelector('[aria-label="Comment"][role="button"]') ||
+                       // Variant: "Bình luận" only (không có "Viết")
+                       document.querySelector('[aria-label="Bình luận"][role="button"]:not([aria-label*="Xem"])');
           // Hoặc comment box đã mở sẵn
           if (!commentBtn) {
             commentBox = document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="bình luận"]') ||
-                         document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="comment"]');
+                         document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="comment"]') ||
+                         document.querySelector('div[role="textbox"][contenteditable="true"][aria-label*="Bình luận"]');
           }
           if (!commentBtn && !commentBox) await new Promise((r) => setTimeout(r, 500));
         }
@@ -1276,8 +1537,8 @@
           commentBtn.click();
           await new Promise((r) => setTimeout(r, 3000));
 
-          // Poll tìm comment textbox sau khi click (có thể trong dialog)
-          for (let poll = 0; poll < 20 && !commentBox; poll++) {
+          // Poll tìm comment textbox sau khi click (có thể trong dialog) — 15s
+          for (let poll = 0; poll < 30 && !commentBox; poll++) {
             // Chính xác nhất: data-lexical-editor textbox
             commentBox = document.querySelector('[data-lexical-editor="true"][role="textbox"][contenteditable="true"]');
             // Fallback: aria-label chứa "Bình luận dưới tên"
@@ -1289,7 +1550,7 @@
             if (!commentBox) {
               commentBox = document.querySelector('div[role="dialog"] div[contenteditable="true"][role="textbox"]');
             }
-            // Fallback cuối: textbox cuối cùng trong document
+            // Fallback cuối: textbox cuối cùng trong document (thường là comment box mới mở)
             if (!commentBox) {
               const allBoxes = document.querySelectorAll('div[contenteditable="true"][role="textbox"]');
               if (allBoxes.length > 0) commentBox = allBoxes[allBoxes.length - 1];
@@ -1297,7 +1558,13 @@
             if (!commentBox) await new Promise((r) => setTimeout(r, 500));
           }
         } else {
-          console.warn("[Agent] Không tìm thấy nút 'Viết bình luận' sau 15s");
+          console.warn("[Agent] ✗ Không tìm thấy nút 'Viết bình luận' sau 20s");
+          console.warn("[Agent] ✗ Comment NGUỒN KHÔNG ĐƯỢC ĐĂNG — copy thủ công:", commentText);
+          // Copy comment text vào clipboard để user có thể paste thủ công
+          try {
+            await navigator.clipboard.writeText(commentText);
+            console.log("[Agent] Đã copy commentText vào clipboard để user paste thủ công");
+          } catch (_) {}
         }
 
         if (commentBox) {
@@ -1308,12 +1575,31 @@
           pasteToLexical(commentBox, commentText);
           await new Promise((r) => setTimeout(r, 2500));
 
-          // Gửi bằng Enter
-          commentBox.dispatchEvent(
-            new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }),
-          );
-          await new Promise((r) => setTimeout(r, 2000));
-          console.log("[Agent] ✓ Comment nguồn đã gửi!");
+          // Verify paste thành công — nếu commentBox rỗng thì retry 1 lần
+          const pastedText = (commentBox.innerText || commentBox.textContent || "").trim();
+          if (pastedText.length < 5) {
+            console.warn("[Agent] Paste lần 1 thất bại, retry...");
+            commentBox.click();
+            commentBox.focus();
+            await new Promise((r) => setTimeout(r, 500));
+            pasteToLexical(commentBox, commentText);
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+
+          // Verify lần cuối — chỉ gửi Enter nếu có text
+          const finalText = (commentBox.innerText || commentBox.textContent || "").trim();
+          if (finalText.length >= 5) {
+            // Gửi bằng Enter
+            commentBox.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }),
+            );
+            await new Promise((r) => setTimeout(r, 2000));
+            console.log("[Agent] ✓ Comment nguồn đã gửi!");
+          } else {
+            console.error("[Agent] ✗ Paste commentText failed sau 2 lần retry");
+            console.error("[Agent] ✗ Comment NGUỒN KHÔNG ĐƯỢC ĐĂNG — copy thủ công:", commentText);
+            try { await navigator.clipboard.writeText(commentText); } catch (_) {}
+          }
         } else {
           console.warn("[Agent] ✗ Không tìm thấy ô comment");
         }
@@ -1360,14 +1646,31 @@
 
   // Expose DOM extractors for auto-pilot
   window.fbsExtractImage = extractPostImage;
+  // Plural: returns ALL images from the post (main + shared inner, deduped & sorted)
+  // Must be called AFTER extractPostImage() for the same element since extractPostImage
+  // populates the internal _lastExtractedImages cache.
+  window.fbsExtractImages = function (element) {
+    // Always re-run extraction to get fresh data for this element
+    extractPostImage(element);
+    return _lastExtractedImages.slice();
+  };
   window.fbsExtractPermalink = extractPostPermalink;
   window.fbsExtractAuthor = extractPostAuthor;
 
   // Async version: lấy permalink (sử dụng nút Share để copy link chính xác tuyệt đối, fallback sang DOM)
+  // Nếu post là BÀI SHARE → ưu tiên tìm link bài GỐC trong nested article trước
   window.fbsExtractPermalinkAsync = async function (element) {
     try {
       if (SITE === "facebook" && element) {
         const postContainer = _findPostContainer(element);
+
+        // === ƯU TIÊN 1: Nếu là bài share → tìm link bài GỐC trong DOM trước ===
+        // Tránh phải click nút Share (slow + xâm lấn) nếu đã có link gốc trong DOM
+        const sharedInner = _findSharedPostArticle(postContainer);
+        if (sharedInner) {
+          const innerPermalink = _findPermalinkInContainer(sharedInner);
+          if (innerPermalink) return innerPermalink;
+        }
 
         const shareBtn = Array.from(postContainer.querySelectorAll('div[role="button"]')).find(b => {
           const label = (b.getAttribute("aria-label") || "").toLowerCase();
@@ -1401,13 +1704,9 @@
                    const closeBtn = document.querySelector('div[role="dialog"] [aria-label="Đóng"][role="button"], div[role="dialog"] [aria-label="Close"][role="button"]');
                    if (closeBtn) closeBtn.click();
                  } catch (_) {}
-                 
-                 try {
-                   const u = new URL(newClip);
-                   return u.origin + u.pathname + (u.searchParams.has("fbid") ? "?fbid=" + u.searchParams.get("fbid") : "");
-                 } catch (_) {
-                   return newClip;
-                 }
+
+                 // Clean URL — loại bỏ tracking params nhưng giữ fbid
+                 return _cleanFbUrl(newClip);
                }
              }
              
@@ -1514,12 +1813,79 @@
     return element;
   }
 
+  // Helper: tìm nested/shared post article bên trong post container.
+  // Khi ai đó share bài của người khác, Facebook render nested article.
+  // Returns the inner (original) post article, or null if this is not a share.
+  function _findSharedPostArticle(postContainer) {
+    if (!postContainer) return null;
+    const nestedArticles = postContainer.querySelectorAll('[role="article"]');
+    for (const nested of nestedArticles) {
+      if (nested === postContainer) continue;
+      // Phải là nested article trực tiếp (không phải comment hay reply sâu hơn)
+      const parentArticle = nested.parentElement?.closest('[role="article"]');
+      if (parentArticle && parentArticle !== postContainer) continue;
+      // Bỏ qua comment (dùng _fbIsCommentArticle nếu có, nếu không có thì check form)
+      if (nested.closest("form")) continue;
+      let el = nested.parentElement;
+      let isInList = false;
+      for (let i = 0; i < 10 && el && el !== postContainer; i++) {
+        const role = (el.getAttribute("role") || "").toLowerCase();
+        if (role === "list" || role === "listitem" || el.tagName === "UL") { isInList = true; break; }
+        el = el.parentElement;
+      }
+      if (isInList) continue;
+      // Nested article phải có header riêng (h2/h3/h4 with a link) — mới coi là shared post
+      const headers = nested.querySelectorAll("h2, h3, h4");
+      for (const h of headers) {
+        if (h.closest('[role="article"]') !== nested) continue;
+        if (h.querySelector("a[href]")) return nested;
+      }
+    }
+    return null;
+  }
+
+  // Helper: parse URL và clean tracking params — shared utility
+  function _cleanFbUrl(rawUrl) {
+    if (!rawUrl) return "";
+    try {
+      const u = new URL(rawUrl);
+      const TRACKING_PARAMS = ["fbclid", "ref", "comment_id", "reply_comment_id",
+        "notif_id", "notif_t", "mibextid", "_rdr", "_rdc", "rdid", "share_scenario",
+        "hoisted_section_header_type"];
+      for (const k of [...u.searchParams.keys()]) {
+        if (k.startsWith("__") || k.startsWith("utm_") || TRACKING_PARAMS.includes(k)) {
+          u.searchParams.delete(k);
+        }
+      }
+      const clean = u.searchParams.toString()
+        ? u.origin + u.pathname + "?" + u.searchParams.toString()
+        : u.origin + u.pathname;
+      return clean.replace(/\/$/, "");
+    } catch (_) {
+      return rawUrl;
+    }
+  }
+
+  // Helper: resolve l.facebook.com/l.php redirect URL to actual target.
+  // Facebook wraps external links như l.facebook.com/l.php?u=<ENCODED_URL>
+  function _resolveFbRedirect(rawUrl) {
+    if (!rawUrl) return "";
+    try {
+      if (rawUrl.includes("l.facebook.com/l.php") || rawUrl.includes("lm.facebook.com/l.php")) {
+        const u = new URL(rawUrl);
+        const target = u.searchParams.get("u");
+        if (target) return decodeURIComponent(target);
+      }
+    } catch (_) {}
+    return rawUrl;
+  }
+
   function extractPostPermalink(element) {
     const url = location.href;
     if (SITE === "facebook") {
       // Nếu đang xem bài đơn lẻ → dùng URL trang
       if (/\/posts\/|\/permalink\/|story_fbid|multi_permalinks|pfbid/.test(url))
-        return url;
+        return _cleanFbUrl(url);
 
       // Đang ở newsfeed → tìm permalink trong article
       if (!element) return "";
@@ -1527,134 +1893,19 @@
       // Tìm post container (supports both old role="article" and new data-virtualized)
       const postContainer = _findPostContainer(element);
 
-      // Lấy TẤT CẢ link trong bài
-      const allLinks = postContainer.querySelectorAll("a[href]");
-      const candidates = [];
-
-      for (const link of allLinks) {
-        const href = link.href || "";
-        if (!href) continue;
-
-        // Bỏ qua link rõ ràng không phải permalink
-        if (href.includes("/photo") || href.includes("/reel/") || href.includes("/hashtag/") ||
-            href.includes("/events/") || href.includes("/marketplace/") ||
-            href.includes("facebook.com/policies") || href.includes("facebook.com/help") ||
-            href.includes("/groups/") && !href.includes("/posts/") ||
-            href.includes("l.facebook.com/") || href.includes("/share") ||
-            href === "https://www.facebook.com/" || href === "https://www.facebook.com") continue;
-
-        const isPermalink =
-          href.includes("/posts/") ||
-          href.includes("/permalink") ||
-          href.includes("story_fbid") ||
-          href.includes("pfbid") ||
-          href.includes("multi_permalinks");
-
-        if (isPermalink) {
-          candidates.push({ href, priority: 1, reason: "permalink_pattern" });
-          continue;
-        }
-
-        // Link có text ngắn giống timestamp
-        const text = (link.textContent || "").trim();
-        const ariaLabel = (link.getAttribute("aria-label") || "").trim();
-        const isTimestamp =
-          /^\d+\s*(giờ|phút|ngày|giây|tháng|năm|h|m|d|w|s|hr|min|tuần|week)/i.test(text) ||
-          /^(hôm qua|yesterday|just now|vừa xong|hôm kia)/i.test(text) ||
-          /\d+\s*(giờ|phút|ngày|hour|minute|day|month|year)/i.test(ariaLabel);
-
-        if (isTimestamp && text.length < 30 && href.includes("facebook.com")) {
-          candidates.push({ href, priority: 2, reason: "timestamp:" + text });
-          continue;
-        }
-
-        // Link ngắn trỏ đến user profile + post (dạng /username/posts/ hoặc /username/pfbid)
-        try {
-          const u = new URL(href);
-          if (u.hostname.includes("facebook.com") && u.pathname.length > 5) {
-            const parts = u.pathname.split("/").filter(Boolean);
-            // Pattern: /username/posts/id hoặc /username/pfbidXXX
-            if (parts.length >= 2 && (parts[1] === "posts" || parts[1].startsWith("pfbid"))) {
-              candidates.push({ href, priority: 1, reason: "path_pattern:" + u.pathname });
-            }
-          }
-        } catch (_) {}
+      // === ƯU TIÊN 1: Nếu là BÀI SHARE → lấy link bài GỐC ===
+      // Khi ai đó share bài, ta muốn link đến bài gốc (của người được share),
+      // không phải link đến bài share. Bài gốc nằm trong nested article.
+      const sharedInner = _findSharedPostArticle(postContainer);
+      if (sharedInner) {
+        // Tìm permalink bên trong nested article
+        const innerPermalink = _findPermalinkInContainer(sharedInner);
+        if (innerPermalink) return innerPermalink;
       }
 
-      if (candidates.length > 0) {
-        candidates.sort((a, b) => a.priority - b.priority);
-        const best = candidates[0];
-        try {
-          const u = new URL(best.href);
-          for (const k of [...u.searchParams.keys()]) {
-            if (k.startsWith("__") || k.startsWith("utm_") ||
-                ["fbclid", "ref", "comment_id", "reply_comment_id", "notif_id", "notif_t", "mibextid"].includes(k))
-              u.searchParams.delete(k);
-          }
-          const clean = u.searchParams.toString()
-            ? u.origin + u.pathname + "?" + u.searchParams.toString()
-            : u.origin + u.pathname;
-          return clean.replace(/\/$/, "");
-        } catch (_) {
-          return best.href;
-        }
-      }
-
-      // === FALLBACK: Bài trong Group — tìm group permalink ===
-      let groupUrl = "";
-      for (const link of allLinks) {
-        const href = link.href || "";
-        const match = href.match(/facebook\.com\/groups\/(\d+)/);
-        if (match) { groupUrl = "https://www.facebook.com/groups/" + match[1]; break; }
-      }
-
-      if (groupUrl) {
-        // Tìm post ID từ data attributes
-        const dataFtEl = postContainer.querySelector("[data-ft]");
-        if (dataFtEl) {
-          try {
-            const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
-            if (ft.top_level_post_id) {
-              const permalink = groupUrl + "/posts/" + ft.top_level_post_id;
-              return permalink;
-            }
-          } catch (_) {}
-        }
-
-        // Tìm post ID từ article ID hoặc aria attributes
-        const idSources = [
-          postContainer.getAttribute("aria-describedby"),
-          postContainer.getAttribute("aria-labelledby"),
-          postContainer.id,
-        ].join(" ");
-        const idMatch = idSources.match(/(\d{10,})/);
-        if (idMatch) {
-          return groupUrl + "/posts/" + idMatch[1];
-        }
-
-        // Tìm trong innerHTML: Facebook đôi khi embed post ID trong hidden elements
-        const hiddenInputs = postContainer.querySelectorAll("input[type='hidden'], [data-story-id], [data-post-id]");
-        for (const el of hiddenInputs) {
-          const val = el.value || el.getAttribute("data-story-id") || el.getAttribute("data-post-id") || "";
-          if (/^\d{10,}$/.test(val)) {
-            return groupUrl + "/posts/" + val;
-          }
-        }
-
-        return groupUrl;
-      }
-
-      // === FALLBACK CUỐI: Link profile tác giả ===
-      for (const link of allLinks) {
-        const href = link.href || "";
-        if (href.includes("facebook.com") && (href.includes("/user/") || href.includes("/profile.php"))) {
-          try {
-            const u = new URL(href);
-            for (const k of [...u.searchParams.keys()]) { if (k.startsWith("__")) u.searchParams.delete(k); }
-            return u.toString().replace(/\?$/, "");
-          } catch (_) {}
-        }
-      }
+      // === ƯU TIÊN 2: Tìm permalink trong post container (bài thường) ===
+      const directPermalink = _findPermalinkInContainer(postContainer);
+      if (directPermalink) return directPermalink;
 
       return "";
     }
@@ -1680,14 +1931,186 @@
     return url;
   }
 
+  // Helper tìm permalink trong 1 container (post hoặc nested shared post).
+  // Được tách ra để tái sử dụng cho cả bài thường và bài share.
+  function _findPermalinkInContainer(container) {
+    if (!container) return "";
+    const allLinks = container.querySelectorAll("a[href]");
+    const candidates = [];
+
+    for (const link of allLinks) {
+      let href = link.href || "";
+      if (!href) continue;
+
+      // Resolve l.facebook.com redirects
+      href = _resolveFbRedirect(href);
+
+      // Bỏ qua link rõ ràng không phải permalink
+      if (href.includes("/photo") || href.includes("/reel/") || href.includes("/hashtag/") ||
+          href.includes("/events/") || href.includes("/marketplace/") ||
+          href.includes("facebook.com/policies") || href.includes("facebook.com/help") ||
+          href.includes("/groups/") && !href.includes("/posts/") && !href.includes("pfbid") && !href.includes("/permalink") ||
+          href.includes("/share") ||
+          href === "https://www.facebook.com/" || href === "https://www.facebook.com") continue;
+
+      const isPermalink =
+        href.includes("/posts/") ||
+        href.includes("/permalink") ||
+        href.includes("story_fbid") ||
+        href.includes("pfbid") ||
+        href.includes("multi_permalinks");
+
+      if (isPermalink) {
+        candidates.push({ href, priority: 1, reason: "permalink_pattern" });
+        continue;
+      }
+
+      // Link có text ngắn giống timestamp
+      const text = (link.textContent || "").trim();
+      const ariaLabel = (link.getAttribute("aria-label") || "").trim();
+      const isTimestamp =
+        /^\d+\s*(giờ|phút|ngày|giây|tháng|năm|h|m|d|w|s|hr|min|tuần|week)/i.test(text) ||
+        /^(hôm qua|yesterday|just now|vừa xong|hôm kia)/i.test(text) ||
+        /\d+\s*(giờ|phút|ngày|hour|minute|day|month|year)/i.test(ariaLabel);
+
+      if (isTimestamp && text.length < 30 && href.includes("facebook.com")) {
+        candidates.push({ href, priority: 2, reason: "timestamp:" + text });
+        continue;
+      }
+
+      // Link ngắn trỏ đến user profile + post (dạng /username/posts/ hoặc /username/pfbid)
+      try {
+        const u = new URL(href);
+        if (u.hostname.includes("facebook.com") && u.pathname.length > 5) {
+          const parts = u.pathname.split("/").filter(Boolean);
+          // Pattern: /username/posts/id hoặc /username/pfbidXXX
+          if (parts.length >= 2 && (parts[1] === "posts" || parts[1].startsWith("pfbid"))) {
+            candidates.push({ href, priority: 1, reason: "path_pattern:" + u.pathname });
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => a.priority - b.priority);
+      return _cleanFbUrl(candidates[0].href);
+    }
+
+    // === FALLBACK: Bài trong Group — tìm group permalink ===
+    let groupUrl = "";
+    let groupId = "";
+    for (const link of allLinks) {
+      const href = link.href || "";
+      const match = href.match(/facebook\.com\/groups\/([^\/?]+)/);
+      if (match) {
+        groupId = match[1];
+        groupUrl = "https://www.facebook.com/groups/" + groupId;
+        break;
+      }
+    }
+
+    if (groupUrl) {
+      // Tìm post ID từ data-ft (Facebook legacy data attribute)
+      const dataFtEl = container.querySelector("[data-ft]");
+      if (dataFtEl) {
+        try {
+          const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
+          if (ft.top_level_post_id) {
+            return groupUrl + "/posts/" + ft.top_level_post_id;
+          }
+          if (ft.mf_story_key) {
+            return groupUrl + "/posts/" + ft.mf_story_key;
+          }
+        } catch (_) {}
+      }
+
+      // Tìm post ID từ aria attributes, id, hoặc data-*
+      const idSources = [
+        container.getAttribute("aria-describedby"),
+        container.getAttribute("aria-labelledby"),
+        container.id,
+        container.getAttribute("data-story-id"),
+        container.getAttribute("data-post-id"),
+      ].filter(Boolean).join(" ");
+      const idMatch = idSources.match(/(\d{10,})/);
+      if (idMatch) {
+        return groupUrl + "/posts/" + idMatch[1];
+      }
+
+      // Tìm hidden inputs có post ID
+      const hiddenInputs = container.querySelectorAll(
+        "input[type='hidden'], [data-story-id], [data-post-id], [data-testid*='post']"
+      );
+      for (const el of hiddenInputs) {
+        const val = el.value ||
+          el.getAttribute("data-story-id") ||
+          el.getAttribute("data-post-id") ||
+          el.getAttribute("data-testid") || "";
+        const vMatch = val.match(/(\d{10,})/);
+        if (vMatch) {
+          return groupUrl + "/posts/" + vMatch[1];
+        }
+      }
+
+      // Fallback: chỉ trả về group URL
+      return groupUrl;
+    }
+
+    // === FALLBACK: Bài trên Page — tìm page URL ===
+    // Page posts thường có link về page, dạng /pageusername hoặc /pages/Name/ID
+    for (const link of allLinks) {
+      const href = link.href || "";
+      // Pattern page: /pages/Name/12345 hoặc /pagename (single path)
+      const pageMatch = href.match(/facebook\.com\/pages\/[^\/]+\/(\d+)/);
+      if (pageMatch) {
+        // Thử tìm post ID trong container
+        const idSources = [
+          container.getAttribute("aria-describedby") || "",
+          container.getAttribute("aria-labelledby") || "",
+          container.id || "",
+        ].join(" ");
+        const postIdMatch = idSources.match(/(\d{10,})/);
+        if (postIdMatch) {
+          return "https://www.facebook.com/" + pageMatch[1] + "/posts/" + postIdMatch[1];
+        }
+        return "https://www.facebook.com/pages/" + pageMatch[0].split("/pages/")[1];
+      }
+    }
+
+    // === FALLBACK CUỐI: Link profile tác giả ===
+    for (const link of allLinks) {
+      const href = link.href || "";
+      if (href.includes("facebook.com") && (href.includes("/user/") || href.includes("/profile.php"))) {
+        return _cleanFbUrl(href);
+      }
+    }
+
+    return "";
+  }
+
   function extractPostImage(element) {
     if (!element) return "";
 
     const postContainer = _findPostContainer(element);
 
-    // Helper: get best src from img element (handles lazy-loaded data-src)
+    // Helper: get best src from img element (handles lazy-loaded srcset/data-src)
     function _imgSrc(img) {
-      return img.getAttribute("data-src") || img.src || "";
+      // Ưu tiên srcset (responsive) → dùng URL cuối (thường là highest res)
+      const srcset = img.getAttribute("srcset") || img.getAttribute("data-srcset") || "";
+      if (srcset) {
+        const parts = srcset.split(",").map(s => s.trim().split(/\s+/)).filter(p => p[0]);
+        if (parts.length > 0) {
+          // Lấy URL có descriptor lớn nhất (w, x) hoặc cuối cùng
+          let best = parts[parts.length - 1];
+          let bestW = 0;
+          for (const p of parts) {
+            const w = parseInt(p[1] || "0");
+            if (w > bestW) { bestW = w; best = p; }
+          }
+          if (best[0]) return best[0];
+        }
+      }
+      return img.getAttribute("data-src") || img.currentSrc || img.src || "";
     }
 
     // Helper: is this img likely an avatar/icon (circular or tiny)?
@@ -1696,16 +2119,24 @@
       const h = img.naturalHeight || img.height || 0;
       if (w > 0 && w === h && w <= 60) return true;
       try { if (getComputedStyle(img).borderRadius === "50%") return true; } catch (_) {}
+      // Avatar thường trong link profile
+      const parentLink = img.closest("a");
+      if (parentLink) {
+        const href = parentLink.href || "";
+        // Profile pattern: /username hoặc /profile.php?id=
+        if (href.includes("/profile.php") ||
+            (href.includes("facebook.com") && /facebook\.com\/[^/?]+\/?$/.test(href) &&
+             !href.includes("/posts/") && !href.includes("/photo") && !href.includes("/pages/"))) {
+          return true;
+        }
+      }
       return false;
     }
 
     // Helper: is this img inside the post header (avatar row)?
-    // Facebook header is typically the FIRST child subtree of the post container.
-    // We detect it by checking if the img is inside a [role="group"] that has no
-    // photo/video link ancestor and appears before the text body.
-    function _isHeaderImg(img) {
-      const headerEl = postContainer.querySelector(
-        "h2, h3, [data-testid='story-subtitle'], [data-testid='post-header']"
+    function _isHeaderImg(img, container) {
+      const headerEl = container.querySelector(
+        "h2, h3, h4, [data-testid='story-subtitle'], [data-testid='post-header']"
       );
       if (headerEl && headerEl.contains(img)) return true;
       // Also skip profile-href links near top of post
@@ -1721,47 +2152,136 @@
       return false;
     }
 
-    if (SITE === "facebook") {
-      // Strategy 1: images inside explicit photo/video link containers
-      const photoLinks = postContainer.querySelectorAll(
+    // Helper: extract ALL images from a specific container, sorted by area desc.
+    // Returns an array of unique image URLs (highest quality variant each).
+    function _extractAllImagesFromContainer(container) {
+      const collected = []; // { src, area, priority }
+      const seenSrcs = new Set();
+
+      // Dedup helper: 2 URL là cùng 1 ảnh nếu sau khi strip size params chúng giống nhau
+      // Facebook URL pattern: scontent-*.fbcdn.net/v/t1.../IMG_HASH_n.jpg?...
+      function _normalizeSrc(src) {
+        try {
+          const u = new URL(src);
+          // Giữ origin + pathname, bỏ query params (thường chứa thumbnail size)
+          return u.origin + u.pathname;
+        } catch (_) {
+          return src;
+        }
+      }
+
+      function _addIfUnique(src, area, priority) {
+        if (!src || src.startsWith("data:")) return;
+        if (src.includes("/rsrc.php/") || src.includes("emoji")) return;
+        const key = _normalizeSrc(src);
+        if (seenSrcs.has(key)) return;
+        seenSrcs.add(key);
+        collected.push({ src, area, priority });
+      }
+
+      // Strategy 1 (priority 1): images inside explicit photo/video link containers
+      const photoLinks = container.querySelectorAll(
         'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]',
       );
       for (const link of photoLinks) {
         const img = link.querySelector("img");
         if (!img) continue;
         const src = _imgSrc(img);
-        if (!src || src.startsWith("data:")) continue;
         const w = img.naturalWidth || img.width || 0;
-        if (w >= 80 || !w) return src; // accept even unloaded (w=0) inside photo links
+        const h = img.naturalHeight || img.height || 0;
+        if (w > 0 && w < 80) continue; // skip rất nhỏ
+        _addIfUnique(src, w * h, 1);
       }
 
-      // Strategy 2: large images not in avatar/header position
-      const allImgs = postContainer.querySelectorAll("img");
+      // Strategy 2 (priority 2): background-image trong inline style
+      const bgElements = container.querySelectorAll('[style*="background-image"]');
+      for (const bgEl of bgElements) {
+        const rect = bgEl.getBoundingClientRect();
+        if (rect.width < 150 || rect.height < 150) continue;
+        try {
+          if (getComputedStyle(bgEl).borderRadius === "50%") continue;
+        } catch (_) {}
+        const style = bgEl.getAttribute("style") || "";
+        const match = style.match(/background-image:\s*url\(["']?([^"')]+)["']?\)/);
+        if (match && match[1]) {
+          _addIfUnique(match[1], rect.width * rect.height, 2);
+        }
+      }
+
+      // Strategy 3 (priority 3): large images not in avatar/header position
+      const allImgs = container.querySelectorAll("img");
       for (const img of allImgs) {
         const src = _imgSrc(img);
         if (!src || src.startsWith("data:")) continue;
         if (_isAvatar(img)) continue;
-        if (_isHeaderImg(img)) continue;
+        if (_isHeaderImg(img, container)) continue;
         const w = img.naturalWidth || img.width || 0;
         const h = img.naturalHeight || img.height || 0;
         if (w > 0 && w < 200 && h < 200) continue;
-        return src;
+        _addIfUnique(src, w * h, 3);
       }
-    } else {
-      // Non-Facebook: original logic
-      const images = postContainer.querySelectorAll("img");
-      for (const img of images) {
-        const src = _imgSrc(img);
-        if (!src || src.startsWith("data:")) continue;
-        const w = img.naturalWidth || img.width || 0;
-        const h = img.naturalHeight || img.height || 0;
-        if (w < 200 && h < 200) continue;
-        if (src.includes("emoji") || src.includes("static")) continue;
-        if (src.includes("profile") || src.includes("avatar")) continue;
-        try { if (getComputedStyle(img).borderRadius === "50%") continue; } catch (_) {}
-        return src;
+
+      // Sort: priority asc (1 = best), then area desc (larger first)
+      collected.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return b.area - a.area;
+      });
+
+      return collected.map(c => c.src);
+    }
+
+    // Internal helper returning array of URLs. extractPostImage() wraps this
+    // and returns only the first for backward compat. extractPostImages() (plural)
+    // is exposed for callers that need multi-image support.
+    function _collectImages() {
+      if (SITE === "facebook") {
+        const results = [];
+        const seen = new Set();
+        const push = (arr) => {
+          for (const url of arr) {
+            try {
+              const key = new URL(url).origin + new URL(url).pathname;
+              if (!seen.has(key)) { seen.add(key); results.push(url); }
+            } catch (_) {
+              if (!seen.has(url)) { seen.add(url); results.push(url); }
+            }
+          }
+        };
+        // ƯU TIÊN 1: Bài share → ảnh bài gốc (nested article)
+        const sharedInner = _findSharedPostArticle(postContainer);
+        if (sharedInner) push(_extractAllImagesFromContainer(sharedInner));
+        // ƯU TIÊN 2: Lấy tất cả ảnh từ post container chính
+        push(_extractAllImagesFromContainer(postContainer));
+        return results;
+      } else {
+        // Non-Facebook: original logic (single best)
+        const results = [];
+        const images = postContainer.querySelectorAll("img");
+        for (const img of images) {
+          const src = _imgSrc(img);
+          if (!src || src.startsWith("data:")) continue;
+          const w = img.naturalWidth || img.width || 0;
+          const h = img.naturalHeight || img.height || 0;
+          if (w < 200 && h < 200) continue;
+          if (src.includes("emoji") || src.includes("static")) continue;
+          if (src.includes("profile") || src.includes("avatar")) continue;
+          try { if (getComputedStyle(img).borderRadius === "50%") continue; } catch (_) {}
+          results.push(src);
+        }
+        return results;
       }
     }
+
+    const allImages = _collectImages();
+    if (allImages.length > 0) {
+      // Attach to the function's returned string as expando for callers that can use it
+      const primary = allImages[0];
+      // Primary as return value (string) — backward compat
+      // Expose all via a module-level variable for the same call
+      _lastExtractedImages = allImages;
+      return primary;
+    }
+    _lastExtractedImages = [];
 
     // Fallback: og:image
     const ogImage = document.querySelector('meta[property="og:image"]');
@@ -1942,37 +2462,50 @@
   function extractPostSource(element) {
     if (!element) return "";
 
-    let postContainer = element;
-    for (let i = 0; i < 20; i++) {
-      if (
-        !postContainer.parentElement ||
-        postContainer.parentElement === document.body
-      )
-        break;
-      postContainer = postContainer.parentElement;
-      if (postContainer.getAttribute("role") === "article") break;
-    }
+    const postContainer = _findPostContainer(element);
 
     if (SITE === "facebook") {
-      // Chỉ trả về group name nếu thực sự đang xem trong group
-      // Kiểm tra URL trang hoặc pattern "Author › Group" trong header
-      const isInGroup = location.href.includes("/groups/");
-      if (isInGroup) {
-        // Tìm group name: thường là link thứ 2 trong header (sau author)
-        const headers = postContainer.querySelectorAll("h2, h3, h4");
+      // 1. Nếu post là BÀI SHARE → source là nguồn bài gốc (group/page được share)
+      const sharedInner = _findSharedPostArticle(postContainer);
+      const containers = sharedInner ? [sharedInner, postContainer] : [postContainer];
+
+      for (const container of containers) {
+        // 2. Tìm pattern "Author › Group" hoặc "Author in Group"
+        // trong header: nếu có ≥2 link trong h2/h3/h4 thì link thứ 2 thường là group/page
+        const headers = container.querySelectorAll("h2, h3, h4");
         for (const h of headers) {
-          const links = h.querySelectorAll("a");
+          // Header phải thuộc container này
+          if (h.closest('[role="article"]') && h.closest('[role="article"]') !== container && container.getAttribute("role") === "article") continue;
+          const links = h.querySelectorAll("a[href]");
           if (links.length >= 2) {
-            const name = (links[1].textContent || "").trim();
-            if (name.length >= 3 && name.length < 100) return name;
+            for (let i = 1; i < links.length; i++) {
+              const link = links[i];
+              const href = link.href || "";
+              const name = (link.innerText || link.textContent || "").trim();
+              if (name.length < 3 || name.length > 100) continue;
+              // Chỉ lấy nếu link trỏ đến group hoặc page
+              if (href.includes("/groups/") || href.match(/facebook\.com\/[^/?]+\/?$/)) {
+                return name;
+              }
+            }
           }
         }
-        // Fallback: lấy từ group link
-        const groupLink = postContainer.querySelector('a[href*="/groups/"]');
-        if (groupLink) {
-          const name = (groupLink.textContent || "").trim();
-          if (name.length >= 3 && name.length < 100) return name;
+
+        // 3. Tìm direct group link trong container (trừ link avatar/author)
+        const groupLinks = container.querySelectorAll('a[href*="/groups/"]');
+        for (const link of groupLinks) {
+          // Bỏ qua link rỗng / chỉ có ảnh
+          const name = (link.innerText || link.textContent || "").trim();
+          if (name.length >= 3 && name.length < 100 && !/^\d+$/.test(name)) {
+            return name;
+          }
         }
+      }
+
+      // 4. Fallback: nếu URL trang là group → lấy từ page title
+      if (location.href.includes("/groups/")) {
+        const ogTitle = document.querySelector('meta[property="og:title"]');
+        if (ogTitle && ogTitle.content) return ogTitle.content.trim();
       }
     }
 
@@ -2479,6 +3012,21 @@
   document.addEventListener("mousedown", mousedownHandler);
   listeners.push({ element: document, event: "mousedown", handler: mousedownHandler });
 
+  // === VISIBLE POSTS TRACKER (IntersectionObserver) ===
+  const visiblePosts = new Set();
+  let postObserver = null;
+  if (typeof IntersectionObserver !== "undefined") {
+    postObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          visiblePosts.add(entry.target);
+        } else {
+          visiblePosts.delete(entry.target);
+        }
+      }
+    }, { rootMargin: "800px 0px" });
+  }
+
   // === FB ALL POSTS (Feature 6) — hover "Tóm tắt" for posts without "Xem thêm" ===
   const fbAllPostInjected = new WeakSet();
   function scanFBAllPosts() {
@@ -2492,6 +3040,11 @@
     ];
 
     for (const article of candidates) {
+      if (postObserver && !article.dataset.fbsObserved) {
+        article.dataset.fbsObserved = "1";
+        postObserver.observe(article);
+      }
+
       if (fbAllPostInjected.has(article)) continue;
       // Skip if already has a regular fbs button
       if (article.querySelector(".fbs-wrap, .fbs-btn, .fbs-btn-inline, .fbs-allpost-btn")) continue;
@@ -2677,15 +3230,36 @@
     if (document.getElementById("fbs-clutter-css")) return;
     const style = document.createElement("style");
     style.id = "fbs-clutter-css";
+    // Các selector ẩn bằng CSS (không cần MutationObserver vì chúng là structural)
     style.textContent = [
+      // Stories row (thanh story trên đầu feed)
       'div[data-pagelet="Stories"]',
       'div[data-pagelet*="Stories"]',
+      'div[aria-label="Stories"]',
+      'div[aria-label="Tin"]',
+      // Reels shelf trong feed
       'div[data-pagelet*="Reels"]',
       'div[aria-label="Reels"]',
+      'div[aria-label="Thước phim ngắn"]',
+      // Watch / Video suggestions
       'div[aria-label="Facebook Watch"]',
+      'div[aria-label="Video gợi ý"]',
+      // Right rail (sidebar contacts, sponsored, birthdays, etc.)
       'div[data-pagelet="RightRail"]',
+      'div[data-pagelet="RightRail2"]',
       'div[data-pagelet="BirthdayNotifications"]',
+      'div[data-pagelet="LeftRail"] div[data-pagelet*="sponsored"]',
+      // Chat sidebar
       'div[data-pagelet*="Chat"]',
+      'div[aria-label="Chat"]',
+      'div[aria-label="Danh sách trò chuyện"]',
+      // Marketplace widget trong feed
+      'div[data-pagelet*="Marketplace"]',
+      'div[aria-label="Marketplace"]',
+      // Groups you should join widget
+      'div[data-pagelet*="GroupsYouShouldJoin"]',
+      // "People you may know" widget
+      'div[data-pagelet*="PeopleYouMayKnow"]',
     ].join(",\n") + " { display: none !important; }";
     (document.head || document.documentElement).appendChild(style);
   }
@@ -2828,25 +3402,70 @@
     }
 
     // ── Strategy 2: aria-label substring scan on elements in the feed ───────
-    // Some Facebook ad variants put aria-label directly on a button/span in
-    // the post: e.g. the ··· button has aria-label on itself (not via portal).
-    // Only check elements whose aria-label is short enough (≤120 chars) to
-    // avoid scanning large containers. Must not be inside complementary.
     const SPKW_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
-    document.querySelectorAll("[aria-label]").forEach(el => {
-      if (el.dataset.fbsClutterChecked) return;
-      const lbl = (el.getAttribute("aria-label") || "").replace(/\s+/g, "").toLowerCase();
-      if (lbl.length < 3 || lbl.length > 120) return;
-      if (!SPKW_NORM.some(kw => lbl.includes(kw))) return;
-      el.dataset.fbsClutterChecked = "1";
-      if (isInNonPostArea(el)) return;
-      const wrapper = findFeedWrapper(el);
-      if (!wrapper || wrapper.dataset.fbsHidden === "1") return;
-      wrapper.dataset.fbsHidden = "1";
-      _hideWrapper(wrapper);
-      hiddenClutterCount++;
-      newlyHidden++;
-    });
+    const roots = (typeof visiblePosts !== "undefined" && visiblePosts.size > 0) ? Array.from(visiblePosts) : [document];
+    for (const root of roots) {
+      root.querySelectorAll("[aria-label]").forEach(el => {
+        if (el.dataset.fbsClutterChecked) return;
+        const lbl = (el.getAttribute("aria-label") || "").replace(/\s+/g, "").toLowerCase();
+        if (lbl.length < 3 || lbl.length > 120) return;
+        if (!SPKW_NORM.some(kw => lbl.includes(kw))) return;
+        el.dataset.fbsClutterChecked = "1";
+        if (isInNonPostArea(el)) return;
+        const wrapper = findFeedWrapper(el);
+        if (!wrapper || wrapper.dataset.fbsHidden === "1") return;
+        wrapper.dataset.fbsHidden = "1";
+        _hideWrapper(wrapper);
+        hiddenClutterCount++;
+        newlyHidden++;
+      });
+    }
+
+    // ── Strategy 3: ad link detection ───────────────────────────────────────
+    for (const root of roots) {
+      const adLinks = root.querySelectorAll(
+        'a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"], a[href*="/ads/preferences"]'
+      );
+      for (const link of adLinks) {
+        if (link.dataset.fbsAdLinkChecked) continue;
+        link.dataset.fbsAdLinkChecked = "1";
+        if (isInNonPostArea(link)) continue;
+        const wrapper = findFeedWrapper(link);
+        if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
+        wrapper.dataset.fbsHidden = "1";
+        _hideWrapper(wrapper);
+        hiddenClutterCount++;
+        newlyHidden++;
+      }
+    }
+
+    // ── Strategy 4: CLUTTER_LABELS (Gợi ý, Reels, People you may know, ...) ─
+    // Quét text label ngắn trong header của các item feed
+    const CLUTTER_LABELS_NORM = CLUTTER_LABELS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
+    function _matchesClutter(tcNorm) {
+      return CLUTTER_LABELS_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw));
+    }
+    // Check spans/divs trong article headers (h2, h3, h4) hoặc dir="auto" labels
+    // Giới hạn scope: chỉ quét trong feed container
+    const feed = document.querySelector('[role="feed"]') || document.querySelector('[role="main"]');
+    if (feed) {
+      const headerCandidates = feed.querySelectorAll('h2 span[dir="auto"], h3 span[dir="auto"], h4 span[dir="auto"], h2 > span, h3 > span, h4 > span');
+      for (const el of headerCandidates) {
+        if (el.dataset.fbsLabelChecked) continue;
+        const text = (el.textContent || "").trim();
+        if (text.length < 3 || text.length > 60) continue;
+        const tcNorm = text.replace(/\s+/g, "").toLowerCase();
+        if (!_matchesClutter(tcNorm)) continue;
+        el.dataset.fbsLabelChecked = "1";
+        if (isInNonPostArea(el)) continue;
+        const wrapper = findFeedWrapper(el);
+        if (!wrapper || wrapper.dataset.fbsHidden === "1") continue;
+        wrapper.dataset.fbsHidden = "1";
+        _hideWrapper(wrapper);
+        hiddenClutterCount++;
+        newlyHidden++;
+      }
+    }
 
     if (newlyHidden > 0) showClutterToast(hiddenClutterCount);
   }

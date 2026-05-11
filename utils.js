@@ -3,34 +3,56 @@
 // Author: Le An (anlvdt)
 
 /**
- * LRU Cache implementation with size limit
+ * LRU Cache implementation with size limit and byte-size awareness
+ * Prevents excessive memory usage on low-memory devices
  */
 class LRUCache {
-  constructor(maxSize = 50) {
+  constructor(maxSize = 50, maxBytes = 10 * 1024 * 1024) { // 10MB default
     this.maxSize = maxSize;
+    this.maxBytes = maxBytes;
     this.cache = new Map();
+    this.totalBytes = 0;
+  }
+
+  _estimateBytes(value) {
+    try {
+      return JSON.stringify(value).length * 2; // UTF-16 chars = ~2 bytes each
+    } catch (_) {
+      return 1024; // fallback estimate
+    }
   }
 
   get(key) {
     if (!this.cache.has(key)) return undefined;
     // Move to end (most recently used)
-    const value = this.cache.get(key);
+    const entry = this.cache.get(key);
     this.cache.delete(key);
-    this.cache.set(key, value);
-    return value;
+    this.cache.set(key, entry);
+    return entry.value;
   }
 
   set(key, value) {
+    const bytes = this._estimateBytes(value);
+
     // Delete if exists (to reinsert at end)
     if (this.cache.has(key)) {
+      this.totalBytes -= this.cache.get(key).bytes;
       this.cache.delete(key);
     }
-    // Evict oldest if at capacity
-    else if (this.cache.size >= this.maxSize) {
+
+    // Evict oldest entries until we have space (both count and bytes)
+    while (
+      (this.cache.size >= this.maxSize || this.totalBytes + bytes > this.maxBytes) &&
+      this.cache.size > 0
+    ) {
       const firstKey = this.cache.keys().next().value;
+      const evicted = this.cache.get(firstKey);
+      this.totalBytes -= evicted.bytes;
       this.cache.delete(firstKey);
     }
-    this.cache.set(key, value);
+
+    this.cache.set(key, { value, bytes });
+    this.totalBytes += bytes;
   }
 
   has(key) {
@@ -38,11 +60,15 @@ class LRUCache {
   }
 
   delete(key) {
+    if (this.cache.has(key)) {
+      this.totalBytes -= this.cache.get(key).bytes;
+    }
     return this.cache.delete(key);
   }
 
   clear() {
     this.cache.clear();
+    this.totalBytes = 0;
   }
 
   keys() {
@@ -53,6 +79,10 @@ class LRUCache {
     return this.cache.size;
   }
 
+  get bytesUsed() {
+    return this.totalBytes;
+  }
+
   // Delete all keys matching a prefix
   deletePrefix(prefix) {
     const keysToDelete = [];
@@ -61,7 +91,7 @@ class LRUCache {
         keysToDelete.push(key);
       }
     }
-    keysToDelete.forEach(key => this.cache.delete(key));
+    keysToDelete.forEach(key => this.delete(key));
     return keysToDelete.length;
   }
 }

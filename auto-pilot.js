@@ -24,6 +24,14 @@
   let agentAlwaysRun = false;
   let loopTimer = null;
 
+  function scheduleNext(fn, delayMs) {
+    if (loopTimer) {
+      clearTimeout(loopTimer);
+      loopTimer = null;
+    }
+    scheduleNext(fn, delayMs);
+  }
+
   // === HUMAN-LIKE TIMING ===
   // Tạo delay ngẫu nhiên theo phân phối gaussian (tự nhiên hơn uniform random)
   function humanDelay(minMs, maxMs) {
@@ -106,21 +114,66 @@
 
   // Giờ vàng Facebook Việt Nam (engagement cao nhất)
   // 7-9 sáng | 11-13 trưa | 19-22 tối — cắt 22-24 vì engagement thấp
+  // Hỗ trợ timezone configurable qua storage
+  const DEFAULT_GOLDEN_HOURS = [[7, 9], [11, 13], [19, 22]];
+  let cachedGoldenHours = null;
+  let cachedTimezone = "Asia/Ho_Chi_Minh";
+
+  // Load golden hours config (non-blocking)
+  try {
+    chrome.storage.sync.get(["goldenHours", "timezone"], (data) => {
+      if (!chrome.runtime.lastError) {
+        if (data.goldenHours && Array.isArray(data.goldenHours)) cachedGoldenHours = data.goldenHours;
+        if (data.timezone) cachedTimezone = data.timezone;
+      }
+    });
+  } catch (_) {}
+
   function isGoldenHour() {
-    const d = new Date();
-    const t = d.getHours() + d.getMinutes() / 60;
-    return (t >= 7 && t < 9) || (t >= 11 && t < 13) || (t >= 19 && t < 22);
+    const goldenHours = cachedGoldenHours || DEFAULT_GOLDEN_HOURS;
+    // Sử dụng Intl.DateTimeFormat để tính giờ theo timezone chính xác
+    let hour, minute;
+    try {
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: cachedTimezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const parts = formatter.formatToParts(new Date());
+      hour = parseInt(parts.find(p => p.type === "hour").value);
+      minute = parseInt(parts.find(p => p.type === "minute").value);
+    } catch (_) {
+      // Fallback nếu timezone không hợp lệ
+      const d = new Date();
+      hour = d.getHours();
+      minute = d.getMinutes();
+    }
+    const t = hour + minute / 60;
+    return goldenHours.some(([start, end]) => t >= start && t < end);
   }
 
 
   // === MAIN LOOP ===
   function runAgentLoop() {
+    try {
+      _runAgentLoopCore();
+    } catch (err) {
+      log("error", "Agent loop crashed (Error Boundary)", { error: err.message });
+      state = "SCANNING";
+      try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
+      // Tự động restart sau 30s thay vì dừng hẳn
+      scheduleNext(runAgentLoop, 30000);
+    }
+  }
+
+  function _runAgentLoopCore() {
     if (!isAgentRunning) return;
 
     if (!agentAlwaysRun && !isGoldenHour()) {
       state = "SLEEPING";
       updateStatus("SLEEP", "#6c5ce7");
-      loopTimer = setTimeout(runAgentLoop, 5 * 60 * 1000); // check lại sau 5 phút
+      scheduleNext(runAgentLoop, 5 * 60 * 1000); // check lại sau 5 phút
       return;
     }
 
@@ -137,7 +190,7 @@
         pendingScore = null;
         updateStatus("SCAN", "#00b894");
       } else {
-        loopTimer = setTimeout(runAgentLoop, 2000);
+        scheduleNext(runAgentLoop, 2000);
         return;
       }
     }
@@ -152,7 +205,7 @@
         currentPost = null;
         currentPostUrl = "";
         pendingScore = null;
-        loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+        scheduleNext(runAgentLoop, humanDelay(5000, 10000));
         return;
       }
 
@@ -170,7 +223,7 @@
             currentPost = null;
             currentPostUrl = "";
             pendingScore = null;
-            loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+            scheduleNext(runAgentLoop, humanDelay(5000, 10000));
             return;
           }
 
@@ -199,10 +252,10 @@
         currentPost = null;
         currentPostUrl = "";
         pendingScore = null;
-        loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+        scheduleNext(runAgentLoop, humanDelay(5000, 10000));
         return;
       }
-      loopTimer = setTimeout(runAgentLoop, 2000);
+      scheduleNext(runAgentLoop, 2000);
       return;
     }
 
@@ -270,7 +323,7 @@
 
         log("info", "Reading post before summarize", { delay: Math.round(readDelay / 1000) + "s" });
 
-        loopTimer = setTimeout(() => {
+        scheduleNext(() => {
           if (!isAgentRunning) return;
           try {
             targetBtn.click();
@@ -282,7 +335,7 @@
             log("error", "Failed to click button", { error: err.message });
             state = "SCANNING";
           }
-          loopTimer = setTimeout(runAgentLoop, 2000);
+          scheduleNext(runAgentLoop, 2000);
         }, readDelay);
         return; // Don't set another timer
       } else {
@@ -290,12 +343,12 @@
         const distance = window.innerHeight * (0.25 + Math.random() * 0.35);
         window.scrollBy({ top: distance, behavior: "smooth" });
         const scrollPause = humanDelay(12000, 30000); // 12-30s giữa mỗi scroll
-        loopTimer = setTimeout(runAgentLoop, scrollPause);
+        scheduleNext(runAgentLoop, scrollPause);
         return;
       }
     }
 
-    loopTimer = setTimeout(runAgentLoop, 2000);
+    scheduleNext(runAgentLoop, 2000);
   }
 
   // === PRE-FILTER: classify post topic before spending API call ===
@@ -342,6 +395,14 @@
       for (const kw of AI_BRANDS) {
         if (text.includes(kw)) return true;
       }
+
+      // === AI product launches / updates — accept even without "free" signal ===
+      // Bắt tin ra mắt sản phẩm AI mới (Claude Pro, GPT-5, Gemini Ultra...)
+      const MAJOR_AI_NAMES = ["claude", "chatgpt", "gemini", "gpt-4", "gpt-5", "copilot", "grok", "deepseek", "perplexity", "midjourney"];
+      const LAUNCH_SIGNALS = ["ra mắt", "vừa ra", "just launched", "now available", "chính thức", "phiên bản mới", "bản cập nhật", "update ", "upgrade", "nâng cấp", "mở rộng", "rolling out"];
+      const hasMajorAI = MAJOR_AI_NAMES.some((kw) => text.includes(kw));
+      const hasLaunch = LAUNCH_SIGNALS.some((kw) => text.includes(kw));
+      if (hasMajorAI && hasLaunch) return true;
 
       // === AI subscription / free-tier deals — explicit pass ===
       // "Claude Pro miễn phí", "ChatGPT Plus trial", "Gemini Advanced free 3 tháng"...
@@ -421,11 +482,32 @@
 
   function isSponsoredPost(postNode) {
     try {
+      // Multi-signal detection: kiểm tra nhiều dấu hiệu quảng cáo
+      // 1. Check ad-related links (strongest signal)
+      if (postNode.querySelector('a[href*="/ads/"], a[href*="about_ads"], a[href*="adchoices"]')) return true;
+
+      // 2. Check "Why am I seeing this?" link (Facebook ad disclosure)
+      if (postNode.querySelector('a[aria-label*="Why"], a[aria-label*="Tại sao"], a[aria-label*="Vì sao"]')) return true;
+
+      // 3. Text-based detection with fuzzy matching
       const candidates = postNode.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label]');
       for (const node of candidates) {
         const t = (node.innerText || node.textContent || "").trim().toLowerCase();
         if (t.length === 0 || t.length > 30) continue;
         if (SPONSORED_KW.some(kw => t === kw || t.startsWith(kw))) return true;
+      }
+
+      // 4. Portal-based detection (Facebook renders sponsored label in portals)
+      const ariaRefs = postNode.querySelectorAll("[aria-describedby],[aria-labelledby]");
+      for (const ref of ariaRefs) {
+        const ids = ((ref.getAttribute("aria-describedby") || "") + " " + (ref.getAttribute("aria-labelledby") || "")).trim().split(/\s+/);
+        for (const id of ids) {
+          if (!id) continue;
+          const portal = document.getElementById(id);
+          if (!portal) continue;
+          const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
+          if (SPONSORED_KW.some(kw => tcNorm === kw.replace(/\s+/g, "") || tcNorm.startsWith(kw.replace(/\s+/g, "")))) return true;
+        }
       }
     } catch (_) {}
     return false;
@@ -449,12 +531,17 @@
           return true;
         }
       }
-      // Check text match với bài vừa đăng
+      // Check text match với bài vừa đăng — dùng hash-based comparison
+      // để tránh false positive khi 2 bài khác nhau có cùng 50 ký tự đầu
       if (lastPostedText) {
-        const postContent = (postNode.textContent || "").toLowerCase();
-        const snippet = lastPostedText.replace(/\*\*/g, "").substring(0, 50).toLowerCase().trim();
-        if (snippet && postContent.includes(snippet)) {
-          log("info", "Skipping own post (text match)");
+        const postContent = (postNode.textContent || "").toLowerCase().replace(/\s+/g, " ").trim();
+        const lastContent = lastPostedText.replace(/\*\*/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+        // So sánh 200 ký tự đầu thay vì 50 — giảm false positive đáng kể
+        const compareLen = 200;
+        const postSnippet = postContent.substring(0, compareLen);
+        const lastSnippet = lastContent.substring(0, compareLen);
+        if (lastSnippet.length >= 50 && postSnippet.includes(lastSnippet)) {
+          log("info", "Skipping own post (text match)", { matchLen: lastSnippet.length });
           return true;
         }
       }
@@ -464,7 +551,14 @@
 
 
   // === EXECUTE POST (human-like timing) ===
+  let isExecutingPost = false;
+
   async function executePost(summaryText) {
+    if (isExecutingPost) {
+      log("warn", "executePost called but already executing");
+      return;
+    }
+    isExecutingPost = true;
     try {
       if (!isAgentRunning) { log("info", "Agent stopped - aborting post"); return; }
 
@@ -596,6 +690,7 @@
       log("error", "Execute post failed", { error: err.message });
       try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
     } finally {
+      isExecutingPost = false;
       state = "SCANNING";
       updateStatus("SCAN", "#00b894");
       if (loopTimer) clearTimeout(loopTimer);
@@ -603,7 +698,7 @@
       // Rate limit thực sự (90 phút) được xử lý trong handleAgentDecision.
       const cooldown = humanDelay(10 * 60 * 1000, 20 * 60 * 1000);
       log("info", "Post cooldown", { minutes: Math.round(cooldown / 60000) });
-      loopTimer = setTimeout(runAgentLoop, cooldown);
+      scheduleNext(runAgentLoop, cooldown);
     }
   }
 
@@ -635,7 +730,7 @@
             try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
             state = "SCANNING";
             // Ngủ đến hết interval + buffer nhỏ trước khi quét lại
-            loopTimer = setTimeout(runAgentLoop, waitMs + humanDelay(60000, 120000));
+            scheduleNext(runAgentLoop, waitMs + humanDelay(60000, 120000));
             return;
           }
 
@@ -645,7 +740,7 @@
             log("error", "Empty summary text");
             try { document.querySelector(".fbs-close")?.click(); } catch (_) {}
             state = "SCANNING";
-            loopTimer = setTimeout(runAgentLoop, humanDelay(5000, 10000));
+            scheduleNext(runAgentLoop, humanDelay(5000, 10000));
             return;
           }
           log("info", "Score passed, will post", { score, textLength: summaryText.length });
@@ -661,12 +756,12 @@
           state = "SCANNING";
           updateStatus("SCAN", "#00b894");
           if (loopTimer) clearTimeout(loopTimer);
-          loopTimer = setTimeout(runAgentLoop, humanDelay(15000, 30000));
+          scheduleNext(runAgentLoop, humanDelay(15000, 30000));
         }
       } catch (err) {
         log("error", "handleAgentDecision error", { error: err.message });
         state = "SCANNING";
-        loopTimer = setTimeout(runAgentLoop, 5000);
+        scheduleNext(runAgentLoop, 5000);
       }
     })();
   }

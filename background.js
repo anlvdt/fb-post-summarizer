@@ -1008,15 +1008,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   // === FETCH IMAGE AS BASE64 (CORS Bypass) ===
+  // Used by fetchImageBlob() in content.js to bypass cross-origin canvas taint.
+  // Timeout 20s (ảnh Facebook thường < 2MB, 20s đủ; 30s quá dài cho parallel fetch)
   if (request.action === "fetch-image") {
-    fetchWithTimeout(request.url, {}, 30000)
-      .then((res) => res.blob())
+    const url = request.url;
+    if (!url || !url.startsWith("http")) {
+      sendResponse({ error: "Invalid URL" });
+      return true;
+    }
+    fetchWithTimeout(url, {
+      credentials: "omit",
+      referrer: "",
+      referrerPolicy: "no-referrer",
+    }, 20000)
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.blob();
+      })
       .then((blob) => {
+        // Reject empty/invalid blobs
+        if (!blob || blob.size < 100) {
+          sendResponse({ error: "Empty or invalid image" });
+          return;
+        }
+        // Reject quá lớn (Facebook upload limit ~10MB)
+        if (blob.size > 12 * 1024 * 1024) {
+          sendResponse({ error: "Image too large (>12MB)" });
+          return;
+        }
         const reader = new FileReader();
-        reader.onloadend = () => sendResponse({ base64: reader.result });
+        reader.onloadend = () => sendResponse({ base64: reader.result, size: blob.size, type: blob.type });
+        reader.onerror = () => sendResponse({ error: "FileReader failed" });
         reader.readAsDataURL(blob);
       })
-      .catch((e) => sendResponse({ error: e.message }));
+      .catch((e) => sendResponse({ error: e.message || "fetch failed" }));
     return true;
   }
 });

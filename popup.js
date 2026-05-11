@@ -86,9 +86,16 @@ chrome.storage.sync.get(
 );
 
 saveBtn.addEventListener("click", () => {
+  // Input validation
+  const minLen = parseInt(minLengthInput.value);
+  if (isNaN(minLen) || minLen < 100 || minLen > 5000) {
+    showStatus("Độ dài tối thiểu phải từ 100-5000 ký tự", "error");
+    return;
+  }
+
   chrome.storage.sync.set(
     {
-      minLength: parseInt(minLengthInput.value) || 400,
+      minLength: minLen,
       outputLang: outputLangSel.value,
       summaryLength: summaryLengthSel.value,
       promptStyle: promptStyleSel.value,
@@ -289,19 +296,30 @@ testBtn.addEventListener("click", async () => {
     0,
   );
   if (total === 0) {
-    showKeyStatus("Chưa có API Key", "error");
+    showKeyStatus("Chưa có API Key. Thêm key ở ô bên trên.", "error");
     return;
   }
   testBtn.disabled = true;
   testBtn.textContent = "Đang test...";
   try {
     const r = await chrome.runtime.sendMessage({ action: "test-connection" });
-    showKeyStatus(
-      r?.ok ? "OK — " + r.provider : r?.error || "Lỗi",
-      r?.ok ? "success" : "error",
-    );
+    if (r?.ok) {
+      showKeyStatus("✓ " + r.provider + (r.model ? " — " + r.model : " — OK"), "success");
+    } else if (r?.error && r.error.includes("429")) {
+      showKeyStatus("⏱ Rate limited — thử lại sau vài phút", "error");
+    } else if (r?.error && (r.error.includes("401") || r.error.includes("403"))) {
+      showKeyStatus("✗ Key không hợp lệ hoặc hết hạn", "error");
+    } else if (r?.error && r.error.includes("network")) {
+      showKeyStatus("✗ Lỗi mạng — kiểm tra kết nối internet", "error");
+    } else {
+      showKeyStatus(r?.error || "Lỗi không xác định", "error");
+    }
   } catch (e) {
-    showKeyStatus("Lỗi: " + e.message, "error");
+    if (e.message.includes("Extension context invalidated")) {
+      showKeyStatus("Extension đã reload — mở lại popup", "error");
+    } else {
+      showKeyStatus("Lỗi: " + e.message, "error");
+    }
   }
   testBtn.disabled = false;
   testBtn.textContent = "Test kết nối";
@@ -364,24 +382,29 @@ async function loadHistory() {
   list.innerHTML = historyData
     .map((h, i) => {
       const bt = h.type || "summary";
+      // Sử dụng esc() cho tất cả user-generated content để ngăn XSS
+      const dateStr = esc(new Date(h.date).toLocaleString("vi"));
+      const siteStr = esc(h.site || "");
+      const textPreview = esc((h.text || "").substring(0, 80));
+      const summaryPreview = esc((h.summary || "").substring(0, 120));
       return (
         '<div class="history-item" data-idx="' +
         i +
         '">' +
         '<div class="history-date">' +
-        esc(new Date(h.date).toLocaleString("vi")) +
+        dateStr +
         " · " +
-        esc(h.site || "") +
+        siteStr +
         '<span class="history-badge ' +
-        bt +
+        esc(bt) +
         '">' +
         (bt === "affiliate" ? "Affiliate" : "Tóm tắt") +
         "</span></div>" +
         '<div class="history-text">' +
-        esc((h.text || "").substring(0, 80)) +
+        textPreview +
         "...</div>" +
         '<div class="history-summary">' +
-        esc((h.summary || "").substring(0, 120)) +
+        summaryPreview +
         "...</div></div>"
       );
     })
@@ -460,9 +483,35 @@ document.getElementById("exportMdBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
-  if (!confirm("Xóa toàn bộ lịch sử?")) return;
-  await chrome.storage.local.remove("history");
+  if (!confirm("Xóa toàn bộ lịch sử? (Có thể khôi phục trong 30 giây)")) return;
+
+  // Soft delete: backup trước khi xóa
+  const data = await chrome.storage.local.get("history");
+  const backup = data.history || [];
+
+  await chrome.storage.local.set({ history: [], historyBackup: { items: backup, deletedAt: Date.now() } });
   loadHistory();
+
+  // Show undo option
+  showStatus("Đã xóa lịch sử", "success");
+  const undoBtn = document.createElement("button");
+  undoBtn.textContent = "↩ Hoàn tác";
+  undoBtn.style.cssText = "margin-left:8px;padding:3px 10px;border:1px solid #a855f7;border-radius:6px;background:transparent;color:#a855f7;font-size:12px;cursor:pointer;";
+  undoBtn.addEventListener("click", async () => {
+    const backupData = await chrome.storage.local.get("historyBackup");
+    if (backupData.historyBackup && backupData.historyBackup.items) {
+      await chrome.storage.local.set({ history: backupData.historyBackup.items });
+      await chrome.storage.local.remove("historyBackup");
+      loadHistory();
+      showStatus("Đã khôi phục lịch sử", "success");
+    }
+  });
+  status.appendChild(undoBtn);
+
+  // Auto-remove backup after 30 seconds
+  setTimeout(async () => {
+    await chrome.storage.local.remove("historyBackup");
+  }, 30000);
 });
 
 // === REVIEW TAB ===
