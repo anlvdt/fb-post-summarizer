@@ -48,36 +48,7 @@ function hashText(text) {
   return h.toString(36);
 }
 
-const SITE = location.hostname.includes("facebook")
-  ? "facebook"
-  : location.hostname.includes("threads")
-    ? "threads"
-    : location.hostname.includes("x.com") ||
-        location.hostname.includes("twitter")
-      ? "x"
-      : location.hostname.includes("linkedin")
-        ? "linkedin"
-        : location.hostname.includes("reddit")
-          ? "reddit"
-          : "other";
 
-const SEE_MORE_KEYWORDS = {
-  facebook: [
-    "xem thêm",
-    "see more",
-    "voir plus",
-    "mehr anzeigen",
-    "もっと見る",
-    "더 보기",
-    "ver más",
-    "ver mais",
-  ],
-  threads: ["more", "xem thêm"],
-  x: ["show more"],
-  linkedin: ["see more", "xem thêm", "...more"],
-  reddit: [],
-  other: ["see more", "xem thêm"],
-};
 
 // === THEME ===
 let currentTheme = "light";
