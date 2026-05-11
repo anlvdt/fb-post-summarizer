@@ -331,3 +331,10 @@ Agent mode (nút góc phải màn hình, chạy autonomous theo lịch) vẫn au
 - ✨ **Mutex & Safe Scheduler:** Viết thêm `scheduleNext()` để quản lý `loopTimer` chặt chẽ, luôn clear timer cũ trước khi khởi tạo mới.
 - ✨ **Execution Lock:** Thêm `isExecutingPost` state giúp lock quá trình thực thi `executePost()`, chặn đứt điểm các cuộc gọi chồng chéo, xoá triệt để bug duplicate.
 - ✨ **Error Boundary (Tự phục hồi):** Đóng gói `runAgentLoop` vào trong `try/catch`. Nếu script crash, agent sẽ tự gỡ lỗi, làm sạch giao diện và **tự động restart sau 30 giây** thay vì chết im lặng.
+
+### 🧩 Tái cấu trúc mã nguồn (Refactoring)
+**Vấn đề cũ:** File `background.js` quá khổng lồ (2481 dòng), chứa trộn lẫn logic khởi tạo, hệ thống Prompt, logic gọi API của các mô hình ngôn ngữ và xử lý message. Rất khó bảo trì và dễ xảy ra xung đột.
+**Đã cải tiến:**
+- ✨ Tách toàn bộ hệ thống Prompt (viết status, affiliate, translate) sang file `bg-prompts.js` độc lập (225 dòng).
+- ✨ Tách toàn bộ logic quản lý API Key, xoay vòng Key (Key Rotation) và các hàm gọi LLM (Groq, Gemini, Cerebras...) sang file `bg-api.js` độc lập (496 dòng).
+- ✨ Giữ `background.js` gọn nhẹ hơn (chỉ còn ~1764 dòng), tải các module qua `importScripts` đồng bộ để không phá vỡ logic giao tiếp của Manifest V3.
