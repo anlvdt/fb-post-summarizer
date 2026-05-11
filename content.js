@@ -248,19 +248,24 @@ function ensureOverlay() {
     '<button class="fbs-tone-btn" data-tone="bullet">Bullet points</button>' +
     "</div>" +
     '<div class="fbs-panel-footer">' +
-    '<button class="fbs-edit-btn" title="Chỉnh sửa trước khi copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa</button>' +
-    '<button class="fbs-stop-btn">Dừng</button>' +
-    '<select class="fbs-model-select" title="Chọn provider cho Viết lại">' +
-    '<option value="">Auto</option>' +
-    '<option value="groq">Groq</option>' +
-    '<option value="gemini">Gemini</option>' +
-    '<option value="cerebras">Cerebras</option>' +
-    '<option value="sambanova">SambaNova</option>' +
-    '<option value="openrouter">OpenRouter</option>' +
-    "</select>" +
-    '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
-    '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
-    '<button class="fbs-post-status-btn" title="Đăng lên Facebook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg> Đăng</button>' +
+    '<div class="fbs-footer-left" style="display:flex;gap:8px;">' +
+      '<button class="fbs-edit-btn" title="Chỉnh sửa"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' +
+      '<button class="fbs-stop-btn" title="Dừng stream"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg></button>' +
+      '<select class="fbs-model-select" title="Chọn provider">' +
+        '<option value="">Auto</option>' +
+        '<option value="groq">Groq</option>' +
+        '<option value="gemini">Gemini</option>' +
+        '<option value="cerebras">Cerebras</option>' +
+        '<option value="sambanova">Samba</option>' +
+        '<option value="openrouter">OR</option>' +
+      '</select>' +
+      '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
+    '</div>' +
+    '<div class="fbs-footer-right" style="display:flex;gap:10px;">' +
+      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
+      '<button class="fbs-btn fbs-aff-btn" title="Chế thành bài Affiliate" style="padding:8px 16px; font-size:13px; border-radius:8px; background:linear-gradient(135deg, #fdcb6e, #e17055); box-shadow:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="M8 12h8"/></svg> Affiliate</button>' +
+      '<button class="fbs-post-status-btn" style="display:none; padding:8px 18px; font-size:13px; font-weight:600; border-radius:8px; border:none; background:linear-gradient(135deg, #00b894, #00cec9); color:#fff; cursor:pointer;" title="Mở FB Composer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Đăng Status</button>' +
+    '</div>' +
     "</div>";
   document.body.appendChild(panel);
   panelBody = panel.querySelector(".fbs-panel-body");
@@ -412,7 +417,7 @@ function openOverlay(html, streaming, type = "summary") {
 
   function toggleMinimize(e) {
     if (e) e.stopPropagation();
-    const panel = document.getElementById("fbs-summary-panel");
+    const panel = document.querySelector(".fbs-panel");
     if (!panel) return;
     panel.classList.toggle("fbs-minimized");
   }
