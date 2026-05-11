@@ -6,6 +6,8 @@
 
 let MIN_LEN = 400;
 let isBlocked = false;
+let globalSourceTemplate = "Nguồn: {platform} {author} {source}\n{link}";
+let globalCustomSourceLink = "";
 let scanTimer = null;
 const injected = new WeakSet();
 const summaryCache = new LRUCache(50);
@@ -32,8 +34,10 @@ if (chrome.runtime?.onConnect) {
 }
 window.addEventListener("beforeunload", cleanup, { once: true });
 
-chrome.storage.sync.get(["minLength", "blockedDomains"], (d) => {
+chrome.storage.sync.get(["minLength", "blockedDomains", "sourceTemplate", "customSourceLink"], (d) => {
   if (d.minLength) MIN_LEN = d.minLength;
+  if (d.sourceTemplate) globalSourceTemplate = d.sourceTemplate;
+  if (d.customSourceLink) globalCustomSourceLink = d.customSourceLink;
   if (d.blockedDomains) {
     const href = location.href;
     const blocked = d.blockedDomains.split("\n").map(s => s.trim()).filter(Boolean);
@@ -597,25 +601,41 @@ function cleanSourceUrl(rawUrl) {
 
 
 function buildCommentText(cleanUrl, author, source) {
-  let line = "Nguồn: ";
   const isValidName = (n) =>
-    n &&
-    n.length >= 2 &&
-    n.length < 80 &&
-    !/[a-f0-9]{10,}/i.test(n) &&
-    !/\d{8,}/.test(n);
+    n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n);
+  
   const a = isValidName(author) ? author : "";
   const s = isValidName(source) ? source : "";
-  if (a) {
-    line += a;
-    if (s && s !== a) line += " (" + s + ")";
-    line += "\n" + cleanUrl;
-  } else if (s) {
-    line += s + "\n" + cleanUrl;
+  
+  const plat = SITE === "facebook" ? "Facebook" : 
+               SITE === "threads" ? "Threads" : 
+               SITE === "reddit" ? "Reddit" : 
+               SITE === "twitter" ? "X" : 
+               SITE === "linkedin" ? "LinkedIn" : "Web";
+               
+  let out = globalSourceTemplate || "Nguồn: {platform} {author} {source}\n{link}";
+  out = out.replace("{platform}", plat);
+  out = out.replace("{author}", a);
+  out = out.replace("{source}", s && s !== a ? `(${s})` : "");
+  
+  let linkStr = cleanUrl || "(chưa có link)";
+  if (globalCustomSourceLink) {
+    if (out.includes("{repo}")) {
+      out = out.replace("{repo}", globalCustomSourceLink);
+    } else {
+      linkStr += "\n" + globalCustomSourceLink;
+    }
   } else {
-    line += cleanUrl;
+    out = out.replace("{repo}", "");
   }
-  return line;
+  
+  out = out.replace("{link}", linkStr);
+  
+  // Cleanup extra spaces
+  out = out.replace(/\s+/g, ' ').replace(/\n\s+/g, '\n').trim();
+  if (!out) out = "Nguồn: " + linkStr;
+  
+  return out;
 }
 
 
@@ -704,13 +724,50 @@ function esc(s) {
 }
 function fmt(t) {
   // Normalize *** (old prompt artifact) to ** before escaping
-  const cleaned = t.replace(/^\*{3}\s*/gm, "**");
-  return esc(cleaned)
+  const cleaned = t.trim().replace(/^\*{3}\s*/gm, "**");
+  let html = esc(cleaned)
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/^[-•·]\s*/gm, "· ") // normalize all bullet styles to ·
-    .replace(/\n{2,}/g, "<br><br>") // blank line = paragraph break
-    .replace(/\n/g, "<br>");
+    .replace(/^[-•·]\s*/gm, "· ");
+    
+  // Tách các đoạn văn bằng dòng trống
+  const paras = html.split(/\n{2,}/);
+  
+  if (paras.length > 1) {
+    // Dòng đầu tiên (không quá dài) thường là tiêu đề
+    const title = paras[0];
+    if (title.length < 200 && !title.includes('· ')) {
+      paras.shift();
+      let result = `<div class="fbs-title-line">${title.replace(/\n/g, "<br>")}</div>`;
+      
+      // Xử lý các đoạn còn lại
+      result += paras.map(p => {
+        // Xử lý Giải thích thuật ngữ
+        if (p.includes('Giải thích thuật ngữ') || p.includes('Giải thích:')) {
+           // Đơn giản hóa regex để strip title của glossary
+           let body = p.replace(/^(?:<strong>)?(?:\*\*)?(?:\*\*\*)?Giải thích.*?(?:<\/strong>)?(?:\*\*)?\s*(?:\n|<br>)?/i, "");
+           return `<div class="fbs-glossary"><div class="fbs-glossary-heading">Giải thích thuật ngữ</div><div class="fbs-glossary-item">${body.replace(/\n/g, '<br>')}</div></div>`;
+        }
+        
+        // Xử lý Bullet points
+        if (p.includes('· ')) {
+           const lines = p.split('\n');
+           const formattedLines = lines.map(l => {
+             if (l.trim().startsWith('·')) return `<div class="fbs-bullet">${l.replace(/^·\s*/, '')}</div>`;
+             return l;
+           });
+           return `<div class="fbs-para">${formattedLines.join('')}</div>`;
+        }
+        
+        return `<div class="fbs-para">${p.replace(/\n/g, "<br>")}</div>`;
+      }).join("");
+      
+      return result;
+    }
+  }
+
+  // Fallback nếu không tách được tiêu đề
+  return html.replace(/\n{2,}/g, '<div class="fbs-para-break"></div>').replace(/\n/g, "<br>");
 }
 
 // === READ TIME ===
@@ -1811,3 +1868,4 @@ scanObserver.observe(document.body, {
 });
 observers.push(scanObserver);
 scanTimer = setInterval(scan, 5000);
+window.buildCommentText = buildCommentText;

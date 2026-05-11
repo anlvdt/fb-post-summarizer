@@ -2,20 +2,8 @@
 // https://github.com/anlvdt/fb-post-summarizer
 // Author: Le An (anlvdt)
 
-const scriptsToImport = [
-  "env.js",
-  "utils.js",
-  "bg-prompts.js",
-  "bg-api.js"
-];
-
-for (const script of scriptsToImport) {
-  try {
-    importScripts(script);
-  } catch (e) {
-    console.warn(`Failed to import ${script}:`, e);
-  }
-}
+// MUST be static, top-level, and without try-catch in MV3 Service Workers
+importScripts("env.js", "utils.js", "bg-prompts.js", "bg-api.js");
 
 // Fallback logger and feature flags if utils.js failed to load
 if (typeof logger === 'undefined') {
@@ -58,8 +46,8 @@ async function migrateStorageIfNeeded() {
   }
 }
 
-// Run migration on startup
-migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed:', e));
+// Run migration only inside onInstalled / onStartup
+// (Removed top-level execution to prevent "Error: No SW" on some browsers)
 
 // === TELEMETRY ===
 let telemetryData = { sessions: 0, summaries: 0, errors: 0 };
@@ -82,12 +70,16 @@ function trackEvent(event, data = {}) {
   // Could send to analytics service here
 }
 
-// Load telemetry on startup
-loadTelemetry().catch(e => logger.error('Failed to load telemetry:', e));
-
-// Track session start
-telemetryData.sessions++;
-saveTelemetry();
+// Initialize telemetry safely
+(async () => {
+  try {
+    await loadTelemetry();
+    telemetryData.sessions++;
+    await saveTelemetry();
+  } catch (e) {
+    logger.error('Failed to initialize telemetry:', e);
+  }
+})();
 
 // === KEEP SERVICE WORKER ALIVE ===
 function ensureKeepAliveAlarm() {
@@ -167,6 +159,7 @@ async function injectAndSend(tabId, message) {
 // === CONTEXT MENU ===
 if (chrome?.runtime?.onInstalled) {
 chrome.runtime.onInstalled.addListener(async () => {
+  await migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed (onInstalled):', e));
   chrome.contextMenus.create({
     id: "summarize-selection",
     title: "Tóm tắt nội dung",
@@ -448,17 +441,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ error: e.message });
       }
     })();
-    return true;
-  }
-  // === AI REVIEW ===
-  if (request.action === "ai-review") {
-    reviewTodayHistory()
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ error: e.message }));
-    return true;
-  }
-  // === GET AI REVIEW RESULTS ===
-    sendResponse({ success: true });
     return true;
   }
   // === TRANSLATE WORD ===
@@ -1065,6 +1047,8 @@ function postProcessOutput(output, sourceText, type) {
       }
     }
     processed = lines.join("\n");
+    // Đảm bảo chỉ có ĐÚNG 1 dòng trống (\n\n) sau tiêu đề và giữa các đoạn
+    processed = processed.replace(/\n{3,}/g, "\n\n");
   }
 
   // 6. VnReview spelling rules auto-fix
@@ -1420,113 +1404,6 @@ async function saveHistory(
 }
 
 // reviewTodayHistory uses getAvailableKey with retry on rate limit
-async function reviewTodayHistory() {
-  const localData = await chrome.storage.local.get("history");
-  const history = localData.history || [];
-  const today = new Date().toISOString().slice(0, 10);
-  const todayItems = history.filter((h) => h.date && h.date.startsWith(today));
-
-  if (todayItems.length === 0)
-    return { error: "Chưa có bài tóm tắt nào hôm nay." };
-
-  const MAX_ITEMS = 20;
-  const cappedItems = todayItems.slice(0, MAX_ITEMS);
-
-  const itemsList = cappedItems
-    .map((h, i) => {
-      const title = (h.postTitle || "N/A").substring(0, 80);
-      const summary = (h.summary || "").substring(0, 200);
-      return `[${i}] Nguồn: ${h.site} | Tác giả: ${h.author || "N/A"} | Tiêu đề: ${title}\nTóm tắt: ${summary}\nLink: ${h.sourceUrl || "N/A"}`;
-    })
-    .join("\n\n");
-
-  const systemPrompt = `Bạn là biên tập viên tin công nghệ. Nhiệm vụ: đánh giá danh sách bài tóm tắt trong ngày và chọn ra những bài HAY NHẤT để đăng "Điểm tin công nghệ".
-
-Tiêu chí chọn:
-- Tin nóng, xu hướng, có giá trị thông tin cao
-- Đủ nội dung để viết bài ngắn (150-350 chữ)
-- Có link nguồn (ưu tiên)
-- Không trùng lặp chủ đề
-- Ưu tiên tin AI, smartphone, bảo mật, startup, sản phẩm mới
-
-Trả về ĐÚNG JSON array, mỗi phần tử là index của bài được chọn kèm lý do ngắn:
-[{"index": 0, "score": 85, "reason": "Tin AI mới ra mắt, hot"}, ...]
-
-CHỈ trả về JSON, không giải thích thêm.`;
-
-  const nonStreamFns = {
-    groq: callGroqNonStream,
-    gemini: callGeminiNonStream,
-    cerebras: callCerebrasNonStream,
-    sambanova: callSambanovaNonStream,
-    openrouter: callOpenrouterNonStream,
-  };
-
-  // Retry up to 3 times with different keys/providers
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const keyInfo = await getAvailableKey();
-    if (!keyInfo.key) {
-      if (keyInfo.noKeys)
-        return { error: "Chưa có API Key. Thêm ở tab API Keys." };
-      if (keyInfo.allLimited)
-        return {
-          error:
-            "Tất cả key bị rate limit. Thử lại sau ~" +
-            keyInfo.waitMinutes +
-            " phút.",
-        };
-      return { error: "Không tìm được key khả dụng." };
-    }
-
-    const callFn = nonStreamFns[keyInfo.provider] || callGroqNonStream;
-    try {
-      const result = await callFn(keyInfo.key, itemsList, systemPrompt);
-      if (!result) return { error: "AI không phản hồi." };
-
-      const jsonMatch = result.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) return { error: "AI phản hồi không hợp lệ." };
-
-      const picks = JSON.parse(jsonMatch[0]);
-      const recommended = picks
-        .filter(
-          (p) =>
-            typeof p.index === "number" &&
-            p.index >= 0 &&
-            p.index < todayItems.length,
-        )
-        .map((p) => ({
-          ...todayItems[p.index],
-          aiScore: p.score || 0,
-          aiReason: p.reason || "",
-        }));
-
-      await chrome.storage.local.set({
-        aiReview: {
-          date: today,
-          items: recommended,
-          reviewedAt: new Date().toISOString(),
-        },
-      });
-
-      return { success: true, count: recommended.length, items: recommended };
-    } catch (e) {
-      if (
-        e.message &&
-        (e.message.includes("429") || e.message.toLowerCase().includes("rate"))
-      ) {
-        await markKeyRateLimited(keyInfo.key, parseRetryAfter(e.message));
-        continue;
-      }
-      return { error: "Lỗi AI Review: " + e.message };
-    }
-  }
-  // Track error
-  telemetryData.errors++;
-  saveTelemetry();
-  trackEvent('summary_error', { reason: 'all_keys_rate_limited' });
-  return { error: "Tất cả key bị rate limit." };
-}
-
 // Generic streaming API call function
 async function callStreamAPI(config) {
   const {
@@ -1639,6 +1516,7 @@ function formatSourceName(site, author) {
 // Re-register alarm on SW startup if previously enabled
 if (chrome?.runtime?.onStartup) {
 chrome.runtime.onStartup.addListener(async () => {
+  await migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed (onStartup):', e));
   const today = new Date().toDateString();
   const data = await chrome.storage.local.get([
     "dailyCount",
@@ -1648,21 +1526,6 @@ chrome.runtime.onStartup.addListener(async () => {
   if (data.lastDate === today) {
     chrome.action.setBadgeText({ text: (data.dailyCount || 0).toString() });
     chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
-  }
-  // Re-create alarm if it was enabled
-  const alarm = data.reviewAlarm;
-  if (alarm && alarm.enabled) {
-    const existing = await chrome.alarms.get("daily-ai-review");
-    if (!existing) {
-      const now = new Date();
-      const target = new Date();
-      target.setHours(alarm.hour, alarm.minute, 0, 0);
-      if (target <= now) target.setDate(target.getDate() + 1);
-      chrome.alarms.create("daily-ai-review", {
-        delayInMinutes: (target - now) / 60000,
-        periodInMinutes: 24 * 60,
-      });
-    }
   }
 
   ensureKeepAliveAlarm();
@@ -1675,41 +1538,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     logger.debug("Keep-alive ping");
     ensureKeepAliveAlarm();
     return;
-  }
-  if (alarm.name === "daily-ai-review") {
-    try {
-      const result = await reviewTodayHistory();
-      if (result.success && result.count > 0) {
-        chrome.notifications.create("ai-review-done", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter — Đề xuất tin hay",
-          message: `AI đã chọn ${result.count} tin hay. Mở extension để xem.`,
-        });
-      } else if (result.error) {
-        chrome.notifications.create("ai-review-error", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter — Lỗi đề xuất",
-          message: result.error,
-        });
-      } else {
-        // No items found today
-        chrome.notifications.create("ai-review-empty", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter",
-          message: "Chưa có bài tóm tắt nào hôm nay để đề xuất.",
-        });
-      }
-    } catch (e) {
-      chrome.notifications.create("ai-review-crash", {
-        type: "basic",
-        iconUrl: "icons/icon128.png",
-        title: "FeedWriter — Lỗi",
-        message: "Lỗi khi chạy đề xuất: " + e.message,
-      });
-    }
   }
 });
 } // end if (chrome?.alarms?.onAlarm)

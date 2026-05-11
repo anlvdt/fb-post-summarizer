@@ -577,22 +577,55 @@ function extractPostAuthor(element) {
   return "";
 }
 
-function _extractAllImagesFromContainer(container) {
-    const collected = []; // { src, area, priority }
-    const seenSrcs = new Set();
+function extractPostImages(element) {
+  if (!element) return [];
+  const postContainer = _findPostContainer(element);
 
-    // Dedup helper: 2 URL là cùng 1 ảnh nếu sau khi strip size params chúng giống nhau
-    // Facebook URL pattern: scontent-*.fbcdn.net/v/t1.../IMG_HASH_n.jpg?...
-    function _normalizeSrc(src) {
-      try {
-        const u = new URL(src);
-        // Giữ origin + pathname, bỏ query params (thường chứa thumbnail size)
-        return u.origin + u.pathname;
-      } catch (_) {
-        return src;
+  // Helper: get best src from img element
+  function _imgSrc(img) {
+    const srcset = img.getAttribute("srcset") || img.getAttribute("data-srcset") || "";
+    if (srcset) {
+      const parts = srcset.split(",").map(s => s.trim().split(/\s+/)).filter(p => p[0]);
+      if (parts.length > 0) {
+        let best = parts[parts.length - 1];
+        let bestW = 0;
+        for (const p of parts) {
+          const w = parseInt(p[1] || "0");
+          if (w > bestW) { bestW = w; best = p; }
+        }
+        if (best[0]) return best[0];
       }
     }
+    return img.getAttribute("data-src") || img.currentSrc || img.src || "";
+  }
 
+  function _isAvatar(img) {
+    if (img.width > 0 && img.width < 80) return true;
+    try { if (getComputedStyle(img).borderRadius === "50%") return true; } catch (_) {}
+    return false;
+  }
+
+  function _isHeaderImg(img, container) {
+    const headerEl = container.querySelector("h2, h3, h4, [data-testid='story-subtitle'], [data-testid='post-header']");
+    if (headerEl && headerEl.contains(img)) return true;
+    const parentLink = img.closest("a");
+    if (parentLink) {
+      const href = parentLink.href || "";
+      if (href.includes("/user/") || href.includes("/profile.php") ||
+          (href.includes("facebook.com") && /facebook\.com\/[^/?]+$/.test(href) &&
+           !href.includes("/posts/") && !href.includes("/photo") && !href.includes("/reel"))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function _extractAllImagesFromContainer(container) {
+    const collected = [];
+    const seenSrcs = new Set();
+    function _normalizeSrc(src) {
+      try { const u = new URL(src); return u.origin + u.pathname; } catch (_) { return src; }
+    }
     function _addIfUnique(src, area, priority) {
       if (!src || src.startsWith("data:")) return;
       if (src.includes("/rsrc.php/") || src.includes("emoji")) return;
@@ -602,36 +635,28 @@ function _extractAllImagesFromContainer(container) {
       collected.push({ src, area, priority });
     }
 
-    // Strategy 1 (priority 1): images inside explicit photo/video link containers
-    const photoLinks = container.querySelectorAll(
-      'a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]',
-    );
+    // Strategy 1: Explicit photo links
+    const photoLinks = container.querySelectorAll('a[href*="/photo"], a[href*="/photos/"], a[href*="fbid="], a[href*="/reel/"], a[href*="/videos/"]');
     for (const link of photoLinks) {
       const img = link.querySelector("img");
       if (!img) continue;
       const src = _imgSrc(img);
       const w = img.naturalWidth || img.width || 0;
       const h = img.naturalHeight || img.height || 0;
-      if (w > 0 && w < 80) continue; // skip rất nhỏ
+      if (w > 0 && w < 80) continue;
       _addIfUnique(src, w * h, 1);
     }
-
-    // Strategy 2 (priority 2): background-image trong inline style
+    // Strategy 2: Background image
     const bgElements = container.querySelectorAll('[style*="background-image"]');
     for (const bgEl of bgElements) {
       const rect = bgEl.getBoundingClientRect();
       if (rect.width < 150 || rect.height < 150) continue;
-      try {
-        if (getComputedStyle(bgEl).borderRadius === "50%") continue;
-      } catch (_) {}
+      try { if (getComputedStyle(bgEl).borderRadius === "50%") continue; } catch (_) {}
       const style = bgEl.getAttribute("style") || "";
-      const match = style.match(/background-image:\s*url\(["']?([^"')]+)["']?\)/);
-      if (match && match[1]) {
-        _addIfUnique(match[1], rect.width * rect.height, 2);
-      }
+      const match = style.match(/background-image:\s*url\(["']?([^"']+)["']?\)/);
+      if (match && match[1]) _addIfUnique(match[1], rect.width * rect.height, 2);
     }
-
-    // Strategy 3 (priority 3): large images not in avatar/header position
+    // Strategy 3: Large images
     const allImgs = container.querySelectorAll("img");
     for (const img of allImgs) {
       const src = _imgSrc(img);
@@ -643,17 +668,14 @@ function _extractAllImagesFromContainer(container) {
       if (w > 0 && w < 200 && h < 200) continue;
       _addIfUnique(src, w * h, 3);
     }
-
-    // Sort: priority asc (1 = best), then area desc (larger first)
     collected.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return b.area - a.area;
     });
-
     return collected.map(c => c.src);
   }
 
-function _collectImages() {
+  function _collectImages() {
     if (SITE === "facebook") {
       const results = [];
       const seen = new Set();
@@ -667,14 +689,11 @@ function _collectImages() {
           }
         }
       };
-      // ƯU TIÊN 1: Bài share → ảnh bài gốc (nested article)
       const sharedInner = _findSharedPostArticle(postContainer);
       if (sharedInner) push(_extractAllImagesFromContainer(sharedInner));
-      // ƯU TIÊN 2: Lấy tất cả ảnh từ post container chính
       push(_extractAllImagesFromContainer(postContainer));
       return results;
     } else {
-      // Non-Facebook: original logic (single best)
       const results = [];
       const images = postContainer.querySelectorAll("img");
       for (const img of images) {
@@ -692,78 +711,18 @@ function _collectImages() {
     }
   }
 
+  let allImages = _collectImages();
+  if (allImages.length === 0) {
+    const ogImage = document.querySelector('meta[property="og:image"]');
+    if (ogImage && ogImage.content) allImages = [ogImage.content];
+  }
+  _lastExtractedImages = allImages;
+  return allImages;
+}
+
 function extractPostImage(element) {
-  if (!element) return "";
-
-  const postContainer = _findPostContainer(element);
-
-  // Helper: get best src from img element (handles lazy-loaded srcset/data-src)
-  function _imgSrc(img) {
-    // Ưu tiên srcset (responsive) → dùng URL cuối (thường là highest res)
-    const srcset = img.getAttribute("srcset") || img.getAttribute("data-srcset") || "";
-    if (srcset) {
-      const parts = srcset.split(",").map(s => s.trim().split(/\s+/)).filter(p => p[0]);
-      if (parts.length > 0) {
-        // Lấy URL có descriptor lớn nhất (w, x) hoặc cuối cùng
-        let best = parts[parts.length - 1];
-        let bestW = 0;
-        for (const p of parts) {
-          const w = parseInt(p[1] || "0");
-          if (w > bestW) { bestW = w; best = p; }
-        }
-        if (best[0]) return best[0];
-      }
-    }
-    return img.getAttribute("data-src") || img.currentSrc || img.src || "";
-  }
-
-  // Helper: is this img likely an avatar/icon (circular or tiny)?
-  
-
-  // Helper: is this img inside the post header (avatar row)?
-  function _isHeaderImg(img, container) {
-    const headerEl = container.querySelector(
-      "h2, h3, h4, [data-testid='story-subtitle'], [data-testid='post-header']"
-    );
-    if (headerEl && headerEl.contains(img)) return true;
-    // Also skip profile-href links near top of post
-    const parentLink = img.closest("a");
-    if (parentLink) {
-      const href = parentLink.href || "";
-      if (href.includes("/user/") || href.includes("/profile.php") ||
-          (href.includes("facebook.com") && /facebook\.com\/[^/?]+$/.test(href) &&
-           !href.includes("/posts/") && !href.includes("/photo") && !href.includes("/reel"))) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // Helper: extract ALL images from a specific container, sorted by area desc.
-  // Returns an array of unique image URLs (highest quality variant each).
-  
-
-  // Internal helper returning array of URLs. extractPostImage() wraps this
-  // and returns only the first for backward compat. extractPostImages() (plural)
-  // is exposed for callers that need multi-image support.
-  
-
-  const allImages = _collectImages();
-  if (allImages.length > 0) {
-    // Attach to the function's returned string as expando for callers that can use it
-    const primary = allImages[0];
-    // Primary as return value (string) — backward compat
-    // Expose all via a module-level variable for the same call
-    _lastExtractedImages = allImages;
-    return primary;
-  }
-  _lastExtractedImages = [];
-
-  // Fallback: og:image
-  const ogImage = document.querySelector('meta[property="og:image"]');
-  if (ogImage && ogImage.content) return ogImage.content;
-
-  return "";
+  const images = extractPostImages(element);
+  return images.length > 0 ? images[0] : "";
 }
 
 async function fetchImageBlob(imgSrc, filename = "image.png") {

@@ -57,6 +57,10 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
     esc(sourceUrl || "") +
     '">' +
     "</div>" +
+    '<div class="fbs-sp-link-input" style="margin-top:6px">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>' +
+    '<input type="text" class="fbs-sp-github-field" placeholder="Link Github / Download (Tùy chọn)">' +
+    "</div>" +
     (cleanAuthor
       ? '<div class="fbs-sp-detected-source"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' +
         esc(cleanAuthor) +
@@ -83,36 +87,31 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
   if (footer) footer.style.display = "none";
 
   const linkField = preview.querySelector(".fbs-sp-link-field");
+  const githubField = preview.querySelector(".fbs-sp-github-field");
   const commentSection = preview.querySelector(".fbs-sp-comment");
   const commentText = preview.querySelector(".fbs-sp-comment-text");
 
   // Generate comment content từ link — ghi nguồn kèm tên tác giả nếu có
   // LUÔN hiển thị section comment (kể cả khi chưa có URL) để user biết
   // cần paste link. Nếu thiếu link mà có author/source → vẫn show "Nguồn: X"
-  function updateComment(url) {
-    // Luôn hiện section comment — giúp user thấy rõ cần ghi nguồn
+  function updateComment(url, githubUrl) {
     commentSection.style.display = "block";
-    // Build source line: "Nguồn: Tên tác giả — link" hoặc "Nguồn: link"
-    let sourceLine = "Nguồn: ";
-    if (cleanAuthor) {
-      sourceLine += cleanAuthor;
-      if (cleanSource && cleanSource !== cleanAuthor)
-        sourceLine += " (" + cleanSource + ")";
-      if (url) sourceLine += "\n" + url;
-    } else if (cleanSource) {
-      sourceLine += cleanSource;
-      if (url) sourceLine += "\n" + url;
-    } else if (url) {
-      sourceLine += url;
+    if (window.buildCommentText) {
+      // Temporarily override globalCustomSourceLink if user typed something manually
+      const oldGithubLink = typeof globalCustomSourceLink !== 'undefined' ? globalCustomSourceLink : '';
+      if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = githubUrl || '';
+      
+      commentText.textContent = window.buildCommentText(url, cleanAuthor, cleanSource);
+      
+      // Restore
+      if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = oldGithubLink;
     } else {
-      // Không có gì cả → hint user paste link
-      sourceLine = "Nguồn: (chưa có — paste link vào ô phía trên)";
+      commentText.textContent = "Nguồn: " + (url || "(chưa có link bài gốc)") + (githubUrl ? "\nLink Github/Tải về: " + githubUrl : "");
     }
-    commentText.textContent = sourceLine;
   }
 
   // LUÔN render section comment ngay khi mở composer — kể cả khi chưa có link
-  updateComment(sourceUrl || "");
+  updateComment(sourceUrl || "", "");
 
   // Normalize Facebook URL
   function normalizeFbUrl(raw) {
@@ -151,17 +150,34 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
   linkField.addEventListener("paste", () => {
     setTimeout(() => {
       const url = linkField.value.trim();
+      const githubUrl = githubField.value.trim();
       if (!url) return;
       const clean = normalizeFbUrl(url);
       linkField.value = clean;
-      updateComment(clean);
+      updateComment(clean, githubUrl);
     }, 50);
   });
 
   // Cũng update khi user gõ tay
   linkField.addEventListener("input", () => {
     const url = linkField.value.trim();
-    updateComment(url);
+    const githubUrl = githubField.value.trim();
+    updateComment(url, githubUrl);
+  });
+  
+  // Update comment khi gõ github link
+  githubField.addEventListener("input", () => {
+    const url = linkField.value.trim() || sourceUrl || "";
+    const githubUrl = githubField.value.trim();
+    updateComment(url, githubUrl);
+  });
+  
+  githubField.addEventListener("paste", () => {
+    setTimeout(() => {
+      const url = linkField.value.trim() || sourceUrl || "";
+      const githubUrl = githubField.value.trim();
+      updateComment(url, githubUrl);
+    }, 50);
   });
 
   function autoPasteToLexical(element, text, file = null) {
@@ -314,18 +330,17 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
 
       try {
         // Prep comment text để copy vào clipboard (user tự paste khi cmt)
-        let sourceLine = "Nguồn: ";
-        if (cleanAuthor) {
-          sourceLine += cleanAuthor;
-          if (cleanSource && cleanSource !== cleanAuthor) sourceLine += " (" + cleanSource + ")";
-          if (sourceUrl) sourceLine += "\n" + sourceUrl;
-        } else if (cleanSource) {
-          sourceLine += cleanSource;
-          if (sourceUrl) sourceLine += "\n" + sourceUrl;
-        } else if (sourceUrl) {
-          sourceLine += sourceUrl;
+        let sourceLine = "";
+        const finalUrl = linkField.value.trim() || sourceUrl;
+        const finalGithubUrl = githubField.value.trim();
+        
+        if (window.buildCommentText) {
+          const oldGithubLink = typeof globalCustomSourceLink !== 'undefined' ? globalCustomSourceLink : '';
+          if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = finalGithubUrl || '';
+          sourceLine = window.buildCommentText(finalUrl, cleanAuthor, cleanSource);
+          if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = oldGithubLink;
         } else {
-          sourceLine = "";
+          sourceLine = "Nguồn: " + (finalUrl || "(chưa có link)") + (finalGithubUrl ? "\nLink Github/Tải về: " + finalGithubUrl : "");
         }
 
         // Bước 1: Xác định ảnh user muốn đăng
@@ -507,13 +522,8 @@ window.fbsAgentPost = async function (summaryText, imageUrl, rawSourceUrl, postE
       commentText = buildCommentText(fallbackUrl, postAuthor, postSource);
     } else {
       // Không có URL nào → vẫn build comment với author/source (không link)
-      const isValidName = (n) => n && n.length >= 2 && n.length < 80 && !/[a-f0-9]{10,}/i.test(n) && !/\d{8,}/.test(n);
-      const a = isValidName(postAuthor) ? postAuthor : "";
-      const s = isValidName(postSource) ? postSource : "";
-      if (a) {
-        commentText = "Nguồn: " + a + (s && s !== a ? " (" + s + ")" : "");
-      } else if (s) {
-        commentText = "Nguồn: " + s;
+      if (window.buildCommentText) {
+        commentText = window.buildCommentText("", postAuthor, postSource);
       } else {
         commentText = "Nguồn: Facebook";
       }
