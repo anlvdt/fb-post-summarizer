@@ -352,3 +352,9 @@ Agent mode (nút góc phải màn hình, chạy autonomous theo lịch) vẫn au
 4. **Nút Thu gọn (Minimize):** Thêm nút `_` vào panel tóm tắt để cuộn gọn thanh làm việc khi cần không gian cuộn đọc Facebook.
 5. **Agent Dashboard (On-page):** Nâng cấp Mini-widget ở góc màn hình. Giờ đây Agent có hiển thị một Dashboard nhỏ báo cáo tiến độ (số bài đã đăng, bài bỏ qua) khi rê chuột vào, thay vì phải mở Popup.
 6. **Removed "Tin hay":** Đã gỡ hoàn toàn tính năng "Tin hay" cùng với hệ thống Alarm ngầm dư thừa.
+### 💎 3. Thiết kế lại Panel Tóm tắt (Summary Popup)
+Đã đập đi xây lại toàn bộ giao diện của cửa sổ tóm tắt thả nổi trên Facebook theo phong cách **Cinematic Minimalism & Liquid Glass** (Kính trong suốt, tối giản, hiện đại):
+*   **Header (Tiêu đề):** Bỏ dải màu nền tím nặng nề, chuyển sang thiết kế trong suốt (transparent) với đường viền mảnh tinh tế. Text "Tóm tắt AI" giờ phát sáng bằng dải màu gradient cực đẹp.
+*   **Typography (Font chữ):** Tăng kích cỡ chữ lên `15px`, line-height `1.75` và nới lỏng padding xung quanh, giúp bạn đọc nội dung tóm tắt thoải mái hơn rất nhiều.
+*   **Các nút Tone (Giọng điệu):** Chuyển từ nút bấm vuông cứng nhắc sang dạng Pill (viên thuốc) viền bo tròn 20px, hiệu ứng hover mượt mà.
+*   **Bố cục Footer (Cụm chức năng):** Sắp xếp lại cực kỳ khoa học. Các nút phụ (Sửa, Dừng, Chọn Model) nép gọn bên trái. Các nút chính (Copy, Chế Affiliate, Đăng Status) to rõ, đẹp mắt nằm bên phải.
