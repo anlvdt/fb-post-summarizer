@@ -156,7 +156,7 @@ async function injectAndSend(tabId, message) {
     });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"],
+      files: ["utils.js", "content-dom.js", "content-composer.js", "content.js"],
     });
     chrome.tabs.sendMessage(tabId, message);
   } catch (e) {

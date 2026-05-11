@@ -338,3 +338,8 @@ Agent mode (nút góc phải màn hình, chạy autonomous theo lịch) vẫn au
 - ✨ Tách toàn bộ hệ thống Prompt (viết status, affiliate, translate) sang file `bg-prompts.js` độc lập (225 dòng).
 - ✨ Tách toàn bộ logic quản lý API Key, xoay vòng Key (Key Rotation) và các hàm gọi LLM (Groq, Gemini, Cerebras...) sang file `bg-api.js` độc lập (496 dòng).
 - ✨ Giữ `background.js` gọn nhẹ hơn (chỉ còn ~1764 dòng), tải các module qua `importScripts` đồng bộ để không phá vỡ logic giao tiếp của Manifest V3.
+- ✨ Phân chia `content.js` khổng lồ (3547 dòng) thành các file logic riêng biệt:
+  - `content-dom.js` (DOM Scanner, trích xuất link, ảnh, ẩn quảng cáo).
+  - `content-composer.js` (Tự động hoá post bài, xử lý khung soạn thảo Lexical).
+  - `content.js` (chỉ còn ~1829 dòng, quản lý vòng lặp quét và UI Panel).
+  - Đã cập nhật `manifest.json` và `background.js` để load file theo đúng trình tự (Shared execution context).
