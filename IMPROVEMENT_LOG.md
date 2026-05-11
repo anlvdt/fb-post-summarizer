@@ -343,3 +343,12 @@ Agent mode (nút góc phải màn hình, chạy autonomous theo lịch) vẫn au
   - `content-composer.js` (Tự động hoá post bài, xử lý khung soạn thảo Lexical).
   - `content.js` (chỉ còn ~1829 dòng, quản lý vòng lặp quét và UI Panel).
   - Đã cập nhật `manifest.json` và `background.js` để load file theo đúng trình tự (Shared execution context).
+
+### 🎨 Cải tiến Trải nghiệm (UI/UX) - Đợt 6
+Đã thực thi 5 đề xuất nâng cấp UI/UX:
+1. **Popup Settings (Accordion):** Gom nhóm Cài đặt thành 3 Accordion (Tùy chỉnh Tóm tắt, Auto-pilot & Đăng bài, Nâng cao) giúp Popup gọn gàng hơn.
+2. **Auto-validate API Key:** Tự động kiểm tra (test) và lưu API key ngay khi vừa paste + click "Add".
+3. **Multi-image Gallery:** Bỏ checkbox nhỏ, thay bằng viền sáng, dấu tick lớn và hiệu ứng mờ cho ảnh bị bỏ chọn để thao tác dễ hơn.
+4. **Nút Thu gọn (Minimize):** Thêm nút `_` vào panel tóm tắt để cuộn gọn thanh làm việc khi cần không gian cuộn đọc Facebook.
+5. **Agent Dashboard (On-page):** Nâng cấp Mini-widget ở góc màn hình. Giờ đây Agent có hiển thị một Dashboard nhỏ báo cáo tiến độ (số bài đã đăng, bài bỏ qua) khi rê chuột vào, thay vì phải mở Popup.
+6. **Removed "Tin hay":** Đã gỡ hoàn toàn tính năng "Tin hay" cùng với hệ thống Alarm ngầm dư thừa.

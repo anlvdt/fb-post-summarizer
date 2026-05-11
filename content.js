@@ -238,7 +238,7 @@ function ensureOverlay() {
     '<div class="fbs-panel-head"><span><img src="' +
     ICON_BASE64 +
     '" width="16" height="16" style="vertical-align:-3px"> <span class="fbs-title-text">Tóm tắt AI</span></span>' +
-    '<div class="fbs-close" role="button" tabindex="0">&#10005;</div></div>' +
+    '<div class="fbs-panel-actions"><div class="fbs-min" role="button" tabindex="0" title="Thu gọn/Mở rộng">_</div><div class="fbs-close" role="button" tabindex="0" title="Đóng">&#10005;</div></div></div>' +
     '<div class="fbs-panel-body"></div>' +
     '<div class="fbs-tone-row">' +
     '<span class="fbs-tone-label">Tone:</span>' +
@@ -265,6 +265,7 @@ function ensureOverlay() {
   document.body.appendChild(panel);
   panelBody = panel.querySelector(".fbs-panel-body");
   panel.querySelector(".fbs-close").addEventListener("click", closeOverlay);
+    panel.querySelector(".fbs-min").addEventListener("click", toggleMinimize);
   panel.querySelector(".fbs-copy-btn").addEventListener("click", copyResult);
   panel
     .querySelector(".fbs-post-status-btn")
@@ -408,7 +409,15 @@ function openOverlay(html, streaming, type = "summary") {
     panelBody.scrollTop = panelBody.scrollHeight;
 }
 
-function closeOverlay() {
+
+  function toggleMinimize(e) {
+    if (e) e.stopPropagation();
+    const panel = document.getElementById("fbs-summary-panel");
+    if (!panel) return;
+    panel.classList.toggle("fbs-minimized");
+  }
+
+  function closeOverlay() {
   stopSummarize();
   if (speechSynthesis.speaking) speechSynthesis.cancel();
   if (panel) {

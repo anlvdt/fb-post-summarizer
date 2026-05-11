@@ -60,24 +60,58 @@
   }
 
   // === UI ===
+  
   function createAgentUI() {
     const ui = document.createElement("div");
     ui.id = "fbs-agent-ui";
-    ui.style.cssText = "position:fixed;bottom:90px;right:16px;z-index:2147483647;background:var(--secondary-button-background, #4b4c4f);color:var(--primary-text, #e4e6eb);width:56px;height:64px;border-radius:14px;font-family:sans-serif;font-size:10px;font-weight:bold;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,0.4);transition:all 0.2s ease;";
-    ui.innerHTML = `
-      <div id="fbs-agent-status" style="width:12px;height:12px;border-radius:50%;background:#d63031;"></div>
-      <span id="fbs-agent-text" style="font-weight:600;line-height:1.2;">OFF</span>
-      <span id="fbs-agent-mode" style="font-size:8px;line-height:1.1;letter-spacing:0.2px;color:#dfe6e9;">ALW</span>
-    `;
-    ui.title = "Click để Start/Stop, nhấn phải để chuyển chế độ Always Run / Golden Hour";
-    ui.addEventListener("click", () => {
+    
+    // Add CSS for the dashboard via JS to avoid modifying content.css if possible
+    ui.style.cssText = "position:fixed;bottom:90px;right:16px;z-index:2147483647;background:var(--surface-background, #242526);color:var(--primary-text, #e4e6eb);border-radius:12px;font-family:-apple-system, sans-serif;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);overflow:hidden;border:1px solid rgba(255,255,255,0.1);display:flex;flex-direction:column;width:160px;transform-origin:bottom right;";
+    
+    ui.innerHTML = "<div id='fbs-agent-header' style='padding:10px 12px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;background:rgba(255,255,255,0.05);'>" +
+        "<div style='display:flex;align-items:center;gap:8px;'>" +
+          "<div id='fbs-agent-status' style='width:10px;height:10px;border-radius:50%;background:#d63031;box-shadow:0 0 4px #d63031;'></div>" +
+          "<span id='fbs-agent-text' style='font-weight:600;font-size:13px;letter-spacing:0.3px;'>OFF</span>" +
+        "</div>" +
+        "<span id='fbs-agent-mode' style='font-size:10px;font-weight:bold;padding:2px 6px;border-radius:6px;background:rgba(255,255,255,0.1);color:#dfe6e9;' title='Chuột phải để đổi chế độ'>ALW</span>" +
+      "</div>" +
+      "<div id='fbs-agent-dashboard' style='padding:12px;display:none;flex-direction:column;gap:8px;border-top:1px solid rgba(255,255,255,0.05);'>" +
+        "<div style='display:flex;justify-content:space-between;'><span>Đã đăng:</span><strong id='fbs-dash-posts' style='color:#00b894;'>0</strong></div>" +
+        "<div style='display:flex;justify-content:space-between;'><span>Bỏ qua:</span><strong id='fbs-dash-skipped' style='color:#b2bec3;'>0</strong></div>" +
+        "<div style='display:flex;justify-content:space-between;font-size:11px;color:#a8a0cc;'><span>Wait:</span><strong id='fbs-dash-timer'>-</strong></div>" +
+      "</div>";
+    
+    const header = ui.querySelector('#fbs-agent-header');
+    header.addEventListener("click", () => {
       isAgentRunning = !isAgentRunning;
       if (isAgentRunning) startAgent();
       else stopAgent();
+      updateDashboardVisibility();
     });
-    ui.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleAgentMode(); });
+    header.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleAgentMode(); });
+    
     document.body.appendChild(ui);
     updateAgentModeDisplay();
+    
+    // Add hover expansion logic
+    ui.addEventListener("mouseenter", () => {
+      if (isAgentRunning) document.getElementById("fbs-agent-dashboard").style.display = "flex";
+    });
+    ui.addEventListener("mouseleave", () => {
+      if (isAgentRunning) document.getElementById("fbs-agent-dashboard").style.display = "none";
+    });
+  }
+
+  function updateDashboardVisibility() {
+    const dash = document.getElementById("fbs-agent-dashboard");
+    if (dash) dash.style.display = isAgentRunning ? "flex" : "none";
+  }
+
+  function updateDashboardStats() {
+    const elPosts = document.getElementById("fbs-dash-posts");
+    const elSkipped = document.getElementById("fbs-dash-skipped");
+    if (elPosts) elPosts.innerText = postsToday + "/" + (agentAlwaysRun ? MAX_POSTS_PER_DAY_ALW : MAX_POSTS_PER_DAY_HOUR);
+    if (elSkipped) elSkipped.innerText = skippedToday;
   }
 
   function updateAgentModeDisplay() {
@@ -564,7 +598,7 @@
 
       // Daily limit — khác nhau theo mode
       const today = new Date().toDateString();
-      if (postsTodayDate !== today) { postsTodayDate = today; postsToday = 0; }
+      if (postsTodayDate !== today) { postsTodayDate = today; postsToday = 0; updateDashboardStats(); }
       const maxToday = agentAlwaysRun ? MAX_POSTS_PER_DAY_ALW : MAX_POSTS_PER_DAY_HOUR;
       if (postsToday >= maxToday) {
         log("warn", "Daily limit reached", { postsToday, limit: maxToday, mode: agentAlwaysRun ? "ALW" : "HOUR" });
@@ -619,7 +653,7 @@
       if (result && result.ok) {
         lastPostTime = Date.now();
         lastPostedText = summaryText;
-        postsToday++;
+        postsToday++; updateDashboardStats();
         if (rawSrcUrl) {
           postedUrls.add(rawSrcUrl);
           // Trim to last 500 to prevent storage quota exhaustion
@@ -749,7 +783,7 @@
           await executePost(summaryText);
         } else {
           log("info", "Score too low, skipping", { score });
-          skippedToday++;
+          skippedToday++; updateDashboardStats();
           updateStatus("SKIP", "#b2bec3");
           await wait(humanDelay(2000, 4000));
           try { document.querySelector(".fbs-close")?.click(); } catch (_) {}

@@ -262,6 +262,18 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+
+// Auto-validate API key on paste
+newApiKeyInput.addEventListener('paste', (e) => {
+  setTimeout(() => {
+    const key = newApiKeyInput.value.trim();
+    if (key.length > 20) {
+      addKeyBtn.click();
+      setTimeout(() => testBtn.click(), 300);
+    }
+  }, 10);
+});
+
 addKeyBtn.addEventListener("click", async () => {
   const key = newApiKeyInput.value.trim();
   if (!key) {
@@ -515,180 +527,6 @@ document.getElementById("clearBtn").addEventListener("click", async () => {
 });
 
 // === REVIEW TAB ===
-let reviewItems = [];
-
-function setAlarmButtonState(on) {
-  document.getElementById("setAlarmBtn").classList.toggle("alarm-active", on);
-}
-
-async function loadReviewTab() {
-  let data = null;
-  try {
-    data = await chrome.runtime.sendMessage({ action: "get-ai-review" });
-  } catch (_) {}
-  if (
-    data &&
-    data.items &&
-    data.items.length > 0 &&
-    data.date === new Date().toISOString().slice(0, 10)
-  ) {
-    reviewItems = data.items;
-    renderReviewResults();
-  }
-  const alarmData = await chrome.storage.local.get("reviewAlarm");
-  const alarm = alarmData.reviewAlarm;
-  const alarmEl = document.getElementById("alarmStatus");
-  if (alarm && alarm.enabled) {
-    const t =
-      String(alarm.hour).padStart(2, "0") +
-      ":" +
-      String(alarm.minute).padStart(2, "0");
-    document.getElementById("reviewTime").value = t;
-    alarmEl.textContent = "Bật — " + t + " mỗi ngày";
-    alarmEl.className = "review-alarm-status alarm-on";
-    setAlarmButtonState(true);
-  } else {
-    alarmEl.textContent = "Chưa bật";
-    alarmEl.className = "review-alarm-status";
-    setAlarmButtonState(false);
-  }
-}
-
-function renderReviewResults() {
-  document.getElementById("reviewResults").style.display = "block";
-  document.getElementById("reviewCount").textContent =
-    reviewItems.length + " tin hay";
-  const list = document.getElementById("reviewList");
-  list.innerHTML = reviewItems
-    .map((item, i) => {
-      const title = esc(
-        item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 80),
-      );
-      const img = item.imageUrl
-        ? '<img class="review-item-thumb" src="' +
-          esc(item.imageUrl) +
-          '" onerror="this.style.display=\'none\'">'
-        : "";
-      return (
-        '<div class="review-item"><input type="checkbox" class="review-check" data-idx="' +
-        i +
-        '" checked>' +
-        '<div class="review-item-content"><div class="review-item-title">' +
-        title +
-        "</div>" +
-        '<div class="review-item-meta">' +
-        esc(item.author || item.site || "") +
-        " · " +
-        esc(item.aiReason || "") +
-        "</div></div>" +
-        (item.aiScore
-          ? '<span class="review-item-score">' + item.aiScore + "</span>"
-          : "") +
-        img +
-        "</div>"
-      );
-    })
-    .join("");
-  // Use a single delegated handler instead of re-adding listeners
-  const selectAll = document.getElementById("selectAllReview");
-  selectAll.checked = true;
-  selectAll.onchange = (e) => {
-    list.querySelectorAll(".review-check").forEach((cb) => {
-      cb.checked = e.target.checked;
-    });
-  };
-}
-
-document.getElementById("aiReviewBtn").addEventListener("click", async () => {
-  const btn = document.getElementById("aiReviewBtn");
-  const st = document.getElementById("reviewStatus");
-  btn.disabled = true;
-  btn.textContent = "Đang phân tích...";
-  st.style.display = "none";
-  try {
-    const r = await chrome.runtime.sendMessage({ action: "ai-review" });
-    if (r.error) {
-      st.textContent = r.error;
-      st.className = "status error";
-      st.style.display = "block";
-    } else if (r.success) {
-      reviewItems = r.items;
-      renderReviewResults();
-      st.textContent = "Tìm được " + r.count + " tin hay";
-      st.className = "status success";
-      st.style.display = "block";
-    }
-  } catch (e) {
-    st.textContent = "Lỗi: " + e.message;
-    st.className = "status error";
-    st.style.display = "block";
-  }
-  btn.disabled = false;
-  btn.textContent = "AI Đề xuất tin hay";
-});
-
-document.getElementById("exportDtcnBtn").addEventListener("click", async () => {
-  const sel = Array.from(document.querySelectorAll(".review-check:checked"))
-    .map((cb) => reviewItems[+cb.dataset.idx])
-    .filter(Boolean);
-  if (!sel.length) {
-    alert("Chọn ít nhất 1 tin");
-    return;
-  }
-  const r = await chrome.runtime.sendMessage({
-    action: "export-dtcn",
-    items: sel,
-  });
-  if (r && r.data) {
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            _scanned_candidates: r.data,
-            source: "feedwriter",
-            exported_at: new Date().toISOString(),
-            count: r.data.length,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download =
-      "feedwriter-dtcn-" + new Date().toISOString().slice(0, 10) + ".json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-});
-
-document.getElementById("setAlarmBtn").addEventListener("click", async () => {
-  const t = document.getElementById("reviewTime").value;
-  if (!t) return;
-  const [h, m] = t.split(":").map(Number);
-  await chrome.storage.local.set({
-    reviewAlarm: { hour: h, minute: m, enabled: true },
-  });
-  const alarmEl = document.getElementById("alarmStatus");
-  alarmEl.textContent = "Bật — " + t + " mỗi ngày";
-  alarmEl.className = "review-alarm-status alarm-on";
-  setAlarmButtonState(true);
-  chrome.runtime
-    .sendMessage({ action: "set-review-alarm", hour: h, minute: m })
-    .catch(() => {});
-});
-
-document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
-  await chrome.storage.local.set({ reviewAlarm: { enabled: false } });
-  const alarmEl = document.getElementById("alarmStatus");
-  alarmEl.textContent = "Đã tắt";
-  alarmEl.className = "review-alarm-status";
-  setAlarmButtonState(false);
-  chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => {});
-});
 
 // === AGENT STATS (Feature 7) ===
 async function loadAgentStats() {
@@ -715,3 +553,19 @@ async function loadAgentStats() {
 const ver = chrome.runtime.getManifest().version;
 const verEl = document.getElementById("aboutVersion");
 if (verEl) verEl.textContent = "FeedWriter v" + ver;
+
+// === ACCORDION LOGIC ===
+document.querySelectorAll('.accordion-header').forEach(header => {
+  header.addEventListener('click', () => {
+    // Toggle active class on header
+    header.classList.toggle('active');
+    
+    // Toggle display on content
+    const content = header.nextElementSibling;
+    if (header.classList.contains('active')) {
+      content.style.display = 'block';
+    } else {
+      content.style.display = 'none';
+    }
+  });
+});

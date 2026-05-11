@@ -204,20 +204,6 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.storage.sync.set({ apiKeys });
   });
 
-  // Re-register alarm on install/update
-  const alarmData = await chrome.storage.local.get(["reviewAlarm"]);
-  const alarm = alarmData.reviewAlarm;
-  if (alarm && alarm.enabled) {
-    const now = new Date();
-    const target = new Date();
-    target.setHours(alarm.hour, alarm.minute, 0, 0);
-    if (target <= now) target.setDate(target.getDate() + 1);
-    chrome.alarms.create("daily-ai-review", {
-      delayInMinutes: (target - now) / 60000,
-      periodInMinutes: 24 * 60,
-    });
-  }
-
   ensureKeepAliveAlarm();
 });
 } // end if (chrome?.runtime?.onInstalled)
@@ -472,40 +458,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   // === GET AI REVIEW RESULTS ===
-  if (request.action === "get-ai-review") {
-    chrome.storage.local.get("aiReview", (data) => {
-      sendResponse(data.aiReview || null);
-    });
-    return true;
-  }
-  // === EXPORT DTCN JSON ===
-  if (request.action === "export-dtcn") {
-    const items = request.items || [];
-    const exported = exportDtcnJson(items);
-    sendResponse({ success: true, data: exported });
-    return true;
-  }
-  // === SET/CLEAR AUTO REVIEW ALARM ===
-  if (request.action === "set-review-alarm") {
-    const hour = request.hour || 18;
-    const minute = request.minute || 0;
-    // Calculate delay to next occurrence
-    const now = new Date();
-    const target = new Date();
-    target.setHours(hour, minute, 0, 0);
-    if (target <= now) target.setDate(target.getDate() + 1);
-    const delayMs = target - now;
-    chrome.alarms.create("daily-ai-review", {
-      delayInMinutes: delayMs / 60000,
-      periodInMinutes: 24 * 60,
-    });
-    chrome.storage.local.set({ reviewAlarm: { hour, minute, enabled: true } });
-    sendResponse({ success: true });
-    return true;
-  }
-  if (request.action === "clear-review-alarm") {
-    chrome.alarms.clear("daily-ai-review");
-    chrome.storage.local.set({ reviewAlarm: { enabled: false } });
     sendResponse({ success: true });
     return true;
   }

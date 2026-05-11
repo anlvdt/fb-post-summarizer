@@ -1674,19 +1674,39 @@ article:hover .fbs-allpost-btn,
   overflow: hidden;
   background: rgba(255, 255, 255, 0.04);
   border: 2px solid transparent;
-  transition: border-color 0.15s, transform 0.1s;
+  transition: all 0.2s ease;
 }
 
 .fbs-sp-thumb:hover {
-  transform: scale(1.03);
+  transform: scale(1.02);
 }
 
 .fbs-sp-thumb:has(input:checked) {
   border-color: #a855f7;
 }
 
+.fbs-sp-thumb:has(input:checked)::after {
+  content: "✓";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  background: #a855f7;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  z-index: 2;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
 .fbs-sp-thumb:has(input:not(:checked)) {
-  opacity: 0.35;
+  opacity: 0.4;
+  transform: scale(0.92);
 }
 
 .fbs-sp-thumb img {
@@ -1697,16 +1717,7 @@ article:hover .fbs-allpost-btn,
 }
 
 .fbs-sp-thumb-cb {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
-  accent-color: #a855f7;
-  cursor: pointer;
-  z-index: 2;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 4px;
+  display: none;
 }
 
 .fbs-panel[data-fbs-theme="light"] .fbs-sp-image.fbs-sp-multi {
@@ -1734,4 +1745,42 @@ article:hover .fbs-allpost-btn,
 .fbs-sp-open-fb:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+/* Minimize logic */
+.fbs-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fbs-min {
+  cursor: pointer;
+  opacity: 0.6;
+  font-weight: bold;
+  font-family: monospace;
+  transition: opacity 0.2s;
+  padding: 0 4px;
+  line-height: 10px;
+  margin-top: -6px;
+}
+.fbs-min:hover {
+  opacity: 1;
+}
+
+/* Minimized state */
+.fbs-panel.fbs-minimized .fbs-panel-body,
+.fbs-panel.fbs-minimized .fbs-tone-row,
+.fbs-panel.fbs-minimized .fbs-panel-footer {
+  display: none !important;
+}
+.fbs-panel.fbs-minimized {
+  width: auto !important;
+  max-width: 250px !important;
+  border-radius: 8px !important;
+  padding: 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+}
+.fbs-panel.fbs-minimized .fbs-panel-head {
+  border-bottom: none;
+  border-radius: 8px;
 }
