@@ -973,8 +973,254 @@ function hideFeedClutter() {
 }
 
 
+// === UNIFIED DETECTION ENGINE ===
+// Consolidates all ad/affiliate detection signals into a single pipeline.
+// Used by both UI hiding (content.js) and auto-pilot skipping (auto-pilot.js).
+
+const AFFILIATE_DOMAINS = [
+  "shope.ee", "shopee.vn", "lazada.vn", "tiki.vn", "tiktok.com/@shop",
+  "sendo.vn", "accesstrade.vn", "go.isclix.com", "invol.co",
+];
+
+const SHORTENER_DOMAINS = [
+  "bit.ly", "tinyurl.com", "cutt.ly", "s.id", "bom.so", "rb.gy",
+  "shorturl.at", "linktr.ee", "beacons.ai", "lnk.bio", "solo.to",
+];
+
+const AFFILIATE_URL_PARAMS = ["aff", "ref", "utm_source", "utm_medium", "subid", "clickid", "affiliate_id"];
+
+const IMAGE_CLICKOUT_SELECTORS = [
+  '[data-ad-rendering-role="image"] a[href]',
+  'a[href] img',
+  'a[href][target="_blank"]:has(img)',
+];
+
+function _resolveFbRedirectUrl(href) {
+  if (!href) return "";
+  try {
+    if (href.includes("l.facebook.com/l.php") || href.includes("lm.facebook.com/l.php")) {
+      const u = new URL(href);
+      const target = u.searchParams.get("u");
+      if (target) return decodeURIComponent(target);
+    }
+  } catch (_) {}
+  return href;
+}
+
+function _detectAffiliateUrl(href) {
+  if (!href) return null;
+  const resolved = _resolveFbRedirectUrl(href);
+  const lower = (resolved || href).toLowerCase();
+
+  // Direct affiliate domains
+  for (const domain of AFFILIATE_DOMAINS) {
+    if (lower.includes(domain)) {
+      return { reason: "affiliate_domain", domain };
+    }
+  }
+
+  // URL shorteners
+  for (const short of SHORTENER_DOMAINS) {
+    if (lower.includes(short)) {
+      return { reason: "shortener_link", domain: short };
+    }
+  }
+
+  // Affiliate URL parameters
+  try {
+    const u = new URL(resolved || href);
+    for (const param of AFFILIATE_URL_PARAMS) {
+      if (u.searchParams.has(param)) {
+        return { reason: "affiliate_param", param };
+      }
+    }
+  } catch (_) {}
+
+  // Facebook redirect wrapper
+  if (lower.includes("l.facebook.com/l.php") || lower.includes("lm.facebook.com/l.php")) {
+    return { reason: "redirect_wrapper" };
+  }
+
+  return null;
+}
+
+function _detectImageClickout(container) {
+  for (const selector of IMAGE_CLICKOUT_SELECTORS) {
+    const nodes = container.querySelectorAll(selector);
+    for (const node of nodes) {
+      const anchor = node.tagName === "A" ? node : node.closest("a[href]");
+      if (!anchor) continue;
+      const href = anchor.href;
+      if (!href) continue;
+
+      // Skip internal Facebook links
+      if (href.includes("facebook.com/") && !href.includes("l.php")) continue;
+
+      const affiliate = _detectAffiliateUrl(href);
+      if (affiliate) {
+        return { detected: true, ...affiliate };
+      }
+    }
+  }
+  return null;
+}
+
+function _detectAffiliateText(container) {
+  const text = (container.innerText || container.textContent || "").toLowerCase();
+
+  for (const domain of AFFILIATE_DOMAINS) {
+    if (text.includes(domain)) {
+      return { reason: "affiliate_text", domain };
+    }
+  }
+
+  // Common affiliate call-to-action patterns
+  const affiliatePatterns = ["mua ngay", "đặt hàng", "shop ngay", "link sản phẩm"];
+  for (const pattern of affiliatePatterns) {
+    if (text.includes(pattern) && (text.includes("http") || text.includes("link"))) {
+      return { reason: "affiliate_cta", pattern };
+    }
+  }
+
+  return null;
+}
+
+function evaluatePostSignals(postEl) {
+  if (!postEl) return { isSponsored: false, isAffiliate: false, reasons: [], confidence: 0 };
+
+  const result = {
+    isSponsored: false,
+    isAffiliate: false,
+    reasons: [],
+    confidence: 0,
+    details: {},
+  };
+
+  // === SPONSORED DETECTION ===
+  const container = findFeedWrapper(postEl) ||
+    (postEl.getAttribute && postEl.getAttribute("role") === "article" ? postEl : findPostArticle(postEl));
+
+  if (container && SITE === "facebook") {
+    // 1. Ads about link (strongest signal, confidence 95)
+    if (container.querySelector('a[href*="/ads/about"], a[href*="about_ads"], a[href*="adchoices"], a[href*="/ads/preferences"]')) {
+      result.isSponsored = true;
+      result.reasons.push("ads_about_link");
+      result.confidence = Math.max(result.confidence, 95);
+    }
+
+    // 2. "Why am I seeing this?" link (confidence 90)
+    if (container.querySelector('a[aria-label*="Why am I seeing"], a[aria-label*="Tại sao tôi"], a[aria-label*="Vì sao"]')) {
+      result.isSponsored = true;
+      result.reasons.push("why_am_i_seeing");
+      result.confidence = Math.max(result.confidence, 90);
+    }
+
+    // 3. Portal-based detection (confidence 85-95)
+    const SPONSORED_NORM = SPONSORED_KEYWORDS.map(kw => kw.replace(/\s+/g, "").toLowerCase());
+    const ariaRefs = container.querySelectorAll("[aria-describedby],[aria-labelledby]");
+    for (const ref of ariaRefs) {
+      const ids = ((ref.getAttribute("aria-describedby") || "") + " " + (ref.getAttribute("aria-labelledby") || "")).trim().split(/\s+/);
+      for (const id of ids) {
+        if (!id) continue;
+        const portal = document.getElementById(id);
+        if (!portal) continue;
+        const tcNorm = (portal.textContent || "").replace(/\s+/g, "").toLowerCase();
+        if (SPONSORED_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw))) {
+          result.isSponsored = true;
+          result.reasons.push("portal_label");
+          result.confidence = Math.max(result.confidence, 90);
+          result.details.portalText = portal.textContent;
+          break;
+        }
+      }
+      if (result.isSponsored) break;
+    }
+
+    // 4. aria-label substring scan (confidence 70-85)
+    if (!result.isSponsored) {
+      const ariaLabelEls = container.querySelectorAll("[aria-label]");
+      for (const el of ariaLabelEls) {
+        const lbl = (el.getAttribute("aria-label") || "").replace(/\s+/g, "").toLowerCase();
+        if (lbl.length < 3 || lbl.length > 120) continue;
+        if (SPONSORED_NORM.some(kw => lbl.includes(kw))) {
+          result.isSponsored = true;
+          result.reasons.push("aria_label");
+          result.confidence = Math.max(result.confidence, 75);
+          break;
+        }
+      }
+    }
+
+    // 5. Text scan fallback (confidence 50-70)
+    if (!result.isSponsored) {
+      const candidates = container.querySelectorAll('a, span, div[dir="auto"]');
+      for (const node of candidates) {
+        const tc = node.textContent || "";
+        const tcNorm = tc.replace(/\s+/g, "").toLowerCase();
+        if (tcNorm.length < 2 || tcNorm.length > 40) continue;
+        if (SPONSORED_NORM.some(kw => tcNorm === kw || tcNorm.startsWith(kw))) {
+          result.isSponsored = true;
+          result.reasons.push("sponsored_keyword");
+          result.confidence = Math.max(result.confidence, 60);
+          break;
+        }
+      }
+    }
+  }
+
+  // === AFFILIATE DETECTION ===
+  if (container) {
+    // 1. Image click-out with affiliate/shortener link (confidence 70-85)
+    const imageClickout = _detectImageClickout(container);
+    if (imageClickout) {
+      result.isAffiliate = true;
+      result.reasons.push(imageClickout.reason);
+      result.confidence = Math.max(result.confidence, imageClickout.reason === "affiliate_domain" ? 85 : 70);
+      result.details.imageClickout = imageClickout;
+    }
+
+    // 2. Direct affiliate links in text (confidence 80-90)
+    const links = container.querySelectorAll('a[href]');
+    for (const link of links) {
+      const affiliate = _detectAffiliateUrl(link.href);
+      if (affiliate) {
+        result.isAffiliate = true;
+        result.reasons.push(affiliate.reason);
+        result.confidence = Math.max(result.confidence, affiliate.reason === "affiliate_domain" ? 85 : 70);
+        result.details.affiliateLink = affiliate;
+        break;
+      }
+    }
+
+    // 3. Affiliate text detection (confidence 50-65)
+    if (!result.isAffiliate) {
+      const textAffiliate = _detectAffiliateText(container);
+      if (textAffiliate) {
+        result.isAffiliate = true;
+        result.reasons.push(textAffiliate.reason);
+        result.confidence = Math.max(result.confidence, 55);
+        result.details.affiliateText = textAffiliate;
+      }
+    }
+  }
+
+  // Dedupe reasons
+  result.reasons = [...new Set(result.reasons)];
+
+  return result;
+}
+
+// Display modes for blocked content
+const DISPLAY_MODES = {
+  HIDE: "hide",       // Completely hidden
+  COLLAPSE: "collapse", // Show indicator with reason
+  MARK: "mark",       // Just highlight, don't hide
+};
+
 window.fbsExtractPermalink = extractPostPermalink;
 window.fbsExtractAuthor = extractPostAuthor;
 window.fbsExtractImage = extractPostImage;
 window.fbsExtractImages = extractPostImages;
+window.fbsEvaluatePostSignals = evaluatePostSignals;
+window.fbsDisplayModes = DISPLAY_MODES;
 

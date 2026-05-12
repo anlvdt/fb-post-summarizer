@@ -106,7 +106,7 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
       // Restore
       if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = oldGithubLink;
     } else {
-      commentText.textContent = "Nguồn: " + (url || "(chưa có link bài gốc)") + (githubUrl ? "\nLink Github/Tải về: " + githubUrl : "");
+      commentText.textContent = "• Nguồn bài viết:\n  " + (url || "(chưa có link bài gốc)") + (githubUrl ? "\n• Mã nguồn (Github/Repo): " + githubUrl : "");
     }
   }
 
@@ -340,7 +340,7 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
           sourceLine = window.buildCommentText(finalUrl, cleanAuthor, cleanSource);
           if (typeof globalCustomSourceLink !== 'undefined') globalCustomSourceLink = oldGithubLink;
         } else {
-          sourceLine = "Nguồn: " + (finalUrl || "(chưa có link)") + (finalGithubUrl ? "\nLink Github/Tải về: " + finalGithubUrl : "");
+          sourceLine = "• Nguồn bài viết:\n  " + (finalUrl || "(chưa có link bài gốc)") + (finalGithubUrl ? "\n• Mã nguồn (Github/Repo): " + finalGithubUrl : "");
         }
 
         // Bước 1: Xác định ảnh user muốn đăng
@@ -525,7 +525,7 @@ window.fbsAgentPost = async function (summaryText, imageUrl, rawSourceUrl, postE
       if (window.buildCommentText) {
         commentText = window.buildCommentText("", postAuthor, postSource);
       } else {
-        commentText = "Nguồn: Facebook";
+        commentText = "• Nguồn bài viết: (chưa có link bài gốc)";
       }
     }
   }

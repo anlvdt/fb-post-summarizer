@@ -309,9 +309,16 @@
         // === SKIP OWN POST ===
         if (shouldSkipPost(postNode)) continue;
 
-        // === SKIP SPONSORED / ADS ===
-        if (isSponsoredPost(postNode)) {
-          log("info", "Skipping sponsored/ad post");
+        // === SKIP SPONSORED / AFFILIATE / ADS ===
+        const postSignals = evaluatePostForAgent(postNode);
+        if (postSignals.isSponsored || postSignals.isAffiliate) {
+          const type = postSignals.isSponsored ? "sponsored" : "affiliate";
+          log("info", "Skipping " + type + " post", {
+            reasons: postSignals.reasons,
+            confidence: postSignals.confidence,
+          });
+          skippedToday++;
+          updateDashboardStats();
           continue;
         }
 
@@ -517,13 +524,9 @@
   function isSponsoredPost(postNode) {
     try {
       // Multi-signal detection: kiểm tra nhiều dấu hiệu quảng cáo
-      // 1. Check ad-related links (strongest signal)
       if (postNode.querySelector('a[href*="/ads/"], a[href*="about_ads"], a[href*="adchoices"]')) return true;
-
-      // 2. Check "Why am I seeing this?" link (Facebook ad disclosure)
       if (postNode.querySelector('a[aria-label*="Why"], a[aria-label*="Tại sao"], a[aria-label*="Vì sao"]')) return true;
 
-      // 3. Text-based detection with fuzzy matching
       const candidates = postNode.querySelectorAll('a[role="link"], span[dir="auto"], span[aria-label]');
       for (const node of candidates) {
         const t = (node.innerText || node.textContent || "").trim().toLowerCase();
@@ -531,7 +534,6 @@
         if (SPONSORED_KW.some(kw => t === kw || t.startsWith(kw))) return true;
       }
 
-      // 4. Portal-based detection (Facebook renders sponsored label in portals)
       const ariaRefs = postNode.querySelectorAll("[aria-describedby],[aria-labelledby]");
       for (const ref of ariaRefs) {
         const ids = ((ref.getAttribute("aria-describedby") || "") + " " + (ref.getAttribute("aria-labelledby") || "")).trim().split(/\s+/);
@@ -545,6 +547,28 @@
       }
     } catch (_) {}
     return false;
+  }
+
+  function evaluatePostForAgent(postNode) {
+    try {
+      if (typeof window.fbsEvaluatePostSignals === "function") {
+        const evalResult = window.fbsEvaluatePostSignals(postNode);
+        return {
+          isSponsored: !!evalResult.isSponsored,
+          isAffiliate: !!evalResult.isAffiliate,
+          reasons: evalResult.reasons || [],
+          confidence: evalResult.confidence || 0,
+        };
+      }
+    } catch (_) {}
+
+    // Fallback if unified engine is not available yet
+    return {
+      isSponsored: isSponsoredPost(postNode),
+      isAffiliate: false,
+      reasons: [],
+      confidence: 0,
+    };
   }
 
   function shouldSkipPost(postNode) {

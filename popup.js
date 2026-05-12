@@ -46,6 +46,7 @@ const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const sourceTemplateEl = document.getElementById("sourceTemplate");
 const useHeuristicEvalEl = document.getElementById("useHeuristicEval");
+const hideAffiliatePostsEl = document.getElementById("hideAffiliatePosts");
 const blockedDomainsEl = document.getElementById("blockedDomains");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
@@ -61,6 +62,7 @@ chrome.storage.sync.get(
     "customAffPrompt",
     "sourceTemplate",
     "useHeuristicEval",
+    "hideAffiliatePosts",
     "blockedDomains",
     "apiKeys",
   ],
@@ -75,6 +77,7 @@ chrome.storage.sync.get(
     if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
     if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
     if (d.useHeuristicEval) useHeuristicEvalEl.checked = true;
+    if (d.hideAffiliatePosts) hideAffiliatePostsEl.checked = true;
     if (d.blockedDomains) blockedDomainsEl.value = d.blockedDomains;
     const total = Object.values(d.apiKeys || {}).reduce(
       (s, a) => s + (a ? a.length : 0),
@@ -104,6 +107,7 @@ saveBtn.addEventListener("click", () => {
       customAffPrompt: customAffPromptEl.value.trim(),
       sourceTemplate: sourceTemplateEl.value.trim(),
       useHeuristicEval: useHeuristicEvalEl.checked,
+      hideAffiliatePosts: hideAffiliatePostsEl.checked,
       blockedDomains: blockedDomainsEl.value.trim(),
     },
     () => showStatus("Đã lưu", "success"),
@@ -378,6 +382,56 @@ if (clearCacheBtn) {
 // === HISTORY ===
 let historyData = [];
 
+function formatHm(ts) {
+  return new Date(ts).toLocaleTimeString("vi", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderPostTimeSuggestions(items) {
+  const box = document.getElementById("postTimeSuggestBox");
+  if (!box) return;
+  if (!items || items.length < 1) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  const sorted = [...items].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const firstTs = new Date(sorted[0].date).getTime();
+  if (!Number.isFinite(firstTs)) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000;
+  const candidates = [];
+  for (let i = 1; i <= 24; i++) {
+    const t1 = firstTs + i * oneHour;
+    const t2 = firstTs + i * 2 * oneHour;
+    if (t1 > now) candidates.push(t1);
+    if (t2 > now) candidates.push(t2);
+  }
+
+  const unique = [...new Set(candidates)]
+    .sort((a, b) => a - b)
+    .slice(0, 4);
+
+  if (unique.length === 0) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  box.style.display = "block";
+  box.innerHTML = `
+    <div class="post-time-suggest-title">🕒 Gợi ý giờ đăng tiếp theo (cách 1–2 giờ từ bài đầu)</div>
+    <div class="post-time-suggest-list">
+      ${unique.map((ts) => `<span class="post-time-pill">${formatHm(ts)}</span>`).join("")}
+    </div>
+  `;
+}
+
 async function loadHistory() {
   const data = await chrome.storage.local.get("history");
   historyData = data.history || [];
@@ -387,6 +441,7 @@ async function loadHistory() {
   detail.style.display = "none";
   list.style.display = "block";
   actions.style.display = historyData.length > 0 ? "block" : "none";
+  renderPostTimeSuggestions(historyData);
   if (historyData.length === 0) {
     list.innerHTML = '<p class="empty">Chưa có lịch sử</p>';
     return;
@@ -531,21 +586,37 @@ document.getElementById("clearBtn").addEventListener("click", async () => {
 // === AGENT STATS (Feature 7) ===
 async function loadAgentStats() {
   try {
-    const data = await chrome.storage.local.get(["agentStats", "agentPostedUrls"]);
+    const data = await chrome.storage.local.get(["agentStats", "agentPostedUrls", "fbsTelemetry"]);
     const stats = data.agentStats;
+    const telemetry = data.fbsTelemetry || {};
     const box = document.getElementById("agentStatsBox");
-    if (!stats && (!data.agentPostedUrls || data.agentPostedUrls.length === 0)) {
+    const hasAgentStats = !!stats || (data.agentPostedUrls && data.agentPostedUrls.length > 0);
+    const hasTelemetry = (telemetry.postsScanned || 0) > 0;
+
+    if (!hasAgentStats && !hasTelemetry) {
       box.style.display = "none";
       return;
     }
+
     box.style.display = "block";
     const today = new Date().toDateString();
     const postsToday = (stats && stats.postsTodayDate === today) ? (stats.postsToday || 0) : 0;
-    document.getElementById("statPostsToday").textContent = postsToday;
-    document.getElementById("statPostsTotal").textContent = stats ? (stats.postsTotal || 0) : (data.agentPostedUrls ? data.agentPostedUrls.length : 0);
-    document.getElementById("statSkipped").textContent = (stats && stats.postsTodayDate === today) ? (stats.skippedToday || 0) : 0;
-    const lastPost = stats && stats.lastPostTime ? new Date(stats.lastPostTime).toLocaleString("vi") : "–";
-    document.getElementById("statLastPost").textContent = lastPost;
+    const postsTotal = stats ? (stats.postsTotal || 0) : (data.agentPostedUrls ? data.agentPostedUrls.length : 0);
+    const skippedToday = (stats && stats.postsTodayDate === today) ? (stats.skippedToday || 0) : 0;
+    const flagged = (telemetry.postsFlaggedAds || 0) + (telemetry.postsFlaggedAffiliate || 0);
+
+    document.getElementById("statPostsToday").textContent = hasAgentStats ? postsToday : (telemetry.postsScanned || 0);
+    document.getElementById("statPostsTotal").textContent = hasAgentStats ? postsTotal : flagged;
+    document.getElementById("statSkipped").textContent = hasAgentStats ? skippedToday : (telemetry.falsePositiveProxy || 0);
+
+    if (hasAgentStats) {
+      const lastPost = stats && stats.lastPostTime ? new Date(stats.lastPostTime).toLocaleString("vi") : "–";
+      document.getElementById("statLastPost").textContent = lastPost;
+    } else {
+      const topReasons = telemetry.topReasons || {};
+      const topReason = Object.entries(topReasons).sort((a, b) => b[1] - a[1])[0];
+      document.getElementById("statLastPost").textContent = topReason ? `${topReason[0]} (${topReason[1]})` : "–";
+    }
   } catch (_) {}
 }
 

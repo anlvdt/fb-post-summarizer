@@ -60,8 +60,15 @@
         <div class="accordion-header">Auto-pilot & Đăng bài</div>
         <div class="accordion-content">
           <div class="field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="hideAffiliatePosts">
+              <span>Ẩn bài viết có link Affiliate</span>
+            </label>
+            <div class="field-hint">Tự động ẩn các bài viết chứa link Shopee, Lazada, Tiki, TikTok Shop và các affiliate link khác.</div>
+          </div>
+          <div class="field">
             <label for="sourceTemplate">Template nguồn (Đăng Status)</label>
-            <input type="text" id="sourceTemplate" placeholder="Nguồn: {platform} {author} (Link full dưới cmt)">
+            <input type="text" id="sourceTemplate" placeholder="• Nguồn bài viết: {platform} {author} {source}\n  {link}">
             <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page</div>
           </div>
           <div class="field">
@@ -162,15 +169,16 @@
     <!-- History Tab -->
     <div class="tab-content" id="tab-history">
       <!-- Agent Stats (Feature 7) -->
-      <div id="agentStatsBox" style="display:none;background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.2);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#a8a0cc;">
-        <div style="font-weight:700;color:#c9b8ff;margin-bottom:6px;">📊 Agent Stats</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;">
-          <span>Đã đăng hôm nay: <b id="statPostsToday">–</b></span>
-          <span>Tổng đã đăng: <b id="statPostsTotal">–</b></span>
-          <span>Bài đã bỏ qua: <b id="statSkipped">–</b></span>
-          <span>Lần đăng cuối: <b id="statLastPost">–</b></span>
+      <div id="agentStatsBox" style="display:none;background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:#a8a0cc;">
+        <div style="font-weight:700;color:#c9b8ff;margin-bottom:8px;font-size:13px;">📊 Detection Stats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;line-height:1.6;">
+          <span>Bài đã quét: <b id="statPostsToday" style="color:#e5ddff;">–</b></span>
+          <span>Bài bị chặn: <b id="statPostsTotal" style="color:#e5ddff;">–</b></span>
+          <span>Hiện lại: <b id="statSkipped" style="color:#e5ddff;">–</b></span>
+          <span>Lý do chính: <b id="statLastPost" style="color:#e5ddff;">–</b></span>
         </div>
       </div>
+      <div id="postTimeSuggestBox" class="post-time-suggest" style="display:none"></div>
       <div id="historyList" class="history-list"></div>
       <div id="historyDetail" class="history-detail" style="display:none">
         <button id="historyBack" class="btn btn-secondary" style="margin-bottom:6px">← Quay lại</button>
