@@ -1074,10 +1074,11 @@ function _detectAffiliateText(container) {
     }
   }
 
-  // Common affiliate call-to-action patterns
+  // Common affiliate call-to-action patterns require a concrete outbound/link signal.
   const affiliatePatterns = ["mua ngay", "đặt hàng", "shop ngay", "link sản phẩm"];
+  const hasOutboundSignal = /https?:\/\/|www\.|shope\.ee|s\.lazada|tiki\.vn|vt\.tiktok\.com/i.test(text);
   for (const pattern of affiliatePatterns) {
-    if (text.includes(pattern) && (text.includes("http") || text.includes("link"))) {
+    if (text.includes(pattern) && hasOutboundSignal) {
       return { reason: "affiliate_cta", pattern };
     }
   }

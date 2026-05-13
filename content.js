@@ -115,10 +115,16 @@ chrome.storage.local.get(["fbsTelemetry"], (d) => {
   }
 });
 
+let telemetryWriteTimer = null;
 function saveTelemetry() {
   try {
-    chrome.storage.local.set({ fbsTelemetry: telemetry });
-  } catch (_) {}
+    clearTimeout(telemetryWriteTimer);
+    telemetryWriteTimer = setTimeout(() => {
+      chrome.storage.local.set({ fbsTelemetry: telemetry });
+    }, 1200);
+  } catch (err) {
+    console.warn("[FeedWriter] saveTelemetry failed:", err?.message || err);
+  }
 }
 
 // Display modes: hide, collapse, mark
@@ -2043,3 +2049,17 @@ scanObserver.observe(document.body, {
 });
 observers.push(scanObserver);
 window.buildCommentText = buildCommentText;
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.action === "rescan-feed") {
+    try {
+      scan();
+      sendResponse({ ok: true });
+    } catch (err) {
+      console.warn("[FeedWriter] rescan-feed failed:", err?.message || err);
+      sendResponse({ ok: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+  return false;
+});

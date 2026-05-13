@@ -568,6 +568,21 @@ document.getElementById("exportMdBtn").addEventListener("click", async () => {
   URL.revokeObjectURL(url);
 });
 
+document.getElementById("rescanBtn").addEventListener("click", async () => {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      showStatus("Không tìm thấy tab hiện tại", "error");
+      return;
+    }
+    const res = await chrome.tabs.sendMessage(tabs[0].id, { action: "rescan-feed" });
+    if (res?.ok) showStatus("Đã yêu cầu quét lại feed", "success");
+    else showStatus(res?.error || "Không thể quét lại feed", "error");
+  } catch (err) {
+    showStatus("Lỗi quét lại: " + (err?.message || err), "error");
+  }
+});
+
 document.getElementById("clearBtn").addEventListener("click", async () => {
   if (!confirm("Xóa toàn bộ lịch sử? (Có thể khôi phục trong 30 giây)")) return;
 
