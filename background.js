@@ -2,16 +2,8 @@
 // https://github.com/anlvdt/fb-post-summarizer
 // Author: Le An (anlvdt)
 
-try {
-  importScripts("env.js");
-} catch (e) {
-  console.warn("No env.js found");
-}
-try {
-  importScripts("utils.js");
-} catch (e) {
-  console.warn("No utils.js found");
-}
+// MUST be static, top-level, and without try-catch in MV3 Service Workers
+importScripts("env.js", "utils.js", "bg-prompts.js", "bg-api.js");
 
 // Fallback logger and feature flags if utils.js failed to load
 if (typeof logger === 'undefined') {
@@ -43,31 +35,31 @@ const STORAGE_VERSION = 1;
 
 // === STORAGE MIGRATION ===
 async function migrateStorageIfNeeded() {
+  if (!chrome?.storage?.local) return; // SW not ready
   const data = await chrome.storage.local.get(['storageVersion', 'history', 'apiKeys']);
   const currentVersion = data.storageVersion || 0;
 
   if (currentVersion < STORAGE_VERSION) {
     logger.info(`Migrating storage from v${currentVersion} to v${STORAGE_VERSION}`);
-
-    // Migration logic here if needed
-    // For now, just update version
     await chrome.storage.local.set({ storageVersion: STORAGE_VERSION });
     logger.info('Storage migration completed');
   }
 }
 
-// Run migration on startup
-migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed:', e));
+// Run migration only inside onInstalled / onStartup
+// (Removed top-level execution to prevent "Error: No SW" on some browsers)
 
 // === TELEMETRY ===
 let telemetryData = { sessions: 0, summaries: 0, errors: 0 };
 
 async function saveTelemetry() {
   if (!featureFlags.enableLogging) return;
+  if (!chrome?.storage?.local) return; // SW not ready
   await chrome.storage.local.set({ telemetry: telemetryData });
 }
 
 async function loadTelemetry() {
+  if (!chrome?.storage?.local) return; // SW not ready
   const data = await chrome.storage.local.get('telemetry');
   telemetryData = { ...telemetryData, ...data.telemetry };
 }
@@ -78,12 +70,16 @@ function trackEvent(event, data = {}) {
   // Could send to analytics service here
 }
 
-// Load telemetry on startup
-loadTelemetry().catch(e => logger.error('Failed to load telemetry:', e));
-
-// Track session start
-telemetryData.sessions++;
-saveTelemetry();
+// Initialize telemetry safely
+(async () => {
+  try {
+    await loadTelemetry();
+    telemetryData.sessions++;
+    await saveTelemetry();
+  } catch (e) {
+    logger.error('Failed to initialize telemetry:', e);
+  }
+})();
 
 // === KEEP SERVICE WORKER ALIVE ===
 function ensureKeepAliveAlarm() {
@@ -152,7 +148,7 @@ async function injectAndSend(tabId, message) {
     });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"],
+      files: ["utils.js", "content-dom.js", "content-composer.js", "content.js"],
     });
     chrome.tabs.sendMessage(tabId, message);
   } catch (e) {
@@ -161,7 +157,9 @@ async function injectAndSend(tabId, message) {
 }
 
 // === CONTEXT MENU ===
+if (chrome?.runtime?.onInstalled) {
 chrome.runtime.onInstalled.addListener(async () => {
+  await migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed (onInstalled):', e));
   chrome.contextMenus.create({
     id: "summarize-selection",
     title: "Tóm tắt nội dung",
@@ -199,22 +197,9 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.storage.sync.set({ apiKeys });
   });
 
-  // Re-register alarm on install/update
-  const alarmData = await chrome.storage.local.get(["reviewAlarm"]);
-  const alarm = alarmData.reviewAlarm;
-  if (alarm && alarm.enabled) {
-    const now = new Date();
-    const target = new Date();
-    target.setHours(alarm.hour, alarm.minute, 0, 0);
-    if (target <= now) target.setDate(target.getDate() + 1);
-    chrome.alarms.create("daily-ai-review", {
-      delayInMinutes: (target - now) / 60000,
-      periodInMinutes: 24 * 60,
-    });
-  }
-
   ensureKeepAliveAlarm();
 });
+} // end if (chrome?.runtime?.onInstalled)
 
 async function clearShopeeCookies() {
   const domains = [".shopee.vn", "shopee.vn", ".shope.ee", "shope.ee"];
@@ -269,6 +254,7 @@ chrome.commands.onCommand.addListener((command) => {
   });
 });
 
+if (chrome?.contextMenus?.onClicked) {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "summarize-selection" && info.selectionText) {
     const msg = {
@@ -302,6 +288,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     processUnshorten(urlMatches[0], tab.id);
   }
 });
+} // end if (chrome?.contextMenus?.onClicked)
 
 // === BADGE COUNTER ===
 async function incrementBadge() {
@@ -314,454 +301,8 @@ async function incrementBadge() {
   chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
 }
 
-// === IMPROVED PROMPTS based on Vietnamese NLP research ===
-// References: VietAI ViT5, Underthesea, Vietnamese summarization best practices
-
-// TÓM TẮT TIẾNG VIỆT CHUẨN - Hybrid extractive + abstractive approach
-const SUMMARY_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt tiếng Việt, giỏi viết tiêu đề hấp dẫn.
-
-NHIỆM VỤ: Đọc kỹ nội dung, xác định thông tin quan trọng, viết TIÊU ĐỀ có hook mạnh + tóm tắt ngắn gọn.
-
-QUY TRÌNH:
-1. XÁC ĐỊNH: Chủ đề chính là gì? Kết luận/điểm then chốt nhất?
-2. VIẾT TIÊU ĐỀ (HOOK): Dòng đầu tiên là tiêu đề in đậm, hấp dẫn, tạo tò mò. Dùng 1 trong các kỹ thuật:
-   - CURIOSITY GAP: Thông tin chưa đầy đủ khiến người đọc muốn biết thêm
-   - CONTRARIAN: Phản bác niềm tin phổ biến
-   - DATA HOOK: Con số/chi tiết cụ thể gây ấn tượng
-   - BENEFIT HOOK: Nêu ngay giá trị người đọc nhận được
-   - QUESTION HOOK: Câu hỏi cụ thể đánh vào pain point
-   Tiêu đề tối đa 15-20 từ, PHẢI chứa thông tin cụ thể từ bài gốc.
-3. TRÍCH XUẤT: Các ý quan trọng nhất (2-5 điểm)
-4. VIẾT LẠI: Hoàn toàn bằng lời của bạn, KHÔNG copy
-
-FORMAT OUTPUT:
-**[Tiêu đề hook mạnh]**
-
-[Nội dung tóm tắt]
-
-YÊU CẦU:
-- Tiêu đề PHẢI ở dòng đầu, bọc trong **...**
-- Tối đa 5 câu liền mạch hoặc 5 bullet points cho phần tóm tắt
-- NẾU bài gốc là HƯỚNG DẪN/TUTORIAL: giữ nguyên các bước (Bước 1, Bước 2...) dạng list ngắn gọn. Mỗi bước tối đa 1-2 câu. Người đọc phải biết cách làm ngay.
-- NẾU bài gốc là TIN TỨC/PHÂN TÍCH: viết đoạn văn liền mạch 3-5 câu.
-- Giọng tự nhiên, dễ hiểu như đang kể cho bạn bè
-- Giữ thông tin có giá trị thực, dữ liệu, kết luận
-- Bỏ ví dụ dài, chi tiết lan man, rào đón
-- CHỈ dùng thông tin CÓ TRONG bài gốc, KHÔNG bịa thêm số liệu/thông số/phiên bản
-- CẤM tiêu đề nhạt không có thông tin: "Tin mới", "Có một điều thú vị..."
-- CẤM câu dẫn dắt rỗng: "Mình vừa đọc...", "Gần đây..."
-- CẤM lạm dụng sở hữu "của bạn", "của mình", "của chúng ta". Viết trực tiếp: "iPhone báo đầy bộ nhớ" thay vì "iPhone của bạn báo đầy bộ nhớ". Chỉ dùng khi thật sự cần phân biệt sở hữu.
-- Trả lời bằng tiếng Việt`;
-
-// TÓM TẮT NGẮN - Quick overview
-const SUMMARY_SHORT_PROMPT = `Tóm tắt cực ngắn nội dung sau:
-
-Yêu cầu:
-- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ
-- Sau tiêu đề: 1-2 câu tóm tắt
-- Nắm bắt thông điệp cốt lõi nhất
-- Viết lại bằng lời mình, KHÔNG copy
-- Giọng tự nhiên`;
-
-// TÓM TẮT CHI TIẾT - Detailed với cấu trúc
-const SUMMARY_DETAILED_PROMPT = `Bạn là chuyên gia phân tích và tóm tắt có cấu trúc.
-
-NHIỆM VỤ: Viết tiêu đề hook mạnh + tóm tắt chi tiết, giữ cấu trúc logic.
-
-YÊU CẦU:
-- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 20 từ
-- Xác định thesis/luận điểm chính
-- Các luận điểm hỗ trợ quan trọng nhất
-- Kết luận và hàm ý
-- Cấu trúc rõ ràng: Tiêu đề → Điểm chính → Kết luận
-- Tối đa 150 từ
-- Viết lại hoàn toàn, KHÔNG copy`;
-
-// TÓM TẮT DẠNG BULLET - Easy to scan
-const SUMMARY_BULLET_PROMPT = `Tóm tắt thành các bullet points ngắn gọn.
-
-Quy tắc:
-- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh (con số, phản bác, tò mò), tối đa 15 từ
-- Mỗi bullet tối đa 15 từ
-- Ưu tiên thông tin có giá trị, dữ liệu, kết luận
-- Bỏ ví dụ, chỉ giữ kết quả
-- 5-7 bullet max
-- Dùng • hoặc - để đánh dấu`;
-
-// === QUY TẮC CHÍNH TẢ VNREVIEW (áp dụng cho mọi output tiếng Việt) ===
-const VNREVIEW_RULES = `
-QUY TẮC CHÍNH TẢ VÀ HÀNH VĂN BẮT BUỘC:
-
-CẤM MỞ ĐẦU BẰNG CÂU DẪN DẮT RỖNG:
-- TUYỆT ĐỐI KHÔNG bắt đầu bằng: "Mình vừa đọc được...", "Gần đây...", "Như chúng ta đã biết...", "Mới đây...", "Theo như mình được biết...", "Hôm nay mình đọc được..."
-- Câu đầu tiên PHẢI chứa thông tin thực, đi thẳng vào nội dung chính.
-- VD SAI: "Mình vừa đọc được tin tức về giá điện thoại cao cấp..."
-- VD ĐÚNG: "Huawei thay đổi chiến lược: bản Pro Max giá ngang Xiaomi Ultra."
-
-HẠN CHẾ SỞ HỮU THỪA:
-- KHÔNG lạm dụng "của bạn", "của mình", "của chúng ta", "của Apple", "của Google" khi không cần thiết.
-- Viết trực tiếp: "iPhone báo đầy bộ nhớ" thay vì "iPhone của bạn báo đầy bộ nhớ".
-- "Cập nhật iOS" thay vì "Cập nhật iOS của bạn". "Tài khoản Google" thay vì "Tài khoản Google của bạn".
-- Chỉ dùng sở hữu khi thật sự cần phân biệt (VD: "ảnh của bạn" vs "ảnh của người khác").
-
-TIỀN VIỆT NAM:
-- Viết gọn bằng đơn vị triệu/tỷ: "45 triệu đồng", "1,2 tỷ đồng"
-- KHÔNG viết dạng đầy đủ: "44.990.000 đồng" → viết "gần 45 triệu đồng" hoặc "44,99 triệu đồng"
-
-KHÔNG LẶP CẢM XÚC:
-- Mỗi cảm xúc/nhận xét chỉ nói MỘT lần. Không lặp "thật sự ngạc nhiên", "thật sự không hiểu", "quá đắt đỏ" trong cùng bài.
-
-CẤM EMOJI:
-- TUYỆT ĐỐI KHÔNG dùng emoji, icon, hay ký tự đặc biệt Unicode trong output (📌🔗✅⚠️🔥💡⚡🎯🚀❌👍...).
-- Dùng text thuần: "Nguồn:" thay vì "📌 Nguồn:", "Link:" thay vì "🔗".
-
-CHỐNG BỊA THÔNG TIN (HALLUCINATION):
-- TUYỆT ĐỐI KHÔNG bịa số liệu, tên sản phẩm, phiên bản, thông số kỹ thuật, giá cả mà KHÔNG có trong bài gốc.
-- Nếu bài gốc không nêu con số cụ thể, KHÔNG được tự thêm con số.
-- Nếu không chắc chắn thông tin, KHÔNG viết. Bỏ qua còn hơn bịa.
-- Chỉ sử dụng thông tin CÓ TRONG bài gốc được cung cấp.
-
-QUY TẮC CHÍNH TẢ:
-- Câu ngắn, từ ngắn. Mỗi đoạn văn thể hiện MỘT ý.
-- THUẬT NGỮ CÔNG NGHỆ: "code/coding" dịch là "lập trình" hoặc giữ nguyên "code", TUYỆT ĐỐI KHÔNG dịch thành "mã hóa". "coder" = "lập trình viên". "source code" = "mã nguồn".
-- Chữ số: dấu chấm (.) chỉ hàng nghìn (VD: 1.500), dấu phẩy (,) chỉ phần thập phân (VD: 2,2 mm).
-- Dấu chấm (.) cho inch, pixel, GHz: 8.9 inch, 18.2 megapixel, 2.2 GHz.
-- Viết bằng chữ số dưới 10 trước danh từ chỉ người/địa danh: "hai tỉnh", "năm nhóm người".
-- Dùng con số cho tuổi, số lượng, khoảng cách, %, tỷ lệ, nhiệt độ, tốc độ, tiền tệ, model máy.
-- Ngoặc đơn () để giải thích: Steve Jobs (1955-2011). Ngoặc kép "" để trích dẫn nguyên văn.
-- Đơn vị: mm, cm, m, kg, độ C, inch, megapixel, lít.
-- Tiền tệ: USD (không viết "đô-la"), euro, yên. Ngoại tệ phải kèm quy đổi VND tương đương.
-- Ngày tháng: dùng gạch chéo (13/10/2011). Viết hoa tên tháng chữ (tháng Sáu), tháng 10 trở đi dùng số. Viết hoa tên ngày (thứ Hai, Chủ nhật).
-- Viết hoa: tên người, tên công ty, địa danh, chức danh.
-- KHÔNG viết tắt địa danh ngắn: Việt Nam, Hà Nội (không viết VN, HN).`;
-
-// AFFILIATE - Review sản phẩm chân thật + Quy tắc VnReview
-const AFFILIATE_PROMPT =
-  `Bạn là người dùng thật, viết review sản phẩm tự nhiên.
-
-NHIỆM VỤ: Viết bài affiliate từ thông tin sản phẩm, như đã dùng thử.
-
-QUY TRÌNH:
-1. XÁC ĐỊNH: Sản phẩm giải quyết vấn đề gì? Điểm nổi bật nhất?
-2. XÂY DỰNG: Tạo câu chuyện trải nghiệm chân thật (vấn đề → tìm kiếm → thử dùng → kết quả)
-3. VIẾT: Xưng "mình", giọng kể bạn bè, chi tiết cụ thể
-
-YÊU CẦU:
-- 2-3 đoạn ngắn, tổng 100-200 từ
-- Mở bằng vấn đề thực tế, KHÔNG mở bằng tên sản phẩm
-- Điểm mạnh viết như phát hiện, không quảng cáo
-- Cuối bài: "Link: [LINK]" hoặc "Mua ở đây: [LINK]"
-- KHÔNG hô hào "MUA NGAY", "GIÁ SỐC"
-- Giọng chân thật, không phóng đại
-` + VNREVIEW_RULES;
-
-// AFFILIATE NHẸ NHÀNG - Soft sell
-const AFFILIATE_SOFT_PROMPT =
-  `Viết chia sẻ trải nghiệm sản phẩm nhẹ nhàng, không giống quảng cáo.
-
-QUY TRÌNH:
-1. Tìm 1 vấn đề thực tế mà sản phẩm giải quyết
-2. Viết như đang kể chuyện, phát hiện sản phẩm một cách tự nhiên
-3. Để link ở cuối, không kêu gọi mua
-
-YÊU CẦU:
-- 80-150 từ, giọng nhẹ nhàng
-- Mở bằng câu chuyện/vấn đề, KHÔNG mở bằng tên sản phẩm
-- Điểm mạnh viết như phát hiện ra, không PR
-- Link ở cuối tự nhiên, không kêu gọi
-` + VNREVIEW_RULES;
-
-// AFFILIATE CÂU CHUYỆN - Storytelling format
-const AFFILIATE_STORY_PROMPT =
-  `Viết bài affiliate theo format câu chuyện hấp dẫn.
-
-QUY TRÌNH:
-1. TÌNH HUỐNG: Mình đang gặp vấn đề gì cụ thể?
-2. HÀNH TRÌNH: Đã thử những gì? Tại sao chưa ổn?
-3. PHÁT HIỆN: Tìm ra sản phẩm này, dùng thử thấy sao?
-4. KẾT QUẢ: Điều mình thích nhất + chia sẻ link cho ai cần
-
-YÊU CẦU:
-- 100-200 từ, giọng kể chuyện tự nhiên
-- Xưng "mình", chi tiết cụ thể (bao lâu, kết quả gì)
-- Không PR cứng, không hô hào
-- Link cuối bài tự nhiên
-` + VNREVIEW_RULES;
-
-// TÓM TẮT GIỮ CẤU TRÚC - Preserve original structure
-const SUMMARY_STRUCTURED_PROMPT = `Bạn là chuyên gia tóm tắt có cấu trúc.
-
-NHIỆM VỤ: Viết tiêu đề hook mạnh, giữ nguyên cấu trúc bài viết, chỉ rút gọn nội dung.
-
-YÊU CẦU:
-- Dòng đầu tiên: tiêu đề in đậm **...** có hook mạnh, tối đa 20 từ
-- Giữ headings, bullet points, numbering
-- Mỗi section: rút còn 1-3 ý quan trọng nhất
-- Bỏ ví dụ, chỉ giữ kết luận/điểm chính
-- Tổng cộng giảm 50-70% nội dung
-- Giọng tự nhiên, viết lại không copy`;
-
-// PROMPT MAP - All available templates
-const PROMPT_TEMPLATES = {
-  // Summary variants
-  summary: SUMMARY_PROMPT,
-  summary_short: SUMMARY_SHORT_PROMPT,
-  summary_detailed: SUMMARY_DETAILED_PROMPT,
-  summary_bullet: SUMMARY_BULLET_PROMPT,
-  summary_structured: SUMMARY_STRUCTURED_PROMPT,
-
-  // Affiliate variants
-  affiliate: AFFILIATE_PROMPT,
-  affiliate_soft: AFFILIATE_SOFT_PROMPT,
-  affiliate_story: AFFILIATE_STORY_PROMPT,
-};
-
-// === API KEY ROTATION ===
-// Supports multiple API keys per provider with automatic rotation on rate limit
-// Cross-provider fallback: if all keys of one provider are limited, try another provider
-
-const PROVIDER_PRIORITY = [
-  "groq",
-  "cerebras",
-  "sambanova",
-  "gemini",
-  "openrouter",
-];
-
-// Get the best available key across ALL providers
-async function getAvailableKey() {
-  const data = await chrome.storage.sync.get(["apiKeys", "apiKey", "provider"]);
-  const localData = await chrome.storage.local.get([
-    "keyStatus",
-    "keyRotationIndex",
-    "backupApiKeys",
-  ]);
-
-  let apiKeys = data.apiKeys;
-  let hasAnyKey = false;
-  if (apiKeys) {
-    for (const p in apiKeys) {
-      if (apiKeys[p] && apiKeys[p].length > 0) hasAnyKey = true;
-    }
-  }
-
-  // 1. Fallback for sync wipe -> use local backup
-  if (!hasAnyKey && localData.backupApiKeys) {
-    apiKeys = localData.backupApiKeys;
-    hasAnyKey = true;
-    chrome.storage.sync.set({ apiKeys });
-  }
-
-  if (!apiKeys)
-    apiKeys = {
-      groq: [],
-      gemini: [],
-      cerebras: [],
-      sambanova: [],
-      openrouter: [],
-    };
-
-  // 2. Fallback to ENV file (Hardcoded keys)
-  if (typeof ENV_API_KEYS !== "undefined") {
-    for (const p in ENV_API_KEYS) {
-      if (ENV_API_KEYS[p] && ENV_API_KEYS[p].length > 0) {
-        if (!apiKeys[p]) apiKeys[p] = [];
-        const newKeys = ENV_API_KEYS[p].filter((k) => !apiKeys[p].includes(k));
-        if (newKeys.length > 0) {
-          apiKeys[p].push(...newKeys);
-          hasAnyKey = true;
-        }
-      }
-    }
-  }
-
-  // 3. Fallback to legacy single key
-  if (!hasAnyKey && data.apiKey) {
-    const provider = data.provider || "groq";
-    if (!apiKeys[provider]) apiKeys[provider] = [];
-    if (!apiKeys[provider].includes(data.apiKey)) {
-      apiKeys[provider].push(data.apiKey);
-    }
-  }
-
-  const keyStatus = localData.keyStatus || {};
-  const rotationIndex = localData.keyRotationIndex || {};
-  const now = Date.now();
-
-  // Try each provider in priority order
-  for (const provider of PROVIDER_PRIORITY) {
-    const keys = apiKeys[provider] || [];
-    if (keys.length === 0) continue;
-
-    const startIdx = (rotationIndex[provider] || 0) % keys.length;
-    for (let i = 0; i < keys.length; i++) {
-      const idx = (startIdx + i) % keys.length;
-      const key = keys[idx];
-      const status = keyStatus[key] || {};
-
-      if (!status.rateLimitedUntil || now >= status.rateLimitedUntil) {
-        // Found a usable key — update rotation
-        const newRotation = {
-          ...rotationIndex,
-          [provider]: (idx + 1) % keys.length,
-        };
-        keyStatus[key] = { ...(keyStatus[key] || {}), lastUsed: now };
-        await chrome.storage.local.set({
-          keyRotationIndex: newRotation,
-          keyStatus,
-        });
-        return { key, provider, index: idx };
-      }
-    }
-  }
-
-  // All keys across all providers are rate-limited
-  let soonestTime = Infinity;
-  let totalKeys = 0;
-  for (const provider of PROVIDER_PRIORITY) {
-    const keys = apiKeys[provider] || [];
-    totalKeys += keys.length;
-    for (const key of keys) {
-      const until = (keyStatus[key] || {}).rateLimitedUntil || 0;
-      if (until < soonestTime) soonestTime = until;
-    }
-  }
-
-  if (totalKeys === 0) return { key: null, provider: null, noKeys: true };
-  const waitMin = Math.max(1, Math.ceil((soonestTime - now) / 60000));
-  return {
-    key: null,
-    provider: null,
-    allLimited: true,
-    waitMinutes: waitMin,
-    total: totalKeys,
-  };
-}
-
-async function markKeyRateLimited(key, retryAfterMs) {
-  const localData = await chrome.storage.local.get(["keyStatus"]);
-  const keyStatus = localData.keyStatus || {};
-  keyStatus[key] = {
-    ...(keyStatus[key] || {}),
-    rateLimitedUntil: Date.now() + (retryAfterMs || 30 * 60 * 1000),
-    lastRateLimited: Date.now(),
-  };
-  await chrome.storage.local.set({ keyStatus });
-}
-
-function parseRetryAfter(errorMessage) {
-  const match = errorMessage?.match(/try again in (\d+)m([\d.]+)s/i);
-  if (match) return (parseInt(match[1]) * 60 + parseFloat(match[2])) * 1000;
-  const secMatch = errorMessage?.match(/retry.?after:?\s*(\d+)/i);
-  if (secMatch) return parseInt(secMatch[1]) * 1000;
-  return 30 * 60 * 1000;
-}
-
-const MAX_INPUT_CHARS = 8000;
-const MAX_OUTPUT_TOKENS = 1024;
-
-async function getSystemPrompt(
-  type,
-  site,
-  author,
-  sourceUrl,
-  postTitle,
-  postSource,
-) {
-  const data = await chrome.storage.sync.get([
-    "customSummaryPrompt",
-    "customAffPrompt",
-    "outputLang",
-    "promptStyle",
-    "summaryLength",
-    "customInstructions",
-  ]);
-
-  const lang = data.outputLang || "auto";
-  const promptStyle = data.promptStyle || "default";
-  const summaryLength = data.summaryLength || "medium";
-  const customInstructions = data.customInstructions || "";
-
-  // Determine base type for prompt lookup
-  const baseType = type.startsWith("affiliate") ? "affiliate" : "summary";
-
-  let prompt;
-
-  // 1. Custom user prompt takes highest priority
-  if (baseType === "affiliate" && data.customAffPrompt) {
-    prompt = data.customAffPrompt;
-  } else if (baseType === "summary" && data.customSummaryPrompt) {
-    prompt = data.customSummaryPrompt;
-  }
-  // 2. promptStyle only applies to summary type
-  else if (
-    baseType === "summary" &&
-    promptStyle !== "default" &&
-    PROMPT_TEMPLATES[promptStyle]
-  ) {
-    prompt = PROMPT_TEMPLATES[promptStyle];
-  }
-  // 3. Length-based variant (summary_short, status_short, etc.)
-  else if (summaryLength !== "medium") {
-    const lengthKey = baseType + "_" + summaryLength;
-    prompt =
-      PROMPT_TEMPLATES[lengthKey] ||
-      PROMPT_TEMPLATES[baseType] ||
-      PROMPT_TEMPLATES.summary;
-  }
-  // 4. Default template for the type
-  else {
-    prompt =
-      PROMPT_TEMPLATES[type] ||
-      PROMPT_TEMPLATES[baseType] ||
-      PROMPT_TEMPLATES.summary;
-  }
-
-  // === SMART CONTEXT: Adapt prompt based on source platform ===
-  const siteHints = {
-    facebook:
-      "\n\nNGỮ CẢNH: Bài viết từ Facebook. Giọng văn thường casual, cá nhân. Nếu là bài chia sẻ link/tin tức, tập trung vào thông tin. Nếu là status cá nhân, giữ cảm xúc và quan điểm.",
-    linkedin:
-      "\n\nNGỮ CẢNH: Bài viết từ LinkedIn. Giọng văn chuyên nghiệp. Tập trung vào insight nghề nghiệp, bài học kinh doanh, dữ liệu.",
-    x: "\n\nNGỮ CẢNH: Bài viết từ X/Twitter. Nội dung thường ngắn, có thể là thread. Tập trung vào ý chính, bỏ qua hashtag và mention.",
-    threads: "\n\nNGỮ CẢNH: Bài viết từ Threads. Giọng casual, ngắn gọn.",
-    reddit:
-      "\n\nNGỮ CẢNH: Bài viết từ Reddit. Có thể là discussion dài. Tập trung vào luận điểm chính và kết luận của tác giả, bỏ qua comment.",
-  };
-  if (site && siteHints[site]) {
-    prompt += siteHints[site];
-  }
-
-  // === SMART CONTEXT: Auto-detect content type ===
-  prompt +=
-    "\n\nTRƯỚC KHI VIẾT, hãy tự xác định loại nội dung (tin tức/ý kiến cá nhân/review sản phẩm/hướng dẫn/câu chuyện) và điều chỉnh giọng văn phù hợp.";
-
-  if (baseType === "summary") {
-    prompt +=
-      "\n- Tiêu đề (dòng đầu tiên) viết bình thường, hệ thống sẽ tự động viết hoa.";
-  }
-
-  // Add custom instructions if provided
-  if (customInstructions) {
-    prompt += "\n\nYÊU CẦU BỔ SUNG:\n" + customInstructions;
-  }
-
-  // Add language instruction
-  if (lang === "vi") {
-    prompt +=
-      "\n- Luôn trả lời bằng tiếng Việt, dịch nếu bài viết bằng ngôn ngữ khác.";
-  } else if (lang === "en") {
-    prompt +=
-      "\n- Always respond in English, translate if the post is in another language.";
-  } else {
-    prompt +=
-      "\n- Nếu bài viết bằng tiếng Anh hoặc ngôn ngữ khác tiếng Việt, dịch tóm tắt sang tiếng Việt. Nếu bằng tiếng Việt, giữ nguyên.";
-  }
-
-  return prompt;
-}
-
 // === PORT-BASED STREAMING ===
+if (chrome?.runtime?.onConnect) {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "summarize-stream") return;
   const controller = new AbortController();
@@ -781,6 +322,8 @@ chrome.runtime.onConnect.addListener((port) => {
         msg.postTitle,
         msg.postSource,
         msg.agentMode,
+        msg.tone || null,
+        msg.preferredProvider || null,
       );
       if (result && result.error)
         port.postMessage({ action: "error", error: result.error });
@@ -804,10 +347,37 @@ chrome.runtime.onConnect.addListener((port) => {
 
   port.onDisconnect.addListener(() => controller.abort());
 });
+} // end if (chrome?.runtime?.onConnect)
 
 // === FALLBACK: non-streaming for test/context menu ===
+if (chrome?.runtime?.onMessage) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (sender.id && sender.id !== chrome.runtime.id) {
+    console.warn("[FeedWriter] Rejected message from untrusted sender:", sender.id);
+    return false;
+  }
+
+  const sensitiveActions = new Set(["summarize", "fetch-image", "agent_eval", "agent_eval_summary"]);
+  if (sensitiveActions.has(request.action) && !sender.id) {
+    console.warn("[FeedWriter] Rejected sensitive message without extension sender id");
+    sendResponse({ error: "Untrusted sender" });
+    return true;
+  }
+
   if (request.action === "ping") {
+    sendResponse({ ok: true });
+    return true;
+  }
+  // === AGENT POSTED — show browser notification ===
+  if (request.action === "agent-posted") {
+    const preview = (request.preview || "").substring(0, 80);
+    chrome.notifications.create("agent-posted-" + Date.now(), {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: "FeedWriter Agent đã đăng bài ✓",
+      message: preview + (preview.length >= 80 ? "…" : ""),
+      priority: 1,
+    });
     sendResponse({ ok: true });
     return true;
   }
@@ -885,51 +455,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true;
   }
-  // === AI REVIEW ===
-  if (request.action === "ai-review") {
-    reviewTodayHistory()
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ error: e.message }));
-    return true;
-  }
-  // === GET AI REVIEW RESULTS ===
-  if (request.action === "get-ai-review") {
-    chrome.storage.local.get("aiReview", (data) => {
-      sendResponse(data.aiReview || null);
-    });
-    return true;
-  }
-  // === EXPORT DTCN JSON ===
-  if (request.action === "export-dtcn") {
-    const items = request.items || [];
-    const exported = exportDtcnJson(items);
-    sendResponse({ success: true, data: exported });
-    return true;
-  }
-  // === SET/CLEAR AUTO REVIEW ALARM ===
-  if (request.action === "set-review-alarm") {
-    const hour = request.hour || 18;
-    const minute = request.minute || 0;
-    // Calculate delay to next occurrence
-    const now = new Date();
-    const target = new Date();
-    target.setHours(hour, minute, 0, 0);
-    if (target <= now) target.setDate(target.getDate() + 1);
-    const delayMs = target - now;
-    chrome.alarms.create("daily-ai-review", {
-      delayInMinutes: delayMs / 60000,
-      periodInMinutes: 24 * 60,
-    });
-    chrome.storage.local.set({ reviewAlarm: { hour, minute, enabled: true } });
-    sendResponse({ success: true });
-    return true;
-  }
-  if (request.action === "clear-review-alarm") {
-    chrome.alarms.clear("daily-ai-review");
-    chrome.storage.local.set({ reviewAlarm: { enabled: false } });
-    sendResponse({ success: true });
-    return true;
-  }
   // === TRANSLATE WORD ===
   if (request.action === "translate-word" && request.word) {
     translateWord(request.word)
@@ -948,18 +473,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   // === FETCH IMAGE AS BASE64 (CORS Bypass) ===
+  // Used by fetchImageBlob() in content.js to bypass cross-origin canvas taint.
+  // Timeout 20s (ảnh Facebook thường < 2MB, 20s đủ; 30s quá dài cho parallel fetch)
   if (request.action === "fetch-image") {
-    fetchWithTimeout(request.url, {}, 30000)
-      .then((res) => res.blob())
+    const url = request.url;
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch (_) {
+      sendResponse({ error: "Invalid URL format" });
+      return true;
+    }
+    if (parsedUrl.protocol !== "https:") {
+      sendResponse({ error: "Only HTTPS URLs allowed" });
+      return true;
+    }
+    fetchWithTimeout(url, {
+      credentials: "omit",
+      referrer: "",
+      referrerPolicy: "no-referrer",
+    }, 20000)
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.blob();
+      })
       .then((blob) => {
+        // Reject empty/invalid blobs
+        if (!blob || blob.size < 100) {
+          sendResponse({ error: "Empty or invalid image" });
+          return;
+        }
+        // Reject quá lớn (Facebook upload limit ~10MB)
+        if (blob.size > 12 * 1024 * 1024) {
+          sendResponse({ error: "Image too large (>12MB)" });
+          return;
+        }
         const reader = new FileReader();
-        reader.onloadend = () => sendResponse({ base64: reader.result });
+        reader.onloadend = () => sendResponse({ base64: reader.result, size: blob.size, type: blob.type });
+        reader.onerror = () => sendResponse({ error: "FileReader failed" });
         reader.readAsDataURL(blob);
       })
-      .catch((e) => sendResponse({ error: e.message }));
+      .catch((e) => sendResponse({ error: e.message || "fetch failed" }));
     return true;
   }
 });
+} // end if (chrome?.runtime?.onMessage)
 
 // === HEURISTIC SCORING (thay thế AI eval để tiết kiệm API call) ===
 // Đánh giá nhanh dựa trên keywords, patterns, độ dài — không cần gọi AI
@@ -1362,6 +920,7 @@ function validateInput(text) {
 
 // N-gram overlap: detect if output copies too much from source
 function computeNgramOverlap(source, output, n = 4) {
+  if (!source || !output) return 0;
   const normalize = (s) =>
     s
       .toLowerCase()
@@ -1455,10 +1014,29 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 4. Repetition detection
+  // 4. Repetition detection + auto-dedup
   const repRate = detectRepetition(processed);
   if (repRate > 0.3) {
-    issues.push("Output có nhiều câu lặp lại.");
+    // Auto-fix: remove duplicate sentences
+    const sentParts = processed.split(/([.!?。]\s*)/);
+    const seen = new Set();
+    const deduped = [];
+    for (let i = 0; i < sentParts.length; i += 2) {
+      const s = sentParts[i];
+      const punct = sentParts[i + 1] || "";
+      const key = s.toLowerCase().replace(/\s+/g, " ").trim();
+      if (key.length < 10 || !seen.has(key)) {
+        seen.add(key);
+        deduped.push(s + punct);
+      }
+    }
+    const dedupedText = deduped.join("").trim();
+    if (dedupedText !== processed) {
+      processed = dedupedText;
+      issues.push("Đã xóa câu lặp lại.");
+    } else {
+      issues.push("Output có nhiều câu lặp lại.");
+    }
   }
 
   // 5. Clean formatting artifacts
@@ -1468,17 +1046,28 @@ function postProcessOutput(output, sourceText, type) {
   processed = processed
     .replace(/^(tóm tắt|summary|status|review|affiliate)\s*[:：]\s*/i, "")
     .trim();
+  // Strip "Đoạn 1:", "Đoạn 2:" labels that AI copies from format example
+  processed = processed.replace(/^Đoạn\s*\d+\s*[:：]\s*/gim, "");
+  // Normalize "*** Giải thích" → "**Giải thích" (old prompt format)
+  processed = processed.replace(/^\*{3}\s*/gm, "**");
 
-  // Viết hoa toàn bộ dòng tiêu đề đầu tiên
+  // Xử lý tiêu đề dòng đầu tiên
   if (type && type.startsWith("summary")) {
     const lines = processed.split("\n");
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].trim().length > 0) {
+        // Strip ** bold markdown nếu AI vẫn trả về (prompt mới yêu cầu không dùng **)
+        lines[i] = lines[i].replace(/^\*\*(.+?)\*\*$/, "$1");
+        lines[i] = lines[i].replace(/^\*\*(.+)$/, "$1");
+        lines[i] = lines[i].replace(/^(.+)\*\*$/, "$1");
+        // Viết hoa toàn bộ tiêu đề
         lines[i] = lines[i].toUpperCase();
         break;
       }
     }
     processed = lines.join("\n");
+    // Đảm bảo chỉ có ĐÚNG 1 dòng trống (\n\n) sau tiêu đề và giữa các đoạn
+    processed = processed.replace(/\n{3,}/g, "\n\n");
   }
 
   // 6. VnReview spelling rules auto-fix
@@ -1501,7 +1090,47 @@ function postProcessOutput(output, sourceText, type) {
     (m, mo) => "tháng " + mo.charAt(0).toUpperCase() + mo.slice(1),
   );
 
-  // 7. Fix VND long format → short format (44.990.000 đồng → gần 45 triệu đồng)
+  // 7. Brand name capitalization — fix lowercase brand names in body text.
+  // Applied before title-uppercase step so the title still gets all-caps.
+  // Only fix in body (after first line) to avoid fighting with toUpperCase().
+  const titleEnd = processed.indexOf("\n");
+  if (titleEnd > 0) {
+    const title = processed.slice(0, titleEnd);
+    let body = processed.slice(titleEnd);
+    const brandFixes = [
+      [/\bchrome\b/gi, "Chrome"],
+      [/\bfirebase\b/gi, "Firebase"],
+      [/\bgoogle\b/gi, "Google"],
+      [/\bfacebook\b/gi, "Facebook"],
+      [/\binstagram\b/gi, "Instagram"],
+      [/\byoutube\b/gi, "YouTube"],
+      [/\btiktok\b/gi, "TikTok"],
+      [/\bwhatsapp\b/gi, "WhatsApp"],
+      [/\btwitter\b/gi, "Twitter"],
+      [/\bwindows\b/gi, "Windows"],
+      [/\bmacos\b/gi, "macOS"],
+      [/\b(?<![a-z])ios\b/gi, "iOS"],
+      [/\bandroid\b/gi, "Android"],
+      [/\biphone\b/gi, "iPhone"],
+      [/\bipad\b/gi, "iPad"],
+      [/\bapple\b/gi, "Apple"],
+      [/\bmicrosoft\b/gi, "Microsoft"],
+      [/\bopenai\b/gi, "OpenAI"],
+      [/\bchatgpt\b/gi, "ChatGPT"],
+      [/\bclaude\b/gi, "Claude"],
+      [/\bgemini\b/gi, "Gemini"],
+      [/\bgpt-(\d)/gi, "GPT-$1"],
+      [/\blinkedin\b/gi, "LinkedIn"],
+      [/\bpaypal\b/gi, "PayPal"],
+      [/\bspotify\b/gi, "Spotify"],
+      [/\bnetflix\b/gi, "Netflix"],
+      [/\bamazon\b/gi, "Amazon"],
+    ];
+    for (const [re, fix] of brandFixes) body = body.replace(re, fix);
+    processed = title + body;
+  }
+
+  // 8. Fix VND long format → short format (44.990.000 đồng → gần 45 triệu đồng)
   processed = processed.replace(
     /(\d{1,3})\.(\d{3})\.(\d{3})\s*(?:đồng|VND|vnđ|VNĐ)/gi,
     (match, a, b, c) => {
@@ -1519,7 +1148,7 @@ function postProcessOutput(output, sourceText, type) {
     },
   );
 
-  // 8. Remove empty lead-in sentences at the beginning
+  // 9. Remove empty lead-in sentences at the beginning
   const leadInPatterns = [
     /^[^\n.!?]*(?:mình|tôi|mình)\s+(?:vừa|mới|đã)\s+(?:đọc|xem|thấy|nghe|biết)\s+(?:được|thấy|về)?\s*[^\n.!?]*[.!?]\s*/i,
     /^(?:gần đây|mới đây|dạo gần đây|thời gian gần đây)[,.]?\s*[^\n.!?]*[.!?]\s*/i,
@@ -1534,7 +1163,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 9. Hallucination detection: check if output contains numbers not in source
+  // 10. Hallucination detection: check if output contains numbers not in source
   if (sourceText && sourceText.length > 50) {
     const sourceNums = new Set(
       (sourceText.match(/\d[\d.,]*\d|\d+/g) || []).map((n) =>
@@ -1556,7 +1185,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 10. Detect "nói xạo" - writing as if personally experienced when sharing others' content
+  // 11. Detect "nói xạo" - writing as if personally experienced when sharing others' content
   const fakeExperiencePatterns = [
     /\b(?:mình|tôi)\s+(?:vừa|đã|mới)\s+(?:thử|test|dùng|tạo|làm|mua|cài|nâng cấp|update)\b/i,
     /\b(?:mình|tôi)\s+(?:thử|test|dùng)\s+(?:rồi|xong|thấy)\b/i,
@@ -1575,7 +1204,7 @@ function postProcessOutput(output, sourceText, type) {
     }
   }
 
-  // 11. Detect excessive possessive "của bạn/mình/chúng ta"
+  // 12. Detect excessive possessive "của bạn/mình/chúng ta"
   const possessiveMatches =
     processed.match(/của\s+(?:bạn|mình|chúng ta)/gi) || [];
   if (possessiveMatches.length >= 3) {
@@ -1586,7 +1215,7 @@ function postProcessOutput(output, sourceText, type) {
     );
   }
 
-  // 12. Quality score
+  // 13. Quality score
   let quality = "good";
   if (issues.some((i) => i.includes("fail") || i.includes("trống")))
     quality = "fail";
@@ -1609,6 +1238,8 @@ async function handleStream(
   postTitle = "",
   postSource = "",
   agentMode = false,
+  tone = null,
+  preferredProvider = null,
 ) {
   // === INPUT GUARDRAILS ===
   const inputCheck = validateInput(text);
@@ -1632,6 +1263,7 @@ async function handleStream(
     sourceUrl,
     postTitle,
     postSource,
+    tone,
   );
 
   // Agent mode: check if user prefers heuristic-only eval (skip AI scoring)
@@ -1642,7 +1274,7 @@ async function handleStream(
   // Nếu useHeuristicEval = true → bỏ qua, dùng heuristic sau khi có summary
   if (agentMode && !useHeuristicOnly) {
     systemPrompt +=
-      "\n\nAGENT MODE: Trước khi viết tóm tắt, chấm điểm bài theo tiêu chí sau:\n- 8-9: Tin AI hot (Claude/ChatGPT/Gemini/Anthropic/OpenAI/DeepSeek ra tính năng mới, đăng ký AI miễn phí/giá rẻ), sự cố bảo mật nghiêm trọng (data breach, ransomware, lỗ hổng lớn)\n- 7: Sản phẩm tech nổi bật, startup gọi vốn lớn, lập trình/tool dev quan trọng\n- 4-6: Tech liên quan nhưng không nổi bật\n- 1-3: Status cá nhân, drama, quảng cáo bán hàng, ẩm thực, thể thao, giải trí không liên quan tech\nĐặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là 1-9), xuống dòng rồi viết tóm tắt. Ví dụ:\n[SCORE:8]\n**Tiêu đề hook**\nNội dung tóm tắt...";
+      "\n\nAGENT MODE: Trước khi viết tóm tắt, chấm điểm bài theo tiêu chí sau:\n- 8-9: Tin AI hot (Claude/ChatGPT/Gemini/Anthropic/OpenAI/DeepSeek ra tính năng mới, đăng ký AI miễn phí/giá rẻ), sự cố bảo mật nghiêm trọng (data breach, ransomware, lỗ hổng lớn)\n- 7: Sản phẩm tech nổi bật, startup gọi vốn lớn, lập trình/tool dev quan trọng\n- 4-6: Tech liên quan nhưng không nổi bật\n- 1-3: Status cá nhân, drama, quảng cáo bán hàng, ẩm thực, thể thao, giải trí không liên quan tech\nĐặt tag [SCORE:N] ở DÒNG ĐẦU TIÊN (N là 1-9), xuống dòng rồi viết tóm tắt (tiêu đề viết bình thường, hệ thống tự viết hoa). Ví dụ:\n[SCORE:8]\nClaude 4 Opus ra mắt: vượt GPT-4o về lập trình\n\nNội dung tóm tắt...";
   }
   const streamFns = {
     groq: callGroqStream,
@@ -1659,7 +1291,7 @@ async function handleStream(
     if (signal.aborted) return { error: "Đã hủy." };
 
     // Get best available key across all providers
-    const keyInfo = await getAvailableKey();
+    const keyInfo = await getAvailableKey(attempt === 0 ? preferredProvider : null);
     if (!keyInfo.key) {
       if (keyInfo.noKeys)
         return { error: "Chưa có API Key. Thêm ở tab API Keys." };
@@ -1791,113 +1423,6 @@ async function saveHistory(
 }
 
 // reviewTodayHistory uses getAvailableKey with retry on rate limit
-async function reviewTodayHistory() {
-  const localData = await chrome.storage.local.get("history");
-  const history = localData.history || [];
-  const today = new Date().toISOString().slice(0, 10);
-  const todayItems = history.filter((h) => h.date && h.date.startsWith(today));
-
-  if (todayItems.length === 0)
-    return { error: "Chưa có bài tóm tắt nào hôm nay." };
-
-  const MAX_ITEMS = 20;
-  const cappedItems = todayItems.slice(0, MAX_ITEMS);
-
-  const itemsList = cappedItems
-    .map((h, i) => {
-      const title = (h.postTitle || "N/A").substring(0, 80);
-      const summary = (h.summary || "").substring(0, 200);
-      return `[${i}] Nguồn: ${h.site} | Tác giả: ${h.author || "N/A"} | Tiêu đề: ${title}\nTóm tắt: ${summary}\nLink: ${h.sourceUrl || "N/A"}`;
-    })
-    .join("\n\n");
-
-  const systemPrompt = `Bạn là biên tập viên tin công nghệ. Nhiệm vụ: đánh giá danh sách bài tóm tắt trong ngày và chọn ra những bài HAY NHẤT để đăng "Điểm tin công nghệ".
-
-Tiêu chí chọn:
-- Tin nóng, xu hướng, có giá trị thông tin cao
-- Đủ nội dung để viết bài ngắn (150-350 chữ)
-- Có link nguồn (ưu tiên)
-- Không trùng lặp chủ đề
-- Ưu tiên tin AI, smartphone, bảo mật, startup, sản phẩm mới
-
-Trả về ĐÚNG JSON array, mỗi phần tử là index của bài được chọn kèm lý do ngắn:
-[{"index": 0, "score": 85, "reason": "Tin AI mới ra mắt, hot"}, ...]
-
-CHỈ trả về JSON, không giải thích thêm.`;
-
-  const nonStreamFns = {
-    groq: callGroqNonStream,
-    gemini: callGeminiNonStream,
-    cerebras: callCerebrasNonStream,
-    sambanova: callSambanovaNonStream,
-    openrouter: callOpenrouterNonStream,
-  };
-
-  // Retry up to 3 times with different keys/providers
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const keyInfo = await getAvailableKey();
-    if (!keyInfo.key) {
-      if (keyInfo.noKeys)
-        return { error: "Chưa có API Key. Thêm ở tab API Keys." };
-      if (keyInfo.allLimited)
-        return {
-          error:
-            "Tất cả key bị rate limit. Thử lại sau ~" +
-            keyInfo.waitMinutes +
-            " phút.",
-        };
-      return { error: "Không tìm được key khả dụng." };
-    }
-
-    const callFn = nonStreamFns[keyInfo.provider] || callGroqNonStream;
-    try {
-      const result = await callFn(keyInfo.key, itemsList, systemPrompt);
-      if (!result) return { error: "AI không phản hồi." };
-
-      const jsonMatch = result.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) return { error: "AI phản hồi không hợp lệ." };
-
-      const picks = JSON.parse(jsonMatch[0]);
-      const recommended = picks
-        .filter(
-          (p) =>
-            typeof p.index === "number" &&
-            p.index >= 0 &&
-            p.index < todayItems.length,
-        )
-        .map((p) => ({
-          ...todayItems[p.index],
-          aiScore: p.score || 0,
-          aiReason: p.reason || "",
-        }));
-
-      await chrome.storage.local.set({
-        aiReview: {
-          date: today,
-          items: recommended,
-          reviewedAt: new Date().toISOString(),
-        },
-      });
-
-      return { success: true, count: recommended.length, items: recommended };
-    } catch (e) {
-      if (
-        e.message &&
-        (e.message.includes("429") || e.message.toLowerCase().includes("rate"))
-      ) {
-        await markKeyRateLimited(keyInfo.key, parseRetryAfter(e.message));
-        continue;
-      }
-      return { error: "Lỗi AI Review: " + e.message };
-    }
-  }
-  // Track error
-  telemetryData.errors++;
-  saveTelemetry();
-  trackEvent('summary_error', { reason: 'all_keys_rate_limited' });
-  return { error: "Tất cả key bị rate limit." };
-}
-
 // Generic streaming API call function
 async function callStreamAPI(config) {
   const {
@@ -2008,7 +1533,9 @@ function formatSourceName(site, author) {
 
 // === ALARM: Auto review ===
 // Re-register alarm on SW startup if previously enabled
+if (chrome?.runtime?.onStartup) {
 chrome.runtime.onStartup.addListener(async () => {
+  await migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed (onStartup):', e));
   const today = new Date().toDateString();
   const data = await chrome.storage.local.get([
     "dailyCount",
@@ -2019,301 +1546,18 @@ chrome.runtime.onStartup.addListener(async () => {
     chrome.action.setBadgeText({ text: (data.dailyCount || 0).toString() });
     chrome.action.setBadgeBackgroundColor({ color: "#6c5ce7" });
   }
-  // Re-create alarm if it was enabled
-  const alarm = data.reviewAlarm;
-  if (alarm && alarm.enabled) {
-    const existing = await chrome.alarms.get("daily-ai-review");
-    if (!existing) {
-      const now = new Date();
-      const target = new Date();
-      target.setHours(alarm.hour, alarm.minute, 0, 0);
-      if (target <= now) target.setDate(target.getDate() + 1);
-      chrome.alarms.create("daily-ai-review", {
-        delayInMinutes: (target - now) / 60000,
-        periodInMinutes: 24 * 60,
-      });
-    }
-  }
 
   ensureKeepAliveAlarm();
 });
+} // end if (chrome?.runtime?.onStartup)
 
+if (chrome?.alarms?.onAlarm) {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "keep-alive") {
     logger.debug("Keep-alive ping");
     ensureKeepAliveAlarm();
     return;
   }
-  if (alarm.name === "daily-ai-review") {
-    try {
-      const result = await reviewTodayHistory();
-      if (result.success && result.count > 0) {
-        chrome.notifications.create("ai-review-done", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter — Đề xuất tin hay",
-          message: `AI đã chọn ${result.count} tin hay. Mở extension để xem.`,
-        });
-      } else if (result.error) {
-        chrome.notifications.create("ai-review-error", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter — Lỗi đề xuất",
-          message: result.error,
-        });
-      } else {
-        // No items found today
-        chrome.notifications.create("ai-review-empty", {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "FeedWriter",
-          message: "Chưa có bài tóm tắt nào hôm nay để đề xuất.",
-        });
-      }
-    } catch (e) {
-      chrome.notifications.create("ai-review-crash", {
-        type: "basic",
-        iconUrl: "icons/icon128.png",
-        title: "FeedWriter — Lỗi",
-        message: "Lỗi khi chạy đề xuất: " + e.message,
-      });
-    }
-  }
 });
+} // end if (chrome?.alarms?.onAlarm)
 
-// === STREAMING HELPERS ===
-async function processStream(response, port, signal, parseLine) {
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let fullText = "";
-  let buffer = "";
-  while (true) {
-    if (signal.aborted) {
-      reader.cancel();
-      return { error: "Đã hủy." };
-    }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop();
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data: ") && trimmed !== "data:") continue;
-      const dataStr = trimmed.replace(/^data:\s*/, "");
-      if (dataStr === "[DONE]" || !dataStr) continue;
-      try {
-        const token = parseLine(JSON.parse(dataStr));
-        if (token) {
-          fullText += token;
-          try {
-            port.postMessage({ action: "chunk", text: token, full: fullText });
-          } catch (_) {}
-        }
-      } catch (e) {}
-    }
-  }
-  return { summary: fullText };
-}
-
-async function callGroqStream(
-  apiKey,
-  text,
-  systemPrompt,
-  port,
-  signal,
-  maxTokens = 512,
-) {
-  return callStreamAPI({
-    url: "https://api.groq.com/openai/v1/chat/completions",
-    headers: { Authorization: "Bearer " + apiKey },
-    body: {
-      model: "llama-3.3-70b-versatile",
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: text },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    },
-    extractFn: (d) => d.choices?.[0]?.delta?.content || "",
-    port,
-    signal,
-    maxTokens,
-    provider: "Groq",
-  });
-}
-
-async function callGeminiStream(
-  apiKey,
-  text,
-  systemPrompt,
-  port,
-  signal,
-  maxTokens = 512,
-) {
-  return callStreamAPI({
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=" + apiKey,
-    headers: {},
-    body: {
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: text }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
-    },
-    extractFn: (d) => d.candidates?.[0]?.content?.parts?.[0]?.text || "",
-    port,
-    signal,
-    maxTokens,
-    provider: "Gemini",
-  });
-}
-
-// === CEREBRAS: OpenAI-compatible API, ultra-fast inference ===
-async function callCerebrasStream(
-  apiKey,
-  text,
-  systemPrompt,
-  port,
-  signal,
-  maxTokens = 512,
-) {
-  return callStreamAPI({
-    url: "https://api.cerebras.ai/v1/chat/completions",
-    headers: { Authorization: "Bearer " + apiKey },
-    body: {
-      model: "llama-3.3-70b",
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: text },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    },
-    extractFn: (d) => d.choices?.[0]?.delta?.content || "",
-    port,
-    signal,
-    maxTokens,
-    provider: "Cerebras",
-  });
-}
-
-async function callCerebrasNonStream(apiKey, userMessage, systemPrompt) {
-  return callNonStream(
-    "https://api.cerebras.ai/v1/chat/completions",
-    { Authorization: "Bearer " + apiKey },
-    {
-      model: "llama-3.3-70b",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 1024,
-      temperature: 0.3,
-    },
-    (d) => d?.choices?.[0]?.message?.content,
-  );
-}
-
-// === SAMBANOVA: OpenAI-compatible API, fast open-source models ===
-async function callSambanovaStream(
-  apiKey,
-  text,
-  systemPrompt,
-  port,
-  signal,
-  maxTokens = 512,
-) {
-  return callStreamAPI({
-    url: "https://api.sambanova.ai/v1/chat/completions",
-    headers: { Authorization: "Bearer " + apiKey },
-    body: {
-      model: "Meta-Llama-3.3-70B-Instruct",
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: text },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    },
-    extractFn: (d) => d.choices?.[0]?.delta?.content || "",
-    port,
-    signal,
-    maxTokens,
-    provider: "SambaNova",
-  });
-}
-
-async function callSambanovaNonStream(apiKey, userMessage, systemPrompt) {
-  return callNonStream(
-    "https://api.sambanova.ai/v1/chat/completions",
-    { Authorization: "Bearer " + apiKey },
-    {
-      model: "Meta-Llama-3.3-70B-Instruct",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 1024,
-      temperature: 0.3,
-    },
-    (d) => d?.choices?.[0]?.message?.content,
-  );
-}
-
-// === OPENROUTER: Unified API gateway, many free models ===
-async function callOpenrouterStream(
-  apiKey,
-  text,
-  systemPrompt,
-  port,
-  signal,
-  maxTokens = 512,
-) {
-  return callStreamAPI({
-    url: "https://openrouter.ai/api/v1/chat/completions",
-    headers: {
-      Authorization: "Bearer " + apiKey,
-      "HTTP-Referer": "https://github.com/anlvdt/fb-post-summarizer",
-      "X-Title": "FeedWriter",
-    },
-    body: {
-      model: "meta-llama/llama-3.3-70b-instruct",
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: text },
-      ],
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    },
-    extractFn: (d) => d.choices?.[0]?.delta?.content || "",
-    port,
-    signal,
-    maxTokens,
-    provider: "OpenRouter",
-  });
-}
-
-async function callOpenrouterNonStream(apiKey, userMessage, systemPrompt) {
-  return callNonStream(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      Authorization: "Bearer " + apiKey,
-      "HTTP-Referer": "https://github.com/anlvdt/fb-post-summarizer",
-      "X-Title": "FeedWriter",
-    },
-    {
-      model: "meta-llama/llama-3.3-70b-instruct",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 1024,
-      temperature: 0.3,
-    },
-    (d) => d?.choices?.[0]?.message?.content,
-  );
-}

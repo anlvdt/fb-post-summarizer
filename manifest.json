@@ -31,6 +31,7 @@
     {
       "matches": [
         "https://www.facebook.com/*",
+        "https://web.facebook.com/*",
         "https://m.facebook.com/*",
         "https://*.threads.net/*",
         "https://x.com/*",
@@ -38,13 +39,14 @@
         "https://www.linkedin.com/*",
         "https://www.reddit.com/*"
       ],
-      "js": ["utils.js", "content.js", "auto-pilot.js"],
+      "js": ["utils.js", "content-dom.js", "content-composer.js", "content.js", "auto-pilot.js"],
       "css": ["content.css"],
       "run_at": "document_end"
     },
     {
       "matches": [
         "https://www.facebook.com/*",
+        "https://web.facebook.com/*",
         "https://m.facebook.com/*",
         "https://*.threads.net/*",
         "https://x.com/*",

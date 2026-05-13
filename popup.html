@@ -11,81 +11,128 @@
       <h1>FeedWriter</h1>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="settings">Cài đặt</button>
-      <button class="tab" data-tab="apikeys">Keys</button>
-      <button class="tab" data-tab="history">Lịch sử</button>
-      <button class="tab" data-tab="review">Tin hay</button>
-      <button class="tab" data-tab="about">About</button>
+    <div class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" data-tab="settings">Cài đặt</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="apikeys">Keys</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="history">Lịch sử</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="about">About</button>
     </div>
 
+    
     <!-- Settings Tab -->
     <div class="tab-content active" id="tab-settings">
-      <div class="field">
-        <label for="outputLang">Ngôn ngữ tóm tắt</label>
-        <select id="outputLang">
-          <option value="auto">Tự động (Việt nếu bài tiếng Anh)</option>
-          <option value="vi">Luôn tiếng Việt</option>
-          <option value="en">Luôn tiếng Anh</option>
-        </select>
+      <div class="accordion">
+        <div class="accordion-header active" role="button" aria-expanded="true" tabindex="0">Tùy chỉnh Tóm tắt</div>
+        <div class="accordion-content" style="display: block;">
+          <div class="field">
+            <label for="outputLang">Ngôn ngữ tóm tắt</label>
+            <select id="outputLang">
+              <option value="auto">Tự động (Việt nếu bài tiếng Anh)</option>
+              <option value="vi">Luôn tiếng Việt</option>
+              <option value="en">Luôn tiếng Anh</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="summaryLength">Độ dài kết quả</label>
+            <select id="summaryLength">
+              <option value="short">Ngắn gọn (1-2 câu)</option>
+              <option value="medium" selected>Vừa phải (3-5 câu)</option>
+              <option value="long">Chi tiết (nhiều hơn)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="promptStyle">Phong cách tóm tắt</label>
+            <select id="promptStyle">
+              <option value="default">Mặc định</option>
+              <option value="summary_bullet">Bullet Points</option>
+              <option value="summary_detailed">Chi tiết có cấu trúc</option>
+              <option value="summary_structured">Giữ cấu trúc gốc</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="minLength">Độ dài tối thiểu (ký tự)</label>
+            <input type="number" id="minLength" value="400" min="100" max="5000" step="100">
+          </div>
+        </div>
       </div>
-      <div class="field">
-        <label for="summaryLength">Độ dài kết quả</label>
-        <select id="summaryLength">
-          <option value="short">Ngắn gọn (1-2 câu)</option>
-          <option value="medium" selected>Vừa phải (3-5 câu)</option>
-          <option value="long">Chi tiết (nhiều hơn)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="promptStyle">Phong cách tóm tắt</label>
-        <select id="promptStyle">
-          <option value="default">Mặc định</option>
-          <option value="summary_bullet">Bullet Points</option>
-          <option value="summary_detailed">Chi tiết có cấu trúc</option>
-          <option value="summary_structured">Giữ cấu trúc gốc</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
-        <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu, bỏ ví dụ..."></textarea>
-      </div>
-      <div class="field">
-        <label for="sourceTemplate">Template nguồn (Đăng Status)</label>
-        <input type="text" id="sourceTemplate" placeholder="Nguồn: {platform} {author} (Link full dưới cmt)">
-        <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page</div>
-      </div>
-      <div class="field">
-        <label for="minLength">Độ dài tối thiểu (ký tự)</label>
-        <input type="number" id="minLength" value="400" min="100" max="5000" step="100">
-      </div>
-      <div class="field">
-        <label for="customSummaryPrompt">Prompt tóm tắt (để trống = mặc định)</label>
-        <textarea id="customSummaryPrompt" rows="2" placeholder="VD: Tóm tắt chi tiết hơn..."></textarea>
-      </div>
-      <div class="field">
-        <label for="customAffPrompt">Prompt Affiliate</label>
-        <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
-      </div>
-      <div class="field">
-        <label class="checkbox-label">
-          <input type="checkbox" id="useHeuristicEval">
-          <span>Dùng heuristic thay AI eval (Agent mode)</span>
-        </label>
-        <div class="field-hint">Bỏ qua bước AI chấm điểm, dùng keyword matching để quyết định đăng/bỏ. Tiết kiệm 1 API call/bài nhưng kém chính xác hơn.</div>
-      </div>
-      <button id="saveBtn" class="btn btn-primary">Lưu cài đặt</button>
-      <div id="status" class="status"></div>
 
-      <!-- Debug Panel (Test Mode) -->
+      <div class="accordion">
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">Auto-pilot & Đăng bài</div>
+        <div class="accordion-content">
+          <div class="field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="hideAffiliatePosts">
+              <span>Ẩn bài viết có link Affiliate</span>
+            </label>
+            <div class="field-hint">Tự động ẩn các bài viết chứa link Shopee, Lazada, Tiki, TikTok Shop và các affiliate link khác.</div>
+          </div>
+          <div class="field">
+            <label for="sourceTemplate">Template nguồn (Đăng Status)</label>
+            <input type="text" id="sourceTemplate" placeholder="• Nguồn bài viết: {platform} {author} {source}\n  {link}">
+            <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page</div>
+          </div>
+          <div class="field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="useHeuristicEval">
+              <span>Dùng heuristic thay AI eval (Agent mode)</span>
+            </label>
+            <div class="field-hint">Bỏ qua bước AI chấm điểm, dùng keyword matching để quyết định đăng/bỏ. Tiết kiệm 1 API call/bài.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion">
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">Nâng cao</div>
+        <div class="accordion-content">
+          <div class="field">
+            <label for="adDisplayMode">Hiển thị bài quảng cáo</label>
+            <select id="adDisplayMode">
+              <option value="hide">Ẩn hoàn toàn</option>
+              <option value="collapse" selected>Thu gọn (có lý do)</option>
+              <option value="mark">Chỉ đánh dấu</option>
+            </select>
+            <div class="field-hint">Cách hiển thị bài viết được phát hiện là quảng cáo.</div>
+          </div>
+          <div class="field">
+            <label for="affiliateDisplayMode">Hiển thị bài affiliate</label>
+            <select id="affiliateDisplayMode">
+              <option value="hide">Ẩn hoàn toàn</option>
+              <option value="collapse" selected>Thu gọn (có lý do)</option>
+              <option value="mark">Chỉ đánh dấu</option>
+            </select>
+            <div class="field-hint">Cách hiển thị bài viết chứa link affiliate (Shopee, Lazada, TikTok Shop...).</div>
+          </div>
+          <div class="field">
+            <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
+            <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu, bỏ ví dụ..."></textarea>
+          </div>
+          <div class="field">
+            <label for="customSummaryPrompt">Prompt tóm tắt (để trống = mặc định)</label>
+            <textarea id="customSummaryPrompt" rows="2" placeholder="VD: Tóm tắt chi tiết hơn..."></textarea>
+          </div>
+          <div class="field">
+            <label for="customAffPrompt">Prompt Affiliate</label>
+            <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
+          </div>
+          <div class="field">
+            <label for="blockedDomains">Tắt extension trên (mỗi dòng 1 domain)</label>
+            <textarea id="blockedDomains" rows="3" placeholder="VD:&#10;groups.facebook.com&#10;x.com/notifications"></textarea>
+            <div class="field-hint">Extension sẽ không hoạt động trên các URL chứa chuỗi này.</div>
+          </div>
+        </div>
+      </div>
+
+      <button id="saveBtn" class="btn btn-primary" style="margin-top:15px">Lưu cài đặt</button>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+
+<!-- Debug Panel (Test Mode) -->
       <div id="debugPanel" class="debug-panel" style="display:none;margin-top:20px;padding:15px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9;">
         <h4 style="margin:0 0 10px 0;color:#666;">🧪 Test Mode Debug</h4>
-        <button id="testBtn" class="btn btn-secondary" style="margin-right:10px;">Test kết nối</button>
+        <button id="debugTestBtn" class="btn btn-secondary" style="margin-right:10px;">Test kết nối</button>
         <button id="clearCacheBtn" class="btn btn-secondary">Clear Cache</button>
         <div id="debugInfo" style="margin-top:10px;font-size:12px;color:#666;"></div>
       </div>
     </div>
-
     <!-- API Keys Tab -->
     <div class="tab-content" id="tab-apikeys">
       <div class="field">
@@ -139,6 +186,17 @@
 
     <!-- History Tab -->
     <div class="tab-content" id="tab-history">
+      <!-- Agent Stats (Feature 7) -->
+      <div id="agentStatsBox" style="display:none;background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:#a8a0cc;">
+        <div style="font-weight:700;color:#c9b8ff;margin-bottom:8px;font-size:13px;">📊 Detection Stats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;line-height:1.6;">
+          <span>Bài đã quét: <b id="statPostsToday" style="color:#e5ddff;">–</b></span>
+          <span>Bài bị chặn: <b id="statPostsTotal" style="color:#e5ddff;">–</b></span>
+          <span>Hiện lại: <b id="statSkipped" style="color:#e5ddff;">–</b></span>
+          <span>Lý do chính: <b id="statLastPost" style="color:#e5ddff;">–</b></span>
+        </div>
+      </div>
+      <div id="postTimeSuggestBox" class="post-time-suggest" style="display:none"></div>
       <div id="historyList" class="history-list"></div>
       <div id="historyDetail" class="history-detail" style="display:none">
         <button id="historyBack" class="btn btn-secondary" style="margin-bottom:6px">← Quay lại</button>
@@ -150,32 +208,6 @@
         <button id="exportBtn" class="btn btn-secondary">Export JSON</button>
         <button id="exportMdBtn" class="btn btn-secondary">Export Markdown</button>
         <button id="clearBtn" class="btn btn-danger">Xóa lịch sử</button>
-      </div>
-    </div>
-
-    <!-- Review Tab -->
-    <div class="tab-content" id="tab-review">
-      <div class="review-section">
-        <button id="aiReviewBtn" class="btn btn-warm">AI Đề xuất tin hay</button>
-        <div id="reviewStatus" class="status" style="display:none"></div>
-        <div id="reviewResults" style="display:none">
-          <div class="review-header">
-            <span id="reviewCount"></span>
-            <label class="review-select-all"><input type="checkbox" id="selectAllReview" checked> Chọn tất cả</label>
-          </div>
-          <div id="reviewList" class="review-list"></div>
-          <button id="exportDtcnBtn" class="btn btn-accent">Export JSON cho DTCN-V2</button>
-        </div>
-      </div>
-      <div class="review-divider"></div>
-      <div class="review-section">
-        <label class="review-alarm-label">Tự động đề xuất hàng ngày</label>
-        <div class="review-alarm-row">
-          <input type="time" id="reviewTime" value="18:00" class="review-time-input">
-          <button id="setAlarmBtn" class="btn btn-secondary" style="width:auto;padding:5px 12px">Bật</button>
-          <button id="clearAlarmBtn" class="btn btn-danger" style="width:auto;padding:5px 12px">Tắt</button>
-        </div>
-        <div id="alarmStatus" class="review-alarm-status"></div>
       </div>
     </div>
 

@@ -90,94 +90,92 @@ themeObserver.observe(document.body, {
 });
 observers.push(themeObserver);
 
-// === AFFILIATE LINK DETECTION (uses unified engine from content-dom.js) ===
+// === AFFILIATE LINK DETECTION ===
+const AFFILIATE_DOMAINS = [
+  "shope.ee",
+  "shopee.vn",
+  "lazada.vn",
+  "tiki.vn",
+  "tiktok.com/@shop",
+  "sendo.vn",
+  "accesstrade.vn",
+  "go.isclix.com",
+  "invol.co",
+  "affiliate",
+  "/aff/",
+  "?aff=",
+  "&aff=",
+  "?ref=",
+  "&ref=",
+];
+
+const SHORTENER_DOMAINS = [
+  "bit.ly",
+  "tinyurl.com",
+  "cutt.ly",
+  "s.id",
+  "bom.so",
+  "rb.gy",
+  "shorturl.at",
+  "linktr.ee",
+  "beacons.ai",
+  "lnk.bio",
+  "solo.to",
+  "l.facebook.com/l.php",
+];
+
+const IMAGE_POST_SELECTORS = [
+  '[data-ad-rendering-role="image"] a[href]',
+  'a[href] img',
+  'a[href][target="_blank"]:has(img)',
+];
+
+function isOutboundOrShortenedLink(href) {
+  const u = href.toLowerCase();
+  if (SHORTENER_DOMAINS.some((d) => u.includes(d))) return true;
+  if (u.includes("l.facebook.com/l.php") || u.includes("?u=http")) return true;
+  return false;
+}
+
 const affiliatePostsHidden = new WeakSet();
 
-// Telemetry counters
-let telemetry = {
-  postsScanned: 0,
-  postsFlaggedAds: 0,
-  postsFlaggedAffiliate: 0,
-  topReasons: {},
-  falsePositiveProxy: 0,
-  lastResetDate: new Date().toDateString(),
-};
+function detectAffiliateLinks(postContainer) {
+  if (!postContainer) return false;
 
-// Load telemetry from storage
-chrome.storage.local.get(["fbsTelemetry"], (d) => {
-  if (d.fbsTelemetry) {
-    const today = new Date().toDateString();
-    if (d.fbsTelemetry.lastResetDate !== today) {
-      telemetry = { ...telemetry, lastResetDate: today };
-    } else {
-      telemetry = { ...telemetry, ...d.fbsTelemetry };
+  const links = postContainer.querySelectorAll('a[href]');
+  for (const link of links) {
+    const href = link.href.toLowerCase();
+    if (AFFILIATE_DOMAINS.some(domain => href.includes(domain))) return true;
+  }
+
+  const textContent = (postContainer.innerText || "").toLowerCase();
+  if (AFFILIATE_DOMAINS.some(domain => textContent.includes(domain))) return true;
+
+  // Pattern chính của case bạn gửi:
+  // bài có ảnh click-out + link shortener/outbound redirect
+  for (const selector of IMAGE_POST_SELECTORS) {
+    const imageAnchors = postContainer.querySelectorAll(selector);
+    for (const node of imageAnchors) {
+      const anchor = node.tagName === "A" ? node : node.closest("a[href]");
+      if (!anchor) continue;
+      const href = (anchor.href || "").toLowerCase();
+      if (!href) continue;
+      if (isOutboundOrShortenedLink(href)) return true;
     }
   }
-});
 
-function saveTelemetry() {
-  try {
-    chrome.storage.local.set({ fbsTelemetry: telemetry });
-  } catch (_) {}
+  return false;
 }
 
-// Display modes: hide, collapse, mark
-let adDisplayMode = "collapse";
-let affiliateDisplayMode = "collapse";
-
-chrome.storage.sync.get(["adDisplayMode", "affiliateDisplayMode"], (d) => {
-  if (d.adDisplayMode) adDisplayMode = d.adDisplayMode;
-  if (d.affiliateDisplayMode) affiliateDisplayMode = d.affiliateDisplayMode;
-});
-
-function _getReasonText(reason) {
-  const reasonMap = {
-    ads_about_link: "Link QC",
-    why_am_i_seeing: "Ad disclosure",
-    portal_label: "Nhãn tài trợ",
-    aria_label: "Quảng cáo",
-    sponsored_keyword: "Từ khóa SP",
-    affiliate_domain: "Link Affiliate",
-    shortener_link: "Short-link",
-    affiliate_param: "Aff param",
-    redirect_wrapper: "FB redirect",
-    affiliate_text: "Nội dung Aff",
-    affiliate_cta: "CTA Affiliate",
-  };
-  return reasonMap[reason] || reason;
-}
-
-function hideFlaggedPost(postContainer, evalResult, type) {
+function hideAffiliatePost(postContainer) {
   if (affiliatePostsHidden.has(postContainer)) return;
   affiliatePostsHidden.add(postContainer);
 
-  const displayMode = type === "sponsored" ? adDisplayMode : affiliateDisplayMode;
-  const reasonText = evalResult.reasons.map(_getReasonText).join(", ");
-  const confidence = evalResult.confidence;
-
-  if (displayMode === "hide") {
-    postContainer.style.display = "none";
-    return;
-  }
-
-  if (displayMode === "mark") {
-    postContainer.style.outline = "2px solid rgba(255, 107, 107, 0.5)";
-    postContainer.style.outlineOffset = "4px";
-    const badge = document.createElement("div");
-    badge.className = "fbs-mark-badge";
-    badge.textContent = `⚠️ ${type === "sponsored" ? "QC" : "Aff"} (${confidence}%)`;
-    badge.style.cssText = "position:absolute;top:8px;right:8px;padding:2px 8px;font-size:10px;background:rgba(255,107,107,0.9);color:#fff;border-radius:4px;z-index:100;";
-    postContainer.style.position = "relative";
-    postContainer.appendChild(badge);
-    return;
-  }
-
-  // Collapse mode (default)
+  // Add visual indicator before hiding
   const indicator = document.createElement("div");
   indicator.className = "fbs-affiliate-indicator";
   indicator.innerHTML =
-    `<span style="color:#ff6b6b;font-size:11px;font-weight:600;">🚫 ${type === "sponsored" ? "Quảng cáo" : "Affiliate"} đã ẩn</span>` +
-    `<span style="color:#888;font-size:10px;margin-left:8px;">(${reasonText} · ${confidence}%)</span>` +
+    '<span style="color:#ff6b6b;font-size:11px;font-weight:600;">🚫 Bài viết Affiliate đã ẩn</span>' +
     '<button class="fbs-affiliate-show" style="margin-left:8px;padding:2px 8px;font-size:10px;border-radius:4px;background:rgba(255,107,107,0.15);color:#ff6b6b;border:1px solid rgba(255,107,107,0.3);cursor:pointer;">Hiện</button>';
 
   const showBtn = indicator.querySelector(".fbs-affiliate-show");
@@ -186,8 +184,6 @@ function hideFlaggedPost(postContainer, evalResult, type) {
     postContainer.style.display = "";
     indicator.remove();
     affiliatePostsHidden.delete(postContainer);
-    telemetry.falsePositiveProxy++;
-    saveTelemetry();
   });
 
   postContainer.style.display = "none";
@@ -196,7 +192,6 @@ function hideFlaggedPost(postContainer, evalResult, type) {
 
 function scanAffiliatePosts() {
   if (!hideAffiliatePosts || SITE !== "facebook") return;
-  if (typeof window.fbsEvaluatePostSignals !== "function") return;
 
   const root = document.querySelector('div[role="main"]') || document.querySelector('div[id^="mount_0_0"]') || document.body;
   const candidates = [
@@ -206,7 +201,6 @@ function scanAffiliatePosts() {
 
   for (const article of candidates) {
     if (affiliatePostsHidden.has(article)) continue;
-    if (article.dataset.fbsEvaluated === "1") continue;
 
     // Skip nested articles (comments)
     let depth = 0;
@@ -218,27 +212,10 @@ function scanAffiliatePosts() {
     }
     if (depth >= 1) continue;
 
-    article.dataset.fbsEvaluated = "1";
-    telemetry.postsScanned++;
-
-    const evalResult = window.fbsEvaluatePostSignals(article);
-
-    if (evalResult.isSponsored) {
-      telemetry.postsFlaggedAds++;
-      for (const r of evalResult.reasons) {
-        telemetry.topReasons[r] = (telemetry.topReasons[r] || 0) + 1;
-      }
-      hideFlaggedPost(article, evalResult, "sponsored");
-    } else if (evalResult.isAffiliate) {
-      telemetry.postsFlaggedAffiliate++;
-      for (const r of evalResult.reasons) {
-        telemetry.topReasons[r] = (telemetry.topReasons[r] || 0) + 1;
-      }
-      hideFlaggedPost(article, evalResult, "affiliate");
+    if (detectAffiliateLinks(article)) {
+      hideAffiliatePost(article);
     }
   }
-
-  saveTelemetry();
 }
 
 // === SCAN LOGIC ===
@@ -1989,22 +1966,14 @@ function scan() {
   scanAffiliatePosts();
 }
 
-let scanDebounceTimer = null;
-let scanScheduled = false;
-const SCAN_DEBOUNCE_MS = 2000;
-
-function scheduleScan() {
-  if (scanScheduled) return;
-  scanScheduled = true;
-  clearTimeout(scanDebounceTimer);
-  scanDebounceTimer = setTimeout(() => {
-    scanScheduled = false;
-    scan();
-  }, SCAN_DEBOUNCE_MS);
+function debouncedScan() {
+  clearTimeout(scanTimer);
+  scanTimer = setTimeout(scan, 200);
 }
 
 scan();
-scheduleScan();
+setTimeout(scan, 500);
+setTimeout(scan, 1500);
 
 // Fast-path clutter observer: fires hideFeedClutter() immediately (no debounce)
 // whenever either:
@@ -2036,10 +2005,11 @@ const clutterObserver = new MutationObserver((mutations) => {
 clutterObserver.observe(document.body, { childList: true, subtree: true });
 observers.push(clutterObserver);
 
-const scanObserver = new MutationObserver(() => scheduleScan());
+const scanObserver = new MutationObserver(() => debouncedScan());
 scanObserver.observe(document.body, {
   childList: true,
   subtree: true,
 });
 observers.push(scanObserver);
+scanTimer = setInterval(scan, 5000);
 window.buildCommentText = buildCommentText;

@@ -26,12 +26,15 @@ const allTabContents = document.querySelectorAll(".tab-content");
 
 allTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
-    allTabs.forEach((t) => t.classList.remove("active"));
+    allTabs.forEach((t) => {
+      t.classList.remove("active");
+      t.setAttribute("aria-selected", "false");
+    });
     allTabContents.forEach((c) => c.classList.remove("active"));
     tab.classList.add("active");
+    tab.setAttribute("aria-selected", "true");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
-    if (tab.dataset.tab === "history") loadHistory();
-    if (tab.dataset.tab === "review") loadReviewTab();
+    if (tab.dataset.tab === "history") { loadHistory(); loadAgentStats(); }
     if (tab.dataset.tab === "apikeys") loadKeyLists();
   });
 });
@@ -46,6 +49,10 @@ const customSummaryPromptEl = document.getElementById("customSummaryPrompt");
 const customAffPromptEl = document.getElementById("customAffPrompt");
 const sourceTemplateEl = document.getElementById("sourceTemplate");
 const useHeuristicEvalEl = document.getElementById("useHeuristicEval");
+const hideAffiliatePostsEl = document.getElementById("hideAffiliatePosts");
+const adDisplayModeEl = document.getElementById("adDisplayMode");
+const affiliateDisplayModeEl = document.getElementById("affiliateDisplayMode");
+const blockedDomainsEl = document.getElementById("blockedDomains");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
 
@@ -60,6 +67,10 @@ chrome.storage.sync.get(
     "customAffPrompt",
     "sourceTemplate",
     "useHeuristicEval",
+    "hideAffiliatePosts",
+    "adDisplayMode",
+    "affiliateDisplayMode",
+    "blockedDomains",
     "apiKeys",
   ],
   (d) => {
@@ -73,6 +84,10 @@ chrome.storage.sync.get(
     if (d.customAffPrompt) customAffPromptEl.value = d.customAffPrompt;
     if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
     if (d.useHeuristicEval) useHeuristicEvalEl.checked = true;
+    if (d.hideAffiliatePosts) hideAffiliatePostsEl.checked = true;
+    if (d.adDisplayMode) adDisplayModeEl.value = d.adDisplayMode;
+    if (d.affiliateDisplayMode) affiliateDisplayModeEl.value = d.affiliateDisplayMode;
+    if (d.blockedDomains) blockedDomainsEl.value = d.blockedDomains;
     const total = Object.values(d.apiKeys || {}).reduce(
       (s, a) => s + (a ? a.length : 0),
       0,
@@ -83,9 +98,16 @@ chrome.storage.sync.get(
 );
 
 saveBtn.addEventListener("click", () => {
+  // Input validation
+  const minLen = parseInt(minLengthInput.value);
+  if (isNaN(minLen) || minLen < 100 || minLen > 5000) {
+    showStatus("Độ dài tối thiểu phải từ 100-5000 ký tự", "error");
+    return;
+  }
+
   chrome.storage.sync.set(
     {
-      minLength: parseInt(minLengthInput.value) || 400,
+      minLength: minLen,
       outputLang: outputLangSel.value,
       summaryLength: summaryLengthSel.value,
       promptStyle: promptStyleSel.value,
@@ -94,6 +116,10 @@ saveBtn.addEventListener("click", () => {
       customAffPrompt: customAffPromptEl.value.trim(),
       sourceTemplate: sourceTemplateEl.value.trim(),
       useHeuristicEval: useHeuristicEvalEl.checked,
+      hideAffiliatePosts: hideAffiliatePostsEl.checked,
+      adDisplayMode: adDisplayModeEl.value,
+      affiliateDisplayMode: affiliateDisplayModeEl.value,
+      blockedDomains: blockedDomainsEl.value.trim(),
     },
     () => showStatus("Đã lưu", "success"),
   );
@@ -251,6 +277,18 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+
+// Auto-validate API key on paste
+newApiKeyInput.addEventListener('paste', (e) => {
+  setTimeout(() => {
+    const key = newApiKeyInput.value.trim();
+    if (key.length > 20) {
+      addKeyBtn.click();
+      setTimeout(() => testBtn.click(), 300);
+    }
+  }, 10);
+});
+
 addKeyBtn.addEventListener("click", async () => {
   const key = newApiKeyInput.value.trim();
   if (!key) {
@@ -278,30 +316,49 @@ addKeyBtn.addEventListener("click", async () => {
   );
 });
 
-testBtn.addEventListener("click", async () => {
+async function handleTestConnection(btn) {
   const data = await chrome.storage.sync.get(["apiKeys"]);
   const total = Object.values(data.apiKeys || {}).reduce(
     (s, a) => s + (a ? a.length : 0),
     0,
   );
   if (total === 0) {
-    showKeyStatus("Chưa có API Key", "error");
+    showKeyStatus("Chưa có API Key. Thêm key ở ô bên trên.", "error");
     return;
   }
-  testBtn.disabled = true;
-  testBtn.textContent = "Đang test...";
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Đang test...";
   try {
     const r = await chrome.runtime.sendMessage({ action: "test-connection" });
-    showKeyStatus(
-      r?.ok ? "OK — " + r.provider : r?.error || "Lỗi",
-      r?.ok ? "success" : "error",
-    );
+    if (r?.ok) {
+      showKeyStatus("✓ " + r.provider + (r.model ? " — " + r.model : " — OK"), "success");
+    } else if (r?.error && r.error.includes("429")) {
+      showKeyStatus("⏱ Rate limited — thử lại sau vài phút", "error");
+    } else if (r?.error && (r.error.includes("401") || r.error.includes("403"))) {
+      showKeyStatus("✗ Key không hợp lệ hoặc hết hạn", "error");
+    } else if (r?.error && r.error.includes("network")) {
+      showKeyStatus("✗ Lỗi mạng — kiểm tra kết nối internet", "error");
+    } else {
+      showKeyStatus(r?.error || "Lỗi không xác định", "error");
+    }
   } catch (e) {
-    showKeyStatus("Lỗi: " + e.message, "error");
+    if (e.message.includes("Extension context invalidated")) {
+      showKeyStatus("Extension đã reload — mở lại popup", "error");
+    } else {
+      showKeyStatus("Lỗi: " + e.message, "error");
+    }
   }
-  testBtn.disabled = false;
-  testBtn.textContent = "Test kết nối";
-});
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+
+testBtn.addEventListener("click", () => handleTestConnection(testBtn));
+
+const debugTestBtn = document.getElementById("debugTestBtn");
+if (debugTestBtn) {
+  debugTestBtn.addEventListener("click", () => handleTestConnection(debugTestBtn));
+}
 
 // Clear cache button (test mode)
 const clearCacheBtn = document.getElementById("clearCacheBtn");
@@ -344,6 +401,56 @@ if (clearCacheBtn) {
 // === HISTORY ===
 let historyData = [];
 
+function formatHm(ts) {
+  return new Date(ts).toLocaleTimeString("vi", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderPostTimeSuggestions(items) {
+  const box = document.getElementById("postTimeSuggestBox");
+  if (!box) return;
+  if (!items || items.length < 1) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  const sorted = [...items].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const firstTs = new Date(sorted[0].date).getTime();
+  if (!Number.isFinite(firstTs)) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000;
+  const candidates = [];
+  for (let i = 1; i <= 24; i++) {
+    const t1 = firstTs + i * oneHour;
+    const t2 = firstTs + i * 2 * oneHour;
+    if (t1 > now) candidates.push(t1);
+    if (t2 > now) candidates.push(t2);
+  }
+
+  const unique = [...new Set(candidates)]
+    .sort((a, b) => a - b)
+    .slice(0, 4);
+
+  if (unique.length === 0) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  box.style.display = "block";
+  box.innerHTML = `
+    <div class="post-time-suggest-title">🕒 Gợi ý giờ đăng tiếp theo (cách 1–2 giờ từ bài đầu)</div>
+    <div class="post-time-suggest-list">
+      ${unique.map((ts) => `<span class="post-time-pill">${formatHm(ts)}</span>`).join("")}
+    </div>
+  `;
+}
+
 async function loadHistory() {
   const data = await chrome.storage.local.get("history");
   historyData = data.history || [];
@@ -353,6 +460,7 @@ async function loadHistory() {
   detail.style.display = "none";
   list.style.display = "block";
   actions.style.display = historyData.length > 0 ? "block" : "none";
+  renderPostTimeSuggestions(historyData);
   if (historyData.length === 0) {
     list.innerHTML = '<p class="empty">Chưa có lịch sử</p>';
     return;
@@ -360,24 +468,29 @@ async function loadHistory() {
   list.innerHTML = historyData
     .map((h, i) => {
       const bt = h.type || "summary";
+      // Sử dụng esc() cho tất cả user-generated content để ngăn XSS
+      const dateStr = esc(new Date(h.date).toLocaleString("vi"));
+      const siteStr = esc(h.site || "");
+      const textPreview = esc((h.text || "").substring(0, 80));
+      const summaryPreview = esc((h.summary || "").substring(0, 120));
       return (
         '<div class="history-item" data-idx="' +
         i +
         '">' +
         '<div class="history-date">' +
-        esc(new Date(h.date).toLocaleString("vi")) +
+        dateStr +
         " · " +
-        esc(h.site || "") +
+        siteStr +
         '<span class="history-badge ' +
-        bt +
+        esc(bt) +
         '">' +
         (bt === "affiliate" ? "Affiliate" : "Tóm tắt") +
         "</span></div>" +
         '<div class="history-text">' +
-        esc((h.text || "").substring(0, 80)) +
+        textPreview +
         "...</div>" +
         '<div class="history-summary">' +
-        esc((h.summary || "").substring(0, 120)) +
+        summaryPreview +
         "...</div></div>"
       );
     })
@@ -456,188 +569,99 @@ document.getElementById("exportMdBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("clearBtn").addEventListener("click", async () => {
-  if (!confirm("Xóa toàn bộ lịch sử?")) return;
-  await chrome.storage.local.remove("history");
+  if (!confirm("Xóa toàn bộ lịch sử? (Có thể khôi phục trong 30 giây)")) return;
+
+  // Soft delete: backup trước khi xóa
+  const data = await chrome.storage.local.get("history");
+  const backup = data.history || [];
+
+  await chrome.storage.local.set({ history: [], historyBackup: { items: backup, deletedAt: Date.now() } });
   loadHistory();
+
+  // Show undo option
+  showStatus("Đã xóa lịch sử", "success");
+  const undoBtn = document.createElement("button");
+  undoBtn.textContent = "↩ Hoàn tác";
+  undoBtn.style.cssText = "margin-left:8px;padding:3px 10px;border:1px solid #a855f7;border-radius:6px;background:transparent;color:#a855f7;font-size:12px;cursor:pointer;";
+  undoBtn.addEventListener("click", async () => {
+    const backupData = await chrome.storage.local.get("historyBackup");
+    if (backupData.historyBackup && backupData.historyBackup.items) {
+      await chrome.storage.local.set({ history: backupData.historyBackup.items });
+      await chrome.storage.local.remove("historyBackup");
+      loadHistory();
+      showStatus("Đã khôi phục lịch sử", "success");
+    }
+  });
+  status.appendChild(undoBtn);
+
+  // Auto-remove backup after 30 seconds
+  setTimeout(async () => {
+    await chrome.storage.local.remove("historyBackup");
+  }, 30000);
 });
 
 // === REVIEW TAB ===
-let reviewItems = [];
 
-function setAlarmButtonState(on) {
-  document.getElementById("setAlarmBtn").classList.toggle("alarm-active", on);
-}
-
-async function loadReviewTab() {
-  let data = null;
+// === AGENT STATS (Feature 7) ===
+async function loadAgentStats() {
   try {
-    data = await chrome.runtime.sendMessage({ action: "get-ai-review" });
-  } catch (_) {}
-  if (
-    data &&
-    data.items &&
-    data.items.length > 0 &&
-    data.date === new Date().toISOString().slice(0, 10)
-  ) {
-    reviewItems = data.items;
-    renderReviewResults();
-  }
-  const alarmData = await chrome.storage.local.get("reviewAlarm");
-  const alarm = alarmData.reviewAlarm;
-  const alarmEl = document.getElementById("alarmStatus");
-  if (alarm && alarm.enabled) {
-    const t =
-      String(alarm.hour).padStart(2, "0") +
-      ":" +
-      String(alarm.minute).padStart(2, "0");
-    document.getElementById("reviewTime").value = t;
-    alarmEl.textContent = "Bật — " + t + " mỗi ngày";
-    alarmEl.className = "review-alarm-status alarm-on";
-    setAlarmButtonState(true);
-  } else {
-    alarmEl.textContent = "Chưa bật";
-    alarmEl.className = "review-alarm-status";
-    setAlarmButtonState(false);
-  }
-}
+    const data = await chrome.storage.local.get(["agentStats", "agentPostedUrls", "fbsTelemetry"]);
+    const stats = data.agentStats;
+    const telemetry = data.fbsTelemetry || {};
+    const box = document.getElementById("agentStatsBox");
+    const hasAgentStats = !!stats || (data.agentPostedUrls && data.agentPostedUrls.length > 0);
+    const hasTelemetry = (telemetry.postsScanned || 0) > 0;
 
-function renderReviewResults() {
-  document.getElementById("reviewResults").style.display = "block";
-  document.getElementById("reviewCount").textContent =
-    reviewItems.length + " tin hay";
-  const list = document.getElementById("reviewList");
-  list.innerHTML = reviewItems
-    .map((item, i) => {
-      const title = esc(
-        item.postTitle || item.summary.split(/[.\n]/)[0].substring(0, 80),
-      );
-      const img = item.imageUrl
-        ? '<img class="review-item-thumb" src="' +
-          esc(item.imageUrl) +
-          '" onerror="this.style.display=\'none\'">'
-        : "";
-      return (
-        '<div class="review-item"><input type="checkbox" class="review-check" data-idx="' +
-        i +
-        '" checked>' +
-        '<div class="review-item-content"><div class="review-item-title">' +
-        title +
-        "</div>" +
-        '<div class="review-item-meta">' +
-        esc(item.author || item.site || "") +
-        " · " +
-        esc(item.aiReason || "") +
-        "</div></div>" +
-        (item.aiScore
-          ? '<span class="review-item-score">' + item.aiScore + "</span>"
-          : "") +
-        img +
-        "</div>"
-      );
-    })
-    .join("");
-  // Use a single delegated handler instead of re-adding listeners
-  const selectAll = document.getElementById("selectAllReview");
-  selectAll.checked = true;
-  selectAll.onchange = (e) => {
-    list.querySelectorAll(".review-check").forEach((cb) => {
-      cb.checked = e.target.checked;
-    });
-  };
-}
-
-document.getElementById("aiReviewBtn").addEventListener("click", async () => {
-  const btn = document.getElementById("aiReviewBtn");
-  const st = document.getElementById("reviewStatus");
-  btn.disabled = true;
-  btn.textContent = "Đang phân tích...";
-  st.style.display = "none";
-  try {
-    const r = await chrome.runtime.sendMessage({ action: "ai-review" });
-    if (r.error) {
-      st.textContent = r.error;
-      st.className = "status error";
-      st.style.display = "block";
-    } else if (r.success) {
-      reviewItems = r.items;
-      renderReviewResults();
-      st.textContent = "Tìm được " + r.count + " tin hay";
-      st.className = "status success";
-      st.style.display = "block";
+    if (!hasAgentStats && !hasTelemetry) {
+      box.style.display = "none";
+      return;
     }
-  } catch (e) {
-    st.textContent = "Lỗi: " + e.message;
-    st.className = "status error";
-    st.style.display = "block";
-  }
-  btn.disabled = false;
-  btn.textContent = "AI Đề xuất tin hay";
-});
 
-document.getElementById("exportDtcnBtn").addEventListener("click", async () => {
-  const sel = Array.from(document.querySelectorAll(".review-check:checked"))
-    .map((cb) => reviewItems[+cb.dataset.idx])
-    .filter(Boolean);
-  if (!sel.length) {
-    alert("Chọn ít nhất 1 tin");
-    return;
-  }
-  const r = await chrome.runtime.sendMessage({
-    action: "export-dtcn",
-    items: sel,
-  });
-  if (r && r.data) {
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            _scanned_candidates: r.data,
-            source: "feedwriter",
-            exported_at: new Date().toISOString(),
-            count: r.data.length,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download =
-      "feedwriter-dtcn-" + new Date().toISOString().slice(0, 10) + ".json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-});
+    box.style.display = "block";
+    const today = new Date().toDateString();
+    const postsToday = (stats && stats.postsTodayDate === today) ? (stats.postsToday || 0) : 0;
+    const postsTotal = stats ? (stats.postsTotal || 0) : (data.agentPostedUrls ? data.agentPostedUrls.length : 0);
+    const skippedToday = (stats && stats.postsTodayDate === today) ? (stats.skippedToday || 0) : 0;
+    const flagged = (telemetry.postsFlaggedAds || 0) + (telemetry.postsFlaggedAffiliate || 0);
 
-document.getElementById("setAlarmBtn").addEventListener("click", async () => {
-  const t = document.getElementById("reviewTime").value;
-  if (!t) return;
-  const [h, m] = t.split(":").map(Number);
-  await chrome.storage.local.set({
-    reviewAlarm: { hour: h, minute: m, enabled: true },
-  });
-  const alarmEl = document.getElementById("alarmStatus");
-  alarmEl.textContent = "Bật — " + t + " mỗi ngày";
-  alarmEl.className = "review-alarm-status alarm-on";
-  setAlarmButtonState(true);
-  chrome.runtime
-    .sendMessage({ action: "set-review-alarm", hour: h, minute: m })
-    .catch(() => {});
-});
+    document.getElementById("statPostsToday").textContent = hasAgentStats ? postsToday : (telemetry.postsScanned || 0);
+    document.getElementById("statPostsTotal").textContent = hasAgentStats ? postsTotal : flagged;
+    document.getElementById("statSkipped").textContent = hasAgentStats ? skippedToday : (telemetry.falsePositiveProxy || 0);
 
-document.getElementById("clearAlarmBtn").addEventListener("click", async () => {
-  await chrome.storage.local.set({ reviewAlarm: { enabled: false } });
-  const alarmEl = document.getElementById("alarmStatus");
-  alarmEl.textContent = "Đã tắt";
-  alarmEl.className = "review-alarm-status";
-  setAlarmButtonState(false);
-  chrome.runtime.sendMessage({ action: "clear-review-alarm" }).catch(() => {});
-});
+    if (hasAgentStats) {
+      const lastPost = stats && stats.lastPostTime ? new Date(stats.lastPostTime).toLocaleString("vi") : "–";
+      document.getElementById("statLastPost").textContent = lastPost;
+    } else {
+      const topReasons = telemetry.topReasons || {};
+      const topReason = Object.entries(topReasons).sort((a, b) => b[1] - a[1])[0];
+      document.getElementById("statLastPost").textContent = topReason ? `${topReason[0]} (${topReason[1]})` : "–";
+    }
+  } catch (err) {
+    console.warn("[FeedWriter] Failed to load stats:", err?.message || err);
+  }
+}
 
 // === ABOUT: load version from manifest ===
 const ver = chrome.runtime.getManifest().version;
 const verEl = document.getElementById("aboutVersion");
 if (verEl) verEl.textContent = "FeedWriter v" + ver;
+
+// === ACCORDION LOGIC ===
+function toggleAccordion(header) {
+  header.classList.toggle('active');
+  const isActive = header.classList.contains('active');
+  header.setAttribute('aria-expanded', String(isActive));
+
+  const content = header.nextElementSibling;
+  content.style.display = isActive ? 'block' : 'none';
+}
+
+document.querySelectorAll('.accordion-header').forEach(header => {
+  header.addEventListener('click', () => toggleAccordion(header));
+  header.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleAccordion(header);
+    }
+  });
+});
