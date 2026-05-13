@@ -1989,14 +1989,22 @@ function scan() {
   scanAffiliatePosts();
 }
 
-function debouncedScan() {
-  clearTimeout(scanTimer);
-  scanTimer = setTimeout(scan, 200);
+let scanDebounceTimer = null;
+let scanScheduled = false;
+const SCAN_DEBOUNCE_MS = 2000;
+
+function scheduleScan() {
+  if (scanScheduled) return;
+  scanScheduled = true;
+  clearTimeout(scanDebounceTimer);
+  scanDebounceTimer = setTimeout(() => {
+    scanScheduled = false;
+    scan();
+  }, SCAN_DEBOUNCE_MS);
 }
 
 scan();
-setTimeout(scan, 500);
-setTimeout(scan, 1500);
+scheduleScan();
 
 // Fast-path clutter observer: fires hideFeedClutter() immediately (no debounce)
 // whenever either:
@@ -2028,11 +2036,10 @@ const clutterObserver = new MutationObserver((mutations) => {
 clutterObserver.observe(document.body, { childList: true, subtree: true });
 observers.push(clutterObserver);
 
-const scanObserver = new MutationObserver(() => debouncedScan());
+const scanObserver = new MutationObserver(() => scheduleScan());
 scanObserver.observe(document.body, {
   childList: true,
   subtree: true,
 });
 observers.push(scanObserver);
-scanTimer = setInterval(scan, 5000);
 window.buildCommentText = buildCommentText;

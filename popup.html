@@ -11,18 +11,18 @@
       <h1>FeedWriter</h1>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="settings">Cài đặt</button>
-      <button class="tab" data-tab="apikeys">Keys</button>
-      <button class="tab" data-tab="history">Lịch sử</button>
-            <button class="tab" data-tab="about">About</button>
+    <div class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" data-tab="settings">Cài đặt</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="apikeys">Keys</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="history">Lịch sử</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="about">About</button>
     </div>
 
     
     <!-- Settings Tab -->
     <div class="tab-content active" id="tab-settings">
       <div class="accordion">
-        <div class="accordion-header active">Tùy chỉnh Tóm tắt</div>
+        <div class="accordion-header active" role="button" aria-expanded="true" tabindex="0">Tùy chỉnh Tóm tắt</div>
         <div class="accordion-content" style="display: block;">
           <div class="field">
             <label for="outputLang">Ngôn ngữ tóm tắt</label>
@@ -57,7 +57,7 @@
       </div>
 
       <div class="accordion">
-        <div class="accordion-header">Auto-pilot & Đăng bài</div>
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">Auto-pilot & Đăng bài</div>
         <div class="accordion-content">
           <div class="field">
             <label class="checkbox-label">
@@ -82,8 +82,26 @@
       </div>
 
       <div class="accordion">
-        <div class="accordion-header">Nâng cao</div>
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">Nâng cao</div>
         <div class="accordion-content">
+          <div class="field">
+            <label for="adDisplayMode">Hiển thị bài quảng cáo</label>
+            <select id="adDisplayMode">
+              <option value="hide">Ẩn hoàn toàn</option>
+              <option value="collapse" selected>Thu gọn (có lý do)</option>
+              <option value="mark">Chỉ đánh dấu</option>
+            </select>
+            <div class="field-hint">Cách hiển thị bài viết được phát hiện là quảng cáo.</div>
+          </div>
+          <div class="field">
+            <label for="affiliateDisplayMode">Hiển thị bài affiliate</label>
+            <select id="affiliateDisplayMode">
+              <option value="hide">Ẩn hoàn toàn</option>
+              <option value="collapse" selected>Thu gọn (có lý do)</option>
+              <option value="mark">Chỉ đánh dấu</option>
+            </select>
+            <div class="field-hint">Cách hiển thị bài viết chứa link affiliate (Shopee, Lazada, TikTok Shop...).</div>
+          </div>
           <div class="field">
             <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
             <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu, bỏ ví dụ..."></textarea>
@@ -105,12 +123,12 @@
       </div>
 
       <button id="saveBtn" class="btn btn-primary" style="margin-top:15px">Lưu cài đặt</button>
-      <div id="status" class="status"></div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
 
 <!-- Debug Panel (Test Mode) -->
       <div id="debugPanel" class="debug-panel" style="display:none;margin-top:20px;padding:15px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9;">
         <h4 style="margin:0 0 10px 0;color:#666;">🧪 Test Mode Debug</h4>
-        <button id="testBtn" class="btn btn-secondary" style="margin-right:10px;">Test kết nối</button>
+        <button id="debugTestBtn" class="btn btn-secondary" style="margin-right:10px;">Test kết nối</button>
         <button id="clearCacheBtn" class="btn btn-secondary">Clear Cache</button>
         <div id="debugInfo" style="margin-top:10px;font-size:12px;color:#666;"></div>
       </div>

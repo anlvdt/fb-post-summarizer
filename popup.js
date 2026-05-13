@@ -26,12 +26,15 @@ const allTabContents = document.querySelectorAll(".tab-content");
 
 allTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
-    allTabs.forEach((t) => t.classList.remove("active"));
+    allTabs.forEach((t) => {
+      t.classList.remove("active");
+      t.setAttribute("aria-selected", "false");
+    });
     allTabContents.forEach((c) => c.classList.remove("active"));
     tab.classList.add("active");
+    tab.setAttribute("aria-selected", "true");
     document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "history") { loadHistory(); loadAgentStats(); }
-    if (tab.dataset.tab === "review") loadReviewTab();
     if (tab.dataset.tab === "apikeys") loadKeyLists();
   });
 });
@@ -47,6 +50,8 @@ const customAffPromptEl = document.getElementById("customAffPrompt");
 const sourceTemplateEl = document.getElementById("sourceTemplate");
 const useHeuristicEvalEl = document.getElementById("useHeuristicEval");
 const hideAffiliatePostsEl = document.getElementById("hideAffiliatePosts");
+const adDisplayModeEl = document.getElementById("adDisplayMode");
+const affiliateDisplayModeEl = document.getElementById("affiliateDisplayMode");
 const blockedDomainsEl = document.getElementById("blockedDomains");
 const saveBtn = document.getElementById("saveBtn");
 const status = document.getElementById("status");
@@ -63,6 +68,8 @@ chrome.storage.sync.get(
     "sourceTemplate",
     "useHeuristicEval",
     "hideAffiliatePosts",
+    "adDisplayMode",
+    "affiliateDisplayMode",
     "blockedDomains",
     "apiKeys",
   ],
@@ -78,6 +85,8 @@ chrome.storage.sync.get(
     if (d.sourceTemplate) sourceTemplateEl.value = d.sourceTemplate;
     if (d.useHeuristicEval) useHeuristicEvalEl.checked = true;
     if (d.hideAffiliatePosts) hideAffiliatePostsEl.checked = true;
+    if (d.adDisplayMode) adDisplayModeEl.value = d.adDisplayMode;
+    if (d.affiliateDisplayMode) affiliateDisplayModeEl.value = d.affiliateDisplayMode;
     if (d.blockedDomains) blockedDomainsEl.value = d.blockedDomains;
     const total = Object.values(d.apiKeys || {}).reduce(
       (s, a) => s + (a ? a.length : 0),
@@ -108,6 +117,8 @@ saveBtn.addEventListener("click", () => {
       sourceTemplate: sourceTemplateEl.value.trim(),
       useHeuristicEval: useHeuristicEvalEl.checked,
       hideAffiliatePosts: hideAffiliatePostsEl.checked,
+      adDisplayMode: adDisplayModeEl.value,
+      affiliateDisplayMode: affiliateDisplayModeEl.value,
       blockedDomains: blockedDomainsEl.value.trim(),
     },
     () => showStatus("Đã lưu", "success"),
@@ -305,7 +316,7 @@ addKeyBtn.addEventListener("click", async () => {
   );
 });
 
-testBtn.addEventListener("click", async () => {
+async function handleTestConnection(btn) {
   const data = await chrome.storage.sync.get(["apiKeys"]);
   const total = Object.values(data.apiKeys || {}).reduce(
     (s, a) => s + (a ? a.length : 0),
@@ -315,8 +326,9 @@ testBtn.addEventListener("click", async () => {
     showKeyStatus("Chưa có API Key. Thêm key ở ô bên trên.", "error");
     return;
   }
-  testBtn.disabled = true;
-  testBtn.textContent = "Đang test...";
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Đang test...";
   try {
     const r = await chrome.runtime.sendMessage({ action: "test-connection" });
     if (r?.ok) {
@@ -337,9 +349,16 @@ testBtn.addEventListener("click", async () => {
       showKeyStatus("Lỗi: " + e.message, "error");
     }
   }
-  testBtn.disabled = false;
-  testBtn.textContent = "Test kết nối";
-});
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+
+testBtn.addEventListener("click", () => handleTestConnection(testBtn));
+
+const debugTestBtn = document.getElementById("debugTestBtn");
+if (debugTestBtn) {
+  debugTestBtn.addEventListener("click", () => handleTestConnection(debugTestBtn));
+}
 
 // Clear cache button (test mode)
 const clearCacheBtn = document.getElementById("clearCacheBtn");
@@ -617,7 +636,9 @@ async function loadAgentStats() {
       const topReason = Object.entries(topReasons).sort((a, b) => b[1] - a[1])[0];
       document.getElementById("statLastPost").textContent = topReason ? `${topReason[0]} (${topReason[1]})` : "–";
     }
-  } catch (_) {}
+  } catch (err) {
+    console.warn("[FeedWriter] Failed to load stats:", err?.message || err);
+  }
 }
 
 // === ABOUT: load version from manifest ===
@@ -626,17 +647,21 @@ const verEl = document.getElementById("aboutVersion");
 if (verEl) verEl.textContent = "FeedWriter v" + ver;
 
 // === ACCORDION LOGIC ===
+function toggleAccordion(header) {
+  header.classList.toggle('active');
+  const isActive = header.classList.contains('active');
+  header.setAttribute('aria-expanded', String(isActive));
+
+  const content = header.nextElementSibling;
+  content.style.display = isActive ? 'block' : 'none';
+}
+
 document.querySelectorAll('.accordion-header').forEach(header => {
-  header.addEventListener('click', () => {
-    // Toggle active class on header
-    header.classList.toggle('active');
-    
-    // Toggle display on content
-    const content = header.nextElementSibling;
-    if (header.classList.contains('active')) {
-      content.style.display = 'block';
-    } else {
-      content.style.display = 'none';
+  header.addEventListener('click', () => toggleAccordion(header));
+  header.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleAccordion(header);
     }
   });
 });

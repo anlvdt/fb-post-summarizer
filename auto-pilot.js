@@ -29,7 +29,7 @@
       clearTimeout(loopTimer);
       loopTimer = null;
     }
-    scheduleNext(fn, delayMs);
+    loopTimer = setTimeout(fn, delayMs);
   }
 
   // === HUMAN-LIKE TIMING ===

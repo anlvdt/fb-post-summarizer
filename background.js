@@ -352,6 +352,18 @@ chrome.runtime.onConnect.addListener((port) => {
 // === FALLBACK: non-streaming for test/context menu ===
 if (chrome?.runtime?.onMessage) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (sender.id && sender.id !== chrome.runtime.id) {
+    console.warn("[FeedWriter] Rejected message from untrusted sender:", sender.id);
+    return false;
+  }
+
+  const sensitiveActions = new Set(["summarize", "fetch-image", "agent_eval", "agent_eval_summary"]);
+  if (sensitiveActions.has(request.action) && !sender.id) {
+    console.warn("[FeedWriter] Rejected sensitive message without extension sender id");
+    sendResponse({ error: "Untrusted sender" });
+    return true;
+  }
+
   if (request.action === "ping") {
     sendResponse({ ok: true });
     return true;
@@ -465,8 +477,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Timeout 20s (ảnh Facebook thường < 2MB, 20s đủ; 30s quá dài cho parallel fetch)
   if (request.action === "fetch-image") {
     const url = request.url;
-    if (!url || !url.startsWith("http")) {
-      sendResponse({ error: "Invalid URL" });
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch (_) {
+      sendResponse({ error: "Invalid URL format" });
+      return true;
+    }
+    if (parsedUrl.protocol !== "https:") {
+      sendResponse({ error: "Only HTTPS URLs allowed" });
       return true;
     }
     fetchWithTimeout(url, {
