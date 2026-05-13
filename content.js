@@ -235,7 +235,7 @@ function scanAffiliatePosts() {
         telemetry.topReasons[r] = (telemetry.topReasons[r] || 0) + 1;
       }
       hideFlaggedPost(article, evalResult, "sponsored");
-    } else if (evalResult.isAffiliate) {
+    } else if (evalResult.isAffiliate && evalResult.confidence >= 70) {
       telemetry.postsFlaggedAffiliate++;
       for (const r of evalResult.reasons) {
         telemetry.topReasons[r] = (telemetry.topReasons[r] || 0) + 1;
