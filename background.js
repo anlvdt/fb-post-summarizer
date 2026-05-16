@@ -31,7 +31,29 @@ if (typeof featureFlags === 'undefined') {
 const historyBatcher = typeof StorageBatcher !== 'undefined' ? new StorageBatcher(500) : { set: () => chrome.storage.local.set.bind(chrome.storage.local) };
 
 // Storage schema version
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
+const SETTINGS_VERSION = 2;
+
+// === SETTINGS SCHEMA ===
+const DEFAULT_SETTINGS = {
+  version: SETTINGS_VERSION,
+  minLength: 400,
+  outputLanguage: 'vi',
+  languageAutoDetected: true,
+  summaryLength: 'medium',
+  promptStyle: 'default',
+  customInstructions: '',
+  customSummaryPrompt: '',
+  customAffPrompt: '',
+  sourceTemplate: '• Nguồn bài viết: {platform} {author} {source}\n  {link}',
+  customSourceLink: '',
+  useHeuristicEval: false,
+  hideAffiliatePosts: false,
+  adDisplayMode: 'collapse',
+  affiliateDisplayMode: 'collapse',
+  blockedDomains: '',
+  theme: 'auto'
+};
 
 // === STORAGE MIGRATION ===
 async function migrateStorageIfNeeded() {
@@ -41,9 +63,139 @@ async function migrateStorageIfNeeded() {
 
   if (currentVersion < STORAGE_VERSION) {
     logger.info(`Migrating storage from v${currentVersion} to v${STORAGE_VERSION}`);
+
+    // Migration v0 -> v1: Initial version
+    if (currentVersion < 1) {
+      // No migration needed, just set version
+    }
+
+    // Migration v1 -> v2: Add templates support
+    if (currentVersion < 2) {
+      const templates = data.templates || [];
+      await chrome.storage.local.set({ templates });
+      logger.info('Migration v1->v2: Added templates support');
+    }
+
     await chrome.storage.local.set({ storageVersion: STORAGE_VERSION });
     logger.info('Storage migration completed');
   }
+}
+
+// === SETTINGS MIGRATION ===
+async function migrateSettingsIfNeeded() {
+  if (!chrome?.storage?.sync) return; // SW not ready
+
+  const data = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
+  const currentVersion = data.version || 0;
+
+  if (currentVersion < SETTINGS_VERSION) {
+    logger.info(`Migrating settings from v${currentVersion} to v${SETTINGS_VERSION}`);
+
+    const migratedSettings = { ...DEFAULT_SETTINGS };
+
+    // Migration v0 -> v1: Rename outputLang to outputLanguage
+    if (currentVersion < 1) {
+      if (data.outputLang) {
+        migratedSettings.outputLanguage = data.outputLang;
+        logger.info('Migration v0->v1: Renamed outputLang to outputLanguage');
+      }
+    }
+
+    // Migration v1 -> v2: Add languageAutoDetected flag
+    if (currentVersion < 2) {
+      migratedSettings.languageAutoDetected = data.languageAutoDetected !== undefined
+        ? data.languageAutoDetected
+        : true;
+      logger.info('Migration v1->v2: Added languageAutoDetected flag');
+    }
+
+    // Merge existing settings with defaults (preserve user values)
+    for (const key in DEFAULT_SETTINGS) {
+      if (data[key] !== undefined && key !== 'version') {
+        migratedSettings[key] = data[key];
+      }
+    }
+
+    migratedSettings.version = SETTINGS_VERSION;
+    await chrome.storage.sync.set(migratedSettings);
+    logger.info('Settings migration completed');
+  }
+}
+
+// === SETTINGS VALIDATION ===
+async function validateSettings() {
+  if (!chrome?.storage?.sync) return;
+
+  const data = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
+  const validatedSettings = {};
+  let hasInvalidSettings = false;
+
+  for (const key in DEFAULT_SETTINGS) {
+    const value = data[key];
+    const defaultValue = DEFAULT_SETTINGS[key];
+
+    // Validate each setting
+    if (value === undefined || value === null) {
+      validatedSettings[key] = defaultValue;
+      hasInvalidSettings = true;
+    } else if (typeof value !== typeof defaultValue) {
+      validatedSettings[key] = defaultValue;
+      hasInvalidSettings = true;
+      logger.warn(`Invalid type for setting ${key}: expected ${typeof defaultValue}, got ${typeof value}`);
+    } else {
+      validatedSettings[key] = value;
+    }
+  }
+
+  if (hasInvalidSettings) {
+    await chrome.storage.sync.set(validatedSettings);
+    logger.info('Settings validation completed, invalid settings reset to defaults');
+  }
+}
+
+// === SETTINGS BACKUP & RESTORE ===
+async function backupSettings() {
+  if (!chrome?.storage?.sync) return null;
+
+  const data = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
+  const backup = {
+    version: SETTINGS_VERSION,
+    timestamp: Date.now(),
+    settings: data
+  };
+
+  // Store backup in local storage
+  const backups = await chrome.storage.local.get('settingsBackups');
+  const backupList = backups.settingsBackups || [];
+  backupList.push(backup);
+
+  // Keep only last 5 backups
+  if (backupList.length > 5) {
+    backupList.shift();
+  }
+
+  await chrome.storage.local.set({ settingsBackups: backupList });
+  logger.info('Settings backup created');
+
+  return backup;
+}
+
+async function restoreSettings(backupIndex = 0) {
+  if (!chrome?.storage?.local || !chrome?.storage?.sync) return false;
+
+  const backups = await chrome.storage.local.get('settingsBackups');
+  const backupList = backups.settingsBackups || [];
+
+  if (backupIndex >= backupList.length) {
+    logger.error('Backup index out of range');
+    return false;
+  }
+
+  const backup = backupList[backupList.length - 1 - backupIndex]; // Most recent first
+  await chrome.storage.sync.set(backup.settings);
+  logger.info(`Settings restored from backup (${new Date(backup.timestamp).toLocaleString()})`);
+
+  return true;
 }
 
 // Run migration only inside onInstalled / onStartup
@@ -82,13 +234,27 @@ function trackEvent(event, data = {}) {
 })();
 
 // === KEEP SERVICE WORKER ALIVE ===
+// Optimized keep-alive strategy with adaptive intervals
+let keepAliveState = {
+  lastActivity: Date.now(),
+  isActive: false,
+  activityCount: 0
+};
+
 function ensureKeepAliveAlarm() {
   if (!chrome?.alarms) {
     logger.warn('Alarms API unavailable, cannot set keep-alive');
     return;
   }
 
-  const desiredPeriod = 1;
+  // Adaptive interval: 1 min when active, 5 min when idle
+  const getDesiredPeriod = () => {
+    const timeSinceActivity = Date.now() - keepAliveState.lastActivity;
+    const isRecentlyActive = timeSinceActivity < 5 * 60 * 1000; // 5 minutes
+    return isRecentlyActive ? 1 : 5;
+  };
+
+  const desiredPeriod = getDesiredPeriod();
   const createAlarm = () => {
     chrome.alarms.create('keep-alive', {
       delayInMinutes: desiredPeriod,
@@ -107,7 +273,7 @@ function ensureKeepAliveAlarm() {
     if (!existing) {
       createAlarm();
     } else if (existing.periodInMinutes !== desiredPeriod) {
-      logger.warn('Keep-alive alarm exists with wrong interval, recreating', existing);
+      logger.info('Adjusting keep-alive interval to ' + desiredPeriod + ' min');
       chrome.alarms.clear('keep-alive', (wasCleared) => {
         if (!wasCleared) {
           logger.warn('Failed to clear stale keep-alive alarm');
@@ -115,17 +281,98 @@ function ensureKeepAliveAlarm() {
         createAlarm();
       });
     } else {
-      logger.info('Keep-alive alarm already exists with correct interval', existing);
+      logger.debug('Keep-alive alarm already exists with correct interval');
     }
-
-    chrome.alarms.getAll((alarms) => {
-      logger.debug('Current alarms', alarms);
-    });
   });
+}
+
+// Track activity for adaptive keep-alive
+function trackActivity() {
+  keepAliveState.lastActivity = Date.now();
+  keepAliveState.activityCount++;
+  keepAliveState.isActive = true;
+
+  // Adjust keep-alive interval based on activity
+  if (keepAliveState.activityCount % 10 === 0) {
+    ensureKeepAliveAlarm();
+  }
 }
 
 // Setup keep-alive on startup
 ensureKeepAliveAlarm();
+
+// === MEMORY MANAGEMENT ===
+const memoryCache = {
+  data: new Map(),
+  maxSize: 50,
+  maxAge: 5 * 60 * 1000, // 5 minutes
+
+  set(key, value) {
+    // Evict oldest entries if cache is full
+    if (this.data.size >= this.maxSize) {
+      const firstKey = this.data.keys().next().value;
+      this.data.delete(firstKey);
+    }
+
+    this.data.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+  },
+
+  get(key) {
+    const entry = this.data.get(key);
+    if (!entry) return null;
+
+    // Check if entry is expired
+    if (Date.now() - entry.timestamp > this.maxAge) {
+      this.data.delete(key);
+      return null;
+    }
+
+    return entry.value;
+  },
+
+  clear() {
+    this.data.clear();
+  },
+
+  // Periodic cleanup of expired entries
+  cleanup() {
+    const now = Date.now();
+    for (const [key, entry] of this.data.entries()) {
+      if (now - entry.timestamp > this.maxAge) {
+        this.data.delete(key);
+      }
+    }
+  }
+};
+
+// Run memory cleanup every 5 minutes
+setInterval(() => {
+  memoryCache.cleanup();
+  logger.debug('Memory cache cleaned up, size:', memoryCache.data.size);
+}, 5 * 60 * 1000);
+
+// === ALARM LISTENER ===
+if (chrome?.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'keep-alive') {
+      logger.debug('Keep-alive alarm fired');
+
+      // Perform periodic maintenance
+      memoryCache.cleanup();
+
+      // Adjust interval based on activity
+      const timeSinceActivity = Date.now() - keepAliveState.lastActivity;
+      if (timeSinceActivity > 10 * 60 * 1000) {
+        // No activity for 10 minutes, mark as inactive
+        keepAliveState.isActive = false;
+        ensureKeepAliveAlarm(); // Switch to longer interval
+      }
+    }
+  });
+}
 
 // === UTILITIES ===
 // Fallback fetchWithTimeout if utils.js not loaded
@@ -159,20 +406,55 @@ async function injectAndSend(tabId, message) {
 // === CONTEXT MENU ===
 if (chrome?.runtime?.onInstalled) {
 chrome.runtime.onInstalled.addListener(async () => {
+  // Run all migrations
   await migrateStorageIfNeeded().catch(e => logger.error('Storage migration failed (onInstalled):', e));
+  await migrateSettingsIfNeeded().catch(e => logger.error('Settings migration failed (onInstalled):', e));
+  await validateSettings().catch(e => logger.error('Settings validation failed (onInstalled):', e));
+  await backupSettings().catch(e => logger.error('Settings backup failed (onInstalled):', e));
+
+  // Context Menu - Organized by feature
+  // Parent: Content Tools
+  chrome.contextMenus.create({
+    id: "content-tools",
+    title: "FeedWriter",
+    contexts: ["selection"],
+  });
+
+  // Content Tools submenu
   chrome.contextMenus.create({
     id: "summarize-selection",
-    title: "Tóm tắt nội dung",
+    parentId: "content-tools",
+    title: "📝 Tóm tắt nội dung",
     contexts: ["selection"],
   });
+
   chrome.contextMenus.create({
     id: "affiliate-rewrite",
-    title: "Chế bài Affiliate Marketing",
+    parentId: "content-tools",
+    title: "💰 Chế bài Affiliate",
     contexts: ["selection"],
   });
+
+  chrome.contextMenus.create({
+    id: "translate-selection",
+    parentId: "content-tools",
+    title: "🌐 Dịch văn bản",
+    contexts: ["selection"],
+  });
+
+  // Separator
+  chrome.contextMenus.create({
+    id: "separator-1",
+    parentId: "content-tools",
+    type: "separator",
+    contexts: ["selection"],
+  });
+
+  // Link Tools submenu
   chrome.contextMenus.create({
     id: "unshorten-shopee",
-    title: "Bóc Link Shopee (No Cookie)",
+    parentId: "content-tools",
+    title: "🔗 Bóc Link Shopee",
     contexts: ["selection"],
   });
 
@@ -274,6 +556,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     chrome.tabs
       .sendMessage(tab.id, msg)
       .catch(() => injectAndSend(tab.id, msg));
+  } else if (info.menuItemId === "translate-selection" && info.selectionText) {
+    const msg = {
+      action: "translate-selection",
+      text: info.selectionText,
+    };
+    chrome.tabs
+      .sendMessage(tab.id, msg)
+      .catch(() => injectAndSend(tab.id, msg));
   } else if (info.menuItemId === "unshorten-shopee" && info.selectionText) {
     const urlMatches = info.selectionText.match(/https?:\/\/shope\.ee\/[^\s]*/);
     if (!urlMatches) {
@@ -368,6 +658,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ ok: true });
     return true;
   }
+
+  // === SETTINGS BACKUP/RESTORE ===
+  if (request.action === "backupSettings") {
+    backupSettings()
+      .then(backup => {
+        sendResponse({ success: true, backup });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (request.action === "restoreSettings") {
+    const backupIndex = request.backupIndex || 0;
+    restoreSettings(backupIndex)
+      .then(success => {
+        sendResponse({ success });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
   // === AGENT POSTED — show browser notification ===
   if (request.action === "agent-posted") {
     const preview = (request.preview || "").substring(0, 80);

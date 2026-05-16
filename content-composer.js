@@ -406,7 +406,8 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
           /\s*(?:[—-]\s*\n\s*)?Nguồn\s+dưới\s+cmt\s+đầu\s*$/gi,
           ""
         ).trim();
-        const textWithFooter = cleanedText + "\n\n—\nNguồn dưới cmt đầu";
+        const formattedText = formatForFacebook(cleanedText);
+        const textWithFooter = formattedText + "\n\n━━━━━━━━━━\n👉 Nguồn dưới cmt đầu";
         pasteToLexical(editor, textWithFooter, imgFiles.length > 0 ? imgFiles : null);
 
         // Chờ upload hoàn tất (để user thấy ảnh đã render trước khi bấm Đăng)
@@ -431,6 +432,99 @@ function openFacebookComposer(text, sourceUrl, imageUrl, author, source, allImag
         setFail("Lỗi: " + (err.message || err));
       }
     });
+}
+
+/**
+ * Format AI-generated text for Facebook status posting
+ * Transforms plain text into visually appealing Facebook format
+ *
+ * @param {string} text - AI-generated text with \n line breaks
+ * @returns {string} - Facebook-optimized text
+ */
+function formatForFacebook(text) {
+  let lines = text.split('\n');
+  let formatted = [];
+  let inBulletSection = false;
+  let firstNonEmptyFound = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Skip empty lines (will add strategic spacing later)
+    if (!line) {
+      // Add spacing between sections
+      if (formatted.length > 0 && formatted[formatted.length - 1] !== '') {
+        formatted.push('');
+      }
+      continue;
+    }
+
+    // Detect title (first non-empty line)
+    if (!firstNonEmptyFound) {
+      firstNonEmptyFound = true;
+      // Add emoji prefix for title based on content
+      const titleEmoji = detectTitleEmoji(line);
+      formatted.push(titleEmoji + ' ' + line.toUpperCase());
+      formatted.push(''); // Spacing after title
+      continue;
+    }
+
+    // Detect bullet points
+    if (line.startsWith('·') || line.startsWith('•') || line.startsWith('-')) {
+      if (!inBulletSection) {
+        // Add spacing before bullet section
+        if (formatted[formatted.length - 1] !== '') {
+          formatted.push('');
+        }
+        inBulletSection = true;
+      }
+      // Replace bullet with checkmark
+      const bulletText = line.replace(/^[·•\-]\s*/, '');
+      formatted.push('✓ ' + bulletText);
+      continue;
+    }
+
+    // Regular paragraph
+    if (inBulletSection) {
+      // Add spacing after bullet section
+      formatted.push('');
+      inBulletSection = false;
+    }
+    formatted.push(line);
+  }
+
+  return formatted.join('\n');
+}
+
+/**
+ * Detect appropriate emoji for title based on content
+ */
+function detectTitleEmoji(title) {
+  const lower = title.toLowerCase();
+
+  // Technology/AI
+  if (lower.match(/ai|công nghệ|tech|phần mềm|app|tool|software|digital/)) return '🤖';
+
+  // Business/Money
+  if (lower.match(/kinh doanh|tiền|thu nhập|doanh thu|marketing|bán hàng|business|money|revenue/)) return '💰';
+
+  // Education/Learning
+  if (lower.match(/học|giáo dục|khóa học|kiến thức|kỹ năng|education|learning|course|skill/)) return '📚';
+
+  // News/Update
+  if (lower.match(/tin tức|cập nhật|thông báo|mới|news|update|announcement/)) return '📰';
+
+  // Tips/Guide
+  if (lower.match(/tips|hướng dẫn|cách|bí quyết|mẹo|guide|how to|tutorial/)) return '💡';
+
+  // Warning/Important
+  if (lower.match(/cảnh báo|quan trọng|chú ý|lưu ý|warning|important|alert/)) return '⚠️';
+
+  // Success/Achievement
+  if (lower.match(/thành công|đạt được|chiến thắng|kỷ lục|success|achievement|win/)) return '🎉';
+
+  // Default
+  return '📌';
 }
 
 function pasteToLexical(element, text, file = null) {
@@ -542,8 +636,10 @@ window.fbsAgentPost = async function (summaryText, imageUrl, rawSourceUrl, postE
     /\s*(?:[—-]\s*\n\s*)?Nguồn\s+dưới\s+cmt\s+đầu\s*$/gi,
     ""
   ).trim();
-  // Append đúng 1 lần footer chuẩn
-  postText += "\n\n—\nNguồn dưới cmt đầu";
+  // Format for Facebook with emojis and visual hierarchy
+  const formattedText = formatForFacebook(postText);
+  // Append đúng 1 lần footer chuẩn với visual separator
+  postText = formattedText + "\n\n━━━━━━━━━━\n👉 Nguồn dưới cmt đầu";
 
   console.log("[Agent] fbsAgentPost called:", {
     textLength: postText.length,

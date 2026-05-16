@@ -50,7 +50,26 @@
             </select>
           </div>
           <div class="field">
-            <label for="minLength">Độ dài tối thiểu (ký tự)</label>
+            <label for="outputLanguage">
+              Ngôn ngữ đầu ra
+              <span class="fbs-hint-icon" data-tooltip="Tự động phát hiện từ Facebook. Thay đổi nếu muốn ngôn ngữ khác.">?</span>
+            </label>
+            <select id="outputLanguage">
+              <option value="vi">Tiếng Việt</option>
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="th">ไทย</option>
+              <option value="id">Bahasa Indonesia</option>
+            </select>
+            <div class="field-hint">Tự động phát hiện từ ngôn ngữ Facebook của bạn.</div>
+          </div>
+          <div class="field">
+            <label for="minLength">
+              Độ dài tối thiểu (ký tự)
+              <span class="fbs-hint-icon" data-tooltip="Chỉ tóm tắt bài viết có ít nhất số ký tự này. Bỏ qua bài ngắn.">?</span>
+            </label>
             <input type="number" id="minLength" value="400" min="100" max="5000" step="100">
           </div>
         </div>
@@ -67,14 +86,20 @@
             <div class="field-hint">Tự động ẩn các bài viết chứa link Shopee, Lazada, Tiki, TikTok Shop và các affiliate link khác.</div>
           </div>
           <div class="field">
-            <label for="sourceTemplate">Template nguồn (Đăng Status)</label>
+            <label for="sourceTemplate">
+              Template nguồn (Đăng Status)
+              <span class="fbs-hint-icon" data-tooltip="Dùng {author}, {platform}, {source}, {link} để tùy chỉnh format.">?</span>
+            </label>
             <input type="text" id="sourceTemplate" placeholder="• Nguồn bài viết: {platform} {author} {source}\n  {link}">
             <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page</div>
           </div>
           <div class="field">
             <label class="checkbox-label">
               <input type="checkbox" id="useHeuristicEval">
-              <span>Dùng heuristic thay AI eval (Agent mode)</span>
+              <span>
+                Dùng heuristic thay AI eval (Agent mode)
+                <span class="fbs-hint-icon" data-tooltip="Bỏ qua bước AI chấm điểm, dùng keyword matching để quyết định đăng/bỏ. Tiết kiệm 1 API call/bài.">?</span>
+              </span>
             </label>
             <div class="field-hint">Bỏ qua bước AI chấm điểm, dùng keyword matching để quyết định đăng/bỏ. Tiết kiệm 1 API call/bài.</div>
           </div>
@@ -103,7 +128,10 @@
             <div class="field-hint">Cách hiển thị bài viết chứa link affiliate (Shopee, Lazada, TikTok Shop...).</div>
           </div>
           <div class="field">
-            <label for="customInstructions">Hướng dẫn bổ sung (tùy chọn)</label>
+            <label for="customInstructions">
+              Hướng dẫn bổ sung (tùy chọn)
+              <span class="fbs-hint-icon" data-tooltip="Thêm yêu cầu riêng cho AI. VD: 'Ưu tiên số liệu', 'Bỏ ví dụ'">?</span>
+            </label>
             <textarea id="customInstructions" rows="2" placeholder="VD: Ưu tiên số liệu, bỏ ví dụ..."></textarea>
           </div>
           <div class="field">
@@ -115,15 +143,73 @@
             <textarea id="customAffPrompt" rows="2" placeholder="VD: Viết review 1 câu..."></textarea>
           </div>
           <div class="field">
-            <label for="blockedDomains">Tắt extension trên (mỗi dòng 1 domain)</label>
+            <label for="blockedDomains">
+              Tắt extension trên (mỗi dòng 1 domain)
+              <span class="fbs-hint-icon" data-tooltip="Extension sẽ không hoạt động trên các URL chứa chuỗi này.">?</span>
+            </label>
             <textarea id="blockedDomains" rows="3" placeholder="VD:&#10;groups.facebook.com&#10;x.com/notifications"></textarea>
             <div class="field-hint">Extension sẽ không hoạt động trên các URL chứa chuỗi này.</div>
           </div>
         </div>
       </div>
 
+      <div class="accordion">
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">
+          Template Library
+          <span class="fbs-hint-icon" data-tooltip="Lưu và tái sử dụng các prompt template yêu thích của bạn.">?</span>
+        </div>
+        <div class="accordion-content">
+          <div class="field">
+            <label for="templateName">Tên template</label>
+            <input type="text" id="templateName" placeholder="VD: Review sản phẩm ngắn gọn">
+          </div>
+          <div class="field">
+            <label for="templateType">Loại template</label>
+            <select id="templateType">
+              <option value="summary">Tóm tắt</option>
+              <option value="affiliate">Affiliate</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="templatePrompt">Nội dung prompt</label>
+            <textarea id="templatePrompt" rows="3" placeholder="VD: Viết review ngắn gọn 2-3 câu, tập trung vào ưu điểm chính..."></textarea>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button id="saveTemplateBtn" class="btn btn-primary" style="flex: 1;">Lưu Template</button>
+            <button id="clearTemplateFormBtn" class="btn btn-secondary" style="flex: 1;">Xóa Form</button>
+          </div>
+          <div id="templateStatus" class="status" role="status" aria-live="polite"></div>
+
+          <div style="margin-top: 16px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Templates đã lưu</label>
+            <div id="templateList" class="template-list"></div>
+          </div>
+        </div>
+      </div>
+
       <button id="saveBtn" class="btn btn-primary" style="margin-top:15px">Lưu cài đặt</button>
       <div id="status" class="status" role="status" aria-live="polite"></div>
+
+      <!-- Settings Management -->
+      <div class="accordion" style="margin-top:15px">
+        <div class="accordion-header" role="button" aria-expanded="false" tabindex="0">
+          Quản lý cài đặt
+          <span class="fbs-hint-icon" data-tooltip="Backup và restore cài đặt của bạn.">?</span>
+        </div>
+        <div class="accordion-content">
+          <div class="field">
+            <label>Backup & Restore</label>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+              <button id="backupSettingsBtn" class="btn btn-secondary" style="flex: 1;">Backup ngay</button>
+              <button id="restoreSettingsBtn" class="btn btn-secondary" style="flex: 1;">Restore</button>
+            </div>
+            <div class="field-hint">Tự động backup khi cài đặt thay đổi. Giữ 5 backup gần nhất.</div>
+          </div>
+          <div id="backupList" class="backup-list"></div>
+          <div id="settingsManagementStatus" class="status" role="status" aria-live="polite"></div>
+        </div>
+      </div>
 
 <!-- Debug Panel (Test Mode) -->
       <div id="debugPanel" class="debug-panel" style="display:none;margin-top:20px;padding:15px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9;">
@@ -186,14 +272,29 @@
 
     <!-- History Tab -->
     <div class="tab-content" id="tab-history">
-      <!-- Agent Stats (Feature 7) -->
-      <div id="agentStatsBox" style="display:none;background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:#a8a0cc;">
-        <div style="font-weight:700;color:#c9b8ff;margin-bottom:8px;font-size:13px;">📊 Detection Stats</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;line-height:1.6;">
-          <span>Bài đã quét: <b id="statPostsToday" style="color:#e5ddff;">–</b></span>
-          <span>Bài bị chặn: <b id="statPostsTotal" style="color:#e5ddff;">–</b></span>
-          <span>Hiện lại: <b id="statSkipped" style="color:#e5ddff;">–</b></span>
-          <span>Lý do chính: <b id="statLastPost" style="color:#e5ddff;">–</b></span>
+      <!-- Agent Stats (Feature 7) - Redesigned -->
+      <div id="agentStatsBox" class="agent-stats-widget">
+        <div class="agent-stats-header">
+          <span class="agent-stats-icon">📊</span>
+          <span class="agent-stats-title">Detection Stats</span>
+        </div>
+        <div class="agent-stats-grid">
+          <div class="agent-stat-item">
+            <div class="agent-stat-value" id="statPostsToday">–</div>
+            <div class="agent-stat-label">Bài đã quét</div>
+          </div>
+          <div class="agent-stat-item">
+            <div class="agent-stat-value" id="statPostsTotal">–</div>
+            <div class="agent-stat-label">Bài bị chặn</div>
+          </div>
+          <div class="agent-stat-item">
+            <div class="agent-stat-value" id="statSkipped">–</div>
+            <div class="agent-stat-label">Hiện lại</div>
+          </div>
+          <div class="agent-stat-item agent-stat-item-wide">
+            <div class="agent-stat-label">Lý do chính</div>
+            <div class="agent-stat-value agent-stat-value-small" id="statLastPost">–</div>
+          </div>
         </div>
       </div>
       <div id="postTimeSuggestBox" class="post-time-suggest" style="display:none"></div>
@@ -253,6 +354,7 @@
         <div class="theme-toggle">
           <label>Theme</label>
           <select id="themeSelect">
+            <option value="auto">Tự động</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>

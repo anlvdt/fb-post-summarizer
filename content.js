@@ -14,6 +14,15 @@ const summaryCache = new LRUCache(50);
 const observers = []; // Store observers for cleanup
 const listeners = []; // Store event listeners for cleanup
 
+// Batch operations state
+const batchOperations = {
+  active: false,
+  selectedTexts: [],
+  currentIndex: 0,
+  results: [],
+  type: 'summary'
+};
+
 // Cleanup function
 function cleanup() {
   observers.forEach(obs => obs.disconnect());
@@ -46,7 +55,43 @@ chrome.storage.sync.get(["minLength", "blockedDomains", "sourceTemplate", "custo
     const blocked = d.blockedDomains.split("\n").map(s => s.trim()).filter(Boolean);
     if (blocked.some(pattern => href.includes(pattern))) isBlocked = true;
   }
+
+  // Auto-detect language from Facebook and set as default if not already set
+  detectAndSetLanguage();
 });
+
+// Detect language from Facebook page and set as default
+function detectAndSetLanguage() {
+  const htmlLang = document.documentElement.lang || "";
+  let detectedLang = "vi"; // Default to Vietnamese
+
+  // Map Facebook language codes to our output language
+  if (htmlLang.startsWith("en")) {
+    detectedLang = "en";
+  } else if (htmlLang.startsWith("vi")) {
+    detectedLang = "vi";
+  } else if (htmlLang.startsWith("zh")) {
+    detectedLang = "zh";
+  } else if (htmlLang.startsWith("ja")) {
+    detectedLang = "ja";
+  } else if (htmlLang.startsWith("ko")) {
+    detectedLang = "ko";
+  } else if (htmlLang.startsWith("th")) {
+    detectedLang = "th";
+  } else if (htmlLang.startsWith("id")) {
+    detectedLang = "id";
+  }
+
+  // Only set if user hasn't explicitly chosen a language
+  chrome.storage.sync.get(["outputLanguage", "languageAutoDetected"], (data) => {
+    if (!data.outputLanguage || data.languageAutoDetected !== false) {
+      chrome.storage.sync.set({
+        outputLanguage: detectedLang,
+        languageAutoDetected: true
+      });
+    }
+  });
+}
 
 function hashText(text) {
   let h = 0;
@@ -412,8 +457,25 @@ function ensureOverlay() {
     '<button class="fbs-tone-btn" data-tone="bullet">Bullet points</button>' +
     "</div>" +
     '<div class="fbs-panel-footer">' +
+    '<div class="fbs-shortcuts-hint">' +
+      '<div class="fbs-shortcut-item">' +
+        '<span class="fbs-shortcut-key">Ctrl</span>' +
+        '<span class="fbs-shortcut-key">C</span>' +
+        '<span class="fbs-shortcut-label">Copy</span>' +
+      '</div>' +
+      '<div class="fbs-shortcut-item">' +
+        '<span class="fbs-shortcut-key">Ctrl</span>' +
+        '<span class="fbs-shortcut-key">E</span>' +
+        '<span class="fbs-shortcut-label">Sửa</span>' +
+      '</div>' +
+      '<div class="fbs-shortcut-item">' +
+        '<span class="fbs-shortcut-key">Esc</span>' +
+        '<span class="fbs-shortcut-label">Đóng</span>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;">' +
     '<div class="fbs-footer-left" style="display:flex;gap:8px;">' +
-      '<button class="fbs-edit-btn" title="Chỉnh sửa"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' +
+      '<button class="fbs-edit-btn" title="Chỉnh sửa (Ctrl+E)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' +
       '<button class="fbs-stop-btn" title="Dừng stream"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg></button>' +
       '<select class="fbs-model-select" title="Chọn provider">' +
         '<option value="">Auto</option>' +
@@ -426,9 +488,10 @@ function ensureOverlay() {
       '<button class="fbs-regen-btn" title="Viết lại"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/></svg></button>' +
     '</div>' +
     '<div class="fbs-footer-right" style="display:flex;gap:10px;">' +
-      '<button class="fbs-copy-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
+      '<button class="fbs-copy-btn" title="Copy (Ctrl+C)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>' +
       '<button class="fbs-btn fbs-aff-btn" title="Chế thành bài Affiliate" style="padding:8px 16px; font-size:13px; border-radius:8px; background:linear-gradient(135deg, #fdcb6e, #e17055); box-shadow:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="M8 12h8"/></svg> Affiliate</button>' +
       '<button class="fbs-post-status-btn" style="display:none; padding:8px 18px; font-size:13px; font-weight:600; border-radius:8px; border:none; background:linear-gradient(135deg, #00b894, #00cec9); color:#fff; cursor:pointer;" title="Mở FB Composer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Đăng Status</button>' +
+    '</div>' +
     '</div>' +
     "</div>";
   document.body.appendChild(panel);
@@ -458,6 +521,57 @@ function ensureOverlay() {
 
 let lastSummarizeParams = null;
 
+// Undo/Redo system for textarea
+const undoRedoHistory = {
+  stack: [],
+  currentIndex: -1,
+  maxSize: 50,
+
+  push(value) {
+    // Remove any redo history after current position
+    this.stack = this.stack.slice(0, this.currentIndex + 1);
+
+    // Add new state
+    this.stack.push(value);
+
+    // Limit stack size
+    if (this.stack.length > this.maxSize) {
+      this.stack.shift();
+    } else {
+      this.currentIndex++;
+    }
+  },
+
+  undo() {
+    if (this.currentIndex > 0) {
+      this.currentIndex--;
+      return this.stack[this.currentIndex];
+    }
+    return null;
+  },
+
+  redo() {
+    if (this.currentIndex < this.stack.length - 1) {
+      this.currentIndex++;
+      return this.stack[this.currentIndex];
+    }
+    return null;
+  },
+
+  canUndo() {
+    return this.currentIndex > 0;
+  },
+
+  canRedo() {
+    return this.currentIndex < this.stack.length - 1;
+  },
+
+  clear() {
+    this.stack = [];
+    this.currentIndex = -1;
+  }
+};
+
 function toggleEdit() {
   if (!panelBody) return;
   const editBtn = panel.querySelector(".fbs-edit-btn");
@@ -472,6 +586,9 @@ function toggleEdit() {
       '<div class="fbs-result">' + fmt(editedText) + "</div>";
     editBtn.innerHTML =
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Sửa';
+
+    // Clear undo/redo history when exiting edit mode
+    undoRedoHistory.clear();
   } else {
     // Switch to edit mode
     const currentText =
@@ -481,6 +598,39 @@ function toggleEdit() {
       esc(currentText) +
       "</textarea>";
     const textarea = panelBody.querySelector(".fbs-edit-textarea");
+
+    // Initialize undo/redo history
+    undoRedoHistory.clear();
+    undoRedoHistory.push(currentText);
+
+    // Track changes for undo/redo
+    let typingTimer;
+    textarea.addEventListener('input', () => {
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        undoRedoHistory.push(textarea.value);
+      }, 500); // Save state after 500ms of no typing
+    });
+
+    // Handle Ctrl+Z (undo) and Ctrl+Y (redo)
+    textarea.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          const prevValue = undoRedoHistory.undo();
+          if (prevValue !== null) {
+            textarea.value = prevValue;
+          }
+        } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          const nextValue = undoRedoHistory.redo();
+          if (nextValue !== null) {
+            textarea.value = nextValue;
+          }
+        }
+      }
+    });
+
     textarea.focus();
     textarea.setSelectionRange(0, 0);
     editBtn.innerHTML =
@@ -715,7 +865,31 @@ async function handlePostStatus() {
 
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeOverlay();
+  // Close panel with Escape
+  if (e.key === "Escape") {
+    closeOverlay();
+    return;
+  }
+
+  // Panel shortcuts (only when panel is visible)
+  const panel = document.querySelector(".fbs-panel.fbs-visible");
+  if (!panel) return;
+
+  // Copy with Ctrl+C (when not in input/textarea)
+  if (e.ctrlKey && e.key === "c" && !["INPUT", "TEXTAREA"].includes(e.target.tagName)) {
+    e.preventDefault();
+    const copyBtn = panel.querySelector(".fbs-copy-btn");
+    if (copyBtn) copyBtn.click();
+    return;
+  }
+
+  // Edit with Ctrl+E
+  if (e.ctrlKey && e.key === "e") {
+    e.preventDefault();
+    const editBtn = panel.querySelector(".fbs-edit-btn");
+    if (editBtn && editBtn.style.display !== "none") editBtn.click();
+    return;
+  }
 });
 
 // ============================================================
@@ -894,6 +1068,51 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+
+// Display structured error with actions
+function displayError(errorData) {
+  let errorHtml = '';
+
+  // If errorData is a string (legacy), convert to structured format
+  if (typeof errorData === 'string') {
+    errorHtml = '<div class="fbs-error">' + esc(errorData) + '</div>';
+  } else if (errorData && typeof errorData === 'object') {
+    // Structured error from errors.js
+    const severityClass = errorData.severity === 'warning' ? 'fbs-error-warning' :
+                          errorData.severity === 'info' ? 'fbs-error-info' : '';
+
+    errorHtml = '<div class="fbs-error ' + severityClass + '">' +
+      '<div class="fbs-error-header">' +
+        '<div class="fbs-error-icon">!</div>' +
+        '<div class="fbs-error-title">' + esc(errorData.message) + '</div>' +
+      '</div>' +
+      '<div class="fbs-error-detail">' + esc(errorData.detail) + '</div>' +
+      '<div class="fbs-error-action">💡 ' + esc(errorData.action) + '</div>';
+
+    // Add action buttons if available
+    if (errorData.actionButton) {
+      errorHtml += '<div class="fbs-error-buttons">';
+
+      if (errorData.retryable) {
+        errorHtml += '<button class="fbs-error-btn fbs-error-btn-primary" onclick="window.location.reload()">Thử lại</button>';
+      }
+
+      if (errorData.actionUrl) {
+        errorHtml += '<button class="fbs-error-btn" onclick="chrome.runtime.openOptionsPage()">' +
+                     esc(errorData.actionButton) + '</button>';
+      }
+
+      errorHtml += '</div>';
+    }
+
+    errorHtml += '</div>';
+  } else {
+    errorHtml = '<div class="fbs-error">Lỗi không xác định</div>';
+  }
+
+  return errorHtml;
+}
+
 function fmt(t) {
   // Normalize *** (old prompt artifact) to ** before escaping
   const cleaned = t.trim().replace(/^\*{3}\s*/gm, "**");
@@ -1202,6 +1421,185 @@ async function wakeServiceWorker() {
   } catch (_) {}
 }
 
+// === BATCH OPERATIONS ===
+async function startBatchOperation(texts, type = 'summary') {
+  if (!texts || texts.length === 0) {
+    alert('Không có text nào được chọn');
+    return;
+  }
+
+  batchOperations.active = true;
+  batchOperations.selectedTexts = texts;
+  batchOperations.currentIndex = 0;
+  batchOperations.results = [];
+  batchOperations.type = type;
+
+  showBatchProgress();
+  await processBatchNext();
+}
+
+async function processBatchNext() {
+  if (!batchOperations.active) return;
+
+  const { selectedTexts, currentIndex, type } = batchOperations;
+
+  if (currentIndex >= selectedTexts.length) {
+    // Batch complete
+    showBatchResults();
+    return;
+  }
+
+  const text = selectedTexts[currentIndex];
+  updateBatchProgress(currentIndex + 1, selectedTexts.length);
+
+  try {
+    // Process current text
+    const result = await processSingleText(text, type);
+    batchOperations.results.push({ text, result, success: true });
+  } catch (error) {
+    batchOperations.results.push({ text, result: error.message, success: false });
+  }
+
+  batchOperations.currentIndex++;
+
+  // Process next after short delay
+  setTimeout(() => processBatchNext(), 500);
+}
+
+async function processSingleText(text, type) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        action: "summarize",
+        text: text,
+        type: type,
+        summaryLength: "medium",
+        promptStyle: "default"
+      },
+      (response) => {
+        if (response && response.success) {
+          resolve(response.result);
+        } else {
+          reject(new Error(response?.error || "Unknown error"));
+        }
+      }
+    );
+  });
+}
+
+function showBatchProgress() {
+  const html = `
+    <div class="fbs-batch-progress">
+      <div class="fbs-batch-header">
+        <div class="fbs-batch-title">Đang xử lý hàng loạt...</div>
+        <button class="fbs-batch-cancel">Hủy</button>
+      </div>
+      <div class="fbs-batch-bar">
+        <div class="fbs-batch-bar-fill" style="width: 0%"></div>
+      </div>
+      <div class="fbs-batch-status">0 / ${batchOperations.selectedTexts.length}</div>
+    </div>
+  `;
+
+  openOverlay(html, false, batchOperations.type);
+
+  const cancelBtn = panel.querySelector('.fbs-batch-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      batchOperations.active = false;
+      closeOverlay();
+    });
+  }
+}
+
+function updateBatchProgress(current, total) {
+  const barFill = panel.querySelector('.fbs-batch-bar-fill');
+  const status = panel.querySelector('.fbs-batch-status');
+
+  if (barFill) {
+    const percent = (current / total) * 100;
+    barFill.style.width = percent + '%';
+  }
+
+  if (status) {
+    status.textContent = `${current} / ${total}`;
+  }
+}
+
+function showBatchResults() {
+  const { results } = batchOperations;
+  const successCount = results.filter(r => r.success).length;
+  const failCount = results.length - successCount;
+
+  let html = `
+    <div class="fbs-batch-results">
+      <div class="fbs-batch-summary">
+        <div class="fbs-batch-summary-item success">
+          <span class="fbs-batch-summary-count">${successCount}</span>
+          <span class="fbs-batch-summary-label">Thành công</span>
+        </div>
+        <div class="fbs-batch-summary-item error">
+          <span class="fbs-batch-summary-count">${failCount}</span>
+          <span class="fbs-batch-summary-label">Thất bại</span>
+        </div>
+      </div>
+      <div class="fbs-batch-results-list">
+  `;
+
+  results.forEach((item, index) => {
+    const statusClass = item.success ? 'success' : 'error';
+    const statusIcon = item.success ? '✓' : '✗';
+    const preview = item.text.substring(0, 50) + (item.text.length > 50 ? '...' : '');
+
+    html += `
+      <div class="fbs-batch-result-item ${statusClass}">
+        <div class="fbs-batch-result-header">
+          <span class="fbs-batch-result-icon">${statusIcon}</span>
+          <span class="fbs-batch-result-preview">${esc(preview)}</span>
+        </div>
+        ${item.success ? `<div class="fbs-batch-result-content">${esc(item.result)}</div>` : `<div class="fbs-batch-result-error">${esc(item.result)}</div>`}
+      </div>
+    `;
+  });
+
+  html += `
+      </div>
+      <div class="fbs-batch-actions">
+        <button class="fbs-batch-copy-all btn btn-primary">Copy tất cả</button>
+        <button class="fbs-batch-close btn btn-secondary">Đóng</button>
+      </div>
+    </div>
+  `;
+
+  openOverlay(html, false, batchOperations.type);
+
+  // Add event listeners
+  const copyAllBtn = panel.querySelector('.fbs-batch-copy-all');
+  if (copyAllBtn) {
+    copyAllBtn.addEventListener('click', () => {
+      const allResults = results
+        .filter(r => r.success)
+        .map(r => r.result)
+        .join('\n\n---\n\n');
+
+      navigator.clipboard.writeText(allResults).then(() => {
+        copyAllBtn.textContent = 'Đã copy!';
+        setTimeout(() => {
+          copyAllBtn.textContent = 'Copy tất cả';
+        }, 2000);
+      });
+    });
+  }
+
+  const closeBtn = panel.querySelector('.fbs-batch-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      closeOverlay();
+      batchOperations.active = false;
+    });
+  }
+}
+
 async function summarizeText(text, type = "summary", contextElement = null, tone = null) {
   if (!text || text.length < 50) {
     openOverlay(
@@ -1261,13 +1659,18 @@ async function summarizeText(text, type = "summary", contextElement = null, tone
       : type === "status_share"
         ? "Đang viết Status..."
         : "Đang tóm tắt...";
-  openOverlay(
-    '<div class="fbs-loading"><div class="fbs-spinner"></div><span>' +
-      title +
-      "</span></div>",
-    false,
-    type,
-  );
+
+  // Show skeleton loading instead of spinner
+  const skeletonHtml = '<div class="fbs-panel-body fbs-loading">' +
+    '<div class="fbs-skeleton fbs-skeleton-text"></div>' +
+    '<div class="fbs-skeleton fbs-skeleton-text"></div>' +
+    '<div class="fbs-skeleton fbs-skeleton-text"></div>' +
+    '<div class="fbs-skeleton fbs-skeleton-text"></div>' +
+    '<div class="fbs-skeleton fbs-skeleton-text"></div>' +
+    '<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.5);">' + title + '</div>' +
+    '</div>';
+
+  openOverlay(skeletonHtml, false, type);
 
   // Wake SW before connecting port (MV3 SW dies after ~30s idle)
   await wakeServiceWorker();
@@ -1372,10 +1775,11 @@ async function summarizeText(text, type = "summary", contextElement = null, tone
       currentPort = null;
     } else if (msg.action === "error") {
       isSummarizing = false;
-      openOverlay(
-        '<div class="fbs-error">' + esc(msg.error) + "</div>",
-        false,
-      );
+
+      // Use structured error display
+      const errorHtml = displayError(msg.errorData || msg.error || 'Lỗi không xác định');
+      openOverlay(errorHtml, false);
+
       try {
         currentPort.disconnect();
       } catch (_) {}
@@ -1387,11 +1791,8 @@ async function summarizeText(text, type = "summary", contextElement = null, tone
     if (isSummarizing) {
       isSummarizing = false;
       if (panelBody && !panelBody.innerHTML.includes("fbs-result")) {
-        openOverlay(
-          '<div class="fbs-error">Kết nối bị ngắt.</div>',
-          false,
-          type,
-        );
+        const errorHtml = displayError('Kết nối bị ngắt.');
+        openOverlay(errorHtml, false, type);
       } else if (panelBody) {
         openOverlay(panelBody.innerHTML, false, type);
       }

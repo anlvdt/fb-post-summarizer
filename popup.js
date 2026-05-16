@@ -1,23 +1,62 @@
 // === THEME ===
-const themeSelect = document.getElementById("themeSelect");
-chrome.storage.sync.get("theme", (d) => {
-  if (chrome.runtime.lastError) {
-    console.error("Failed to load theme:", chrome.runtime.lastError);
-    return;
-  }
-  const theme = d.theme || "dark";
-  if (theme === "light") document.body.classList.add("light");
+async function initTheme() {
+  const { theme } = await chrome.storage.sync.get({ theme: 'auto' });
+  applyTheme(theme);
+
+  // Update select value
+  const themeSelect = document.getElementById("themeSelect");
   themeSelect.value = theme;
-});
-themeSelect.addEventListener("change", () => {
+}
+
+function applyTheme(theme) {
+  if (theme === 'auto') {
+    // Detect from system preference
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('light', !prefersDark);
+  } else if (theme === 'light') {
+    document.body.classList.add('light');
+  } else {
+    document.body.classList.remove('light');
+  }
+}
+
+const themeSelect = document.getElementById("themeSelect");
+themeSelect.addEventListener("change", async () => {
   const theme = themeSelect.value;
-  document.body.classList.toggle("light", theme === "light");
-  chrome.storage.sync.set({ theme }, () => {
-    if (chrome.runtime.lastError) {
-      console.error("Failed to save theme:", chrome.runtime.lastError);
-    }
-  });
+  await chrome.storage.sync.set({ theme });
+  applyTheme(theme);
 });
+
+// Listen to system theme changes
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async () => {
+  const { theme } = await chrome.storage.sync.get({ theme: 'auto' });
+  if (theme === 'auto') {
+    applyTheme('auto');
+  }
+});
+
+// Initialize theme on load
+initTheme();
+
+// === SETUP WIZARD CHECK ===
+// Check if wizard has been completed, if not, redirect to wizard
+async function checkWizardStatus() {
+  const data = await chrome.storage.local.get('wizardCompleted');
+  if (!data.wizardCompleted) {
+    // Open wizard in new window
+    chrome.windows.create({
+      url: chrome.runtime.getURL('setup-wizard.html'),
+      type: 'popup',
+      width: 400,
+      height: 600
+    });
+    // Close current popup
+    window.close();
+  }
+}
+
+// Run wizard check on popup load
+checkWizardStatus();
 
 // === TABS ===
 // Cache selectors for better performance
@@ -41,7 +80,7 @@ allTabs.forEach((tab) => {
 
 // === SETTINGS ===
 const minLengthInput = document.getElementById("minLength");
-const outputLangSel = document.getElementById("outputLang");
+const outputLangSel = document.getElementById("outputLanguage");
 const summaryLengthSel = document.getElementById("summaryLength");
 const promptStyleSel = document.getElementById("promptStyle");
 const customInstructionsEl = document.getElementById("customInstructions");
@@ -59,7 +98,7 @@ const status = document.getElementById("status");
 chrome.storage.sync.get(
   [
     "minLength",
-    "outputLang",
+    "outputLanguage",
     "summaryLength",
     "promptStyle",
     "customInstructions",
@@ -75,7 +114,7 @@ chrome.storage.sync.get(
   ],
   (d) => {
     if (d.minLength) minLengthInput.value = d.minLength;
-    if (d.outputLang) outputLangSel.value = d.outputLang;
+    if (d.outputLanguage) outputLangSel.value = d.outputLanguage;
     if (d.summaryLength) summaryLengthSel.value = d.summaryLength;
     if (d.promptStyle) promptStyleSel.value = d.promptStyle;
     if (d.customInstructions) customInstructionsEl.value = d.customInstructions;
@@ -108,7 +147,7 @@ saveBtn.addEventListener("click", () => {
   chrome.storage.sync.set(
     {
       minLength: minLen,
-      outputLang: outputLangSel.value,
+      outputLanguage: outputLangSel.value,
       summaryLength: summaryLengthSel.value,
       promptStyle: promptStyleSel.value,
       customInstructions: customInstructionsEl.value.trim(),
@@ -120,8 +159,18 @@ saveBtn.addEventListener("click", () => {
       adDisplayMode: adDisplayModeEl.value,
       affiliateDisplayMode: affiliateDisplayModeEl.value,
       blockedDomains: blockedDomainsEl.value.trim(),
+      languageAutoDetected: false, // User manually changed settings
     },
-    () => showStatus("Đã lưu", "success"),
+    () => {
+      showStatus("Đã lưu", "success");
+
+      // Create backup after saving
+      chrome.runtime.sendMessage({ action: "backupSettings" }, (response) => {
+        if (response && response.success) {
+          loadBackupList();
+        }
+      });
+    },
   );
 });
 
@@ -632,6 +681,7 @@ async function loadAgentStats() {
       return;
     }
 
+    // Always show the widget when there are stats
     box.style.display = "block";
     const today = new Date().toDateString();
     const postsToday = (stats && stats.postsTodayDate === today) ? (stats.postsToday || 0) : 0;
@@ -680,3 +730,261 @@ document.querySelectorAll('.accordion-header').forEach(header => {
     }
   });
 });
+
+// === TEMPLATE LIBRARY ===
+const templateNameInput = document.getElementById("templateName");
+const templateTypeSelect = document.getElementById("templateType");
+const templatePromptInput = document.getElementById("templatePrompt");
+const saveTemplateBtn = document.getElementById("saveTemplateBtn");
+const clearTemplateFormBtn = document.getElementById("clearTemplateFormBtn");
+const templateStatus = document.getElementById("templateStatus");
+const templateList = document.getElementById("templateList");
+
+// Load templates on init
+loadTemplates();
+
+// Save template
+saveTemplateBtn.addEventListener("click", async () => {
+  const name = templateNameInput.value.trim();
+  const type = templateTypeSelect.value;
+  const prompt = templatePromptInput.value.trim();
+
+  if (!name) {
+    showTemplateStatus("Vui lòng nhập tên template", "error");
+    return;
+  }
+
+  if (!prompt) {
+    showTemplateStatus("Vui lòng nhập nội dung prompt", "error");
+    return;
+  }
+
+  const template = {
+    id: Date.now().toString(),
+    name,
+    type,
+    prompt,
+    createdAt: Date.now()
+  };
+
+  const { templates = [] } = await chrome.storage.local.get("templates");
+  templates.push(template);
+  await chrome.storage.local.set({ templates });
+
+  showTemplateStatus("Đã lưu template", "success");
+  clearTemplateForm();
+  loadTemplates();
+});
+
+// Clear template form
+clearTemplateFormBtn.addEventListener("click", () => {
+  clearTemplateForm();
+});
+
+function clearTemplateForm() {
+  templateNameInput.value = "";
+  templatePromptInput.value = "";
+  templateTypeSelect.value = "summary";
+}
+
+// Load templates
+async function loadTemplates() {
+  const { templates = [] } = await chrome.storage.local.get("templates");
+
+  if (templates.length === 0) {
+    templateList.innerHTML = '<div class="template-empty">Chưa có template nào. Tạo template đầu tiên của bạn!</div>';
+    return;
+  }
+
+  templateList.innerHTML = templates.map(template => `
+    <div class="template-item" data-id="${template.id}">
+      <div class="template-header">
+        <div class="template-name">${escapeHtml(template.name)}</div>
+        <div class="template-type ${template.type}">${template.type}</div>
+      </div>
+      <div class="template-prompt">${escapeHtml(template.prompt)}</div>
+      <div class="template-actions">
+        <button class="btn btn-secondary template-use-btn" data-id="${template.id}">Sử dụng</button>
+        <button class="btn btn-danger template-delete-btn" data-id="${template.id}">Xóa</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Add event listeners
+  document.querySelectorAll('.template-use-btn').forEach(btn => {
+    btn.addEventListener('click', () => useTemplate(btn.dataset.id));
+  });
+
+  document.querySelectorAll('.template-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteTemplate(btn.dataset.id));
+  });
+}
+
+// Use template
+async function useTemplate(id) {
+  const { templates = [] } = await chrome.storage.local.get("templates");
+  const template = templates.find(t => t.id === id);
+
+  if (!template) return;
+
+  // Apply template to appropriate field
+  if (template.type === "summary") {
+    customSummaryPromptEl.value = template.prompt;
+  } else if (template.type === "affiliate") {
+    customAffPromptEl.value = template.prompt;
+  } else if (template.type === "status") {
+    customSummaryPromptEl.value = template.prompt;
+  }
+
+  showTemplateStatus("Đã áp dụng template", "success");
+
+  // Scroll to the field
+  const targetField = template.type === "affiliate" ? customAffPromptEl : customSummaryPromptEl;
+  targetField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  targetField.focus();
+}
+
+// Delete template
+async function deleteTemplate(id) {
+  if (!confirm("Xóa template này?")) return;
+
+  const { templates = [] } = await chrome.storage.local.get("templates");
+  const filtered = templates.filter(t => t.id !== id);
+  await chrome.storage.local.set({ templates: filtered });
+
+  showTemplateStatus("Đã xóa template", "success");
+  loadTemplates();
+}
+
+// Show template status
+function showTemplateStatus(message, type) {
+  templateStatus.textContent = message;
+  templateStatus.className = `status ${type}`;
+  templateStatus.style.display = "block";
+  setTimeout(() => {
+    templateStatus.style.display = "none";
+  }, 3000);
+}
+
+// Escape HTML helper
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// === SETTINGS MANAGEMENT ===
+const backupSettingsBtn = document.getElementById("backupSettingsBtn");
+const restoreSettingsBtn = document.getElementById("restoreSettingsBtn");
+const backupList = document.getElementById("backupList");
+const settingsManagementStatus = document.getElementById("settingsManagementStatus");
+
+// Load backup list on init
+loadBackupList();
+
+// Backup settings
+backupSettingsBtn.addEventListener("click", async () => {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "backupSettings" });
+    if (response && response.success) {
+      showSettingsManagementStatus("Đã backup cài đặt", "success");
+      loadBackupList();
+    } else {
+      showSettingsManagementStatus("Lỗi backup: " + (response?.error || "Unknown error"), "error");
+    }
+  } catch (error) {
+    showSettingsManagementStatus("Lỗi backup: " + error.message, "error");
+  }
+});
+
+// Restore settings (restore most recent)
+restoreSettingsBtn.addEventListener("click", async () => {
+  if (!confirm("Restore cài đặt từ backup gần nhất?")) return;
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "restoreSettings", backupIndex: 0 });
+    if (response && response.success) {
+      showSettingsManagementStatus("Đã restore cài đặt. Reload trang để áp dụng.", "success");
+      setTimeout(() => {
+        location.reload();
+      }, 1500);
+    } else {
+      showSettingsManagementStatus("Lỗi restore: " + (response?.error || "Unknown error"), "error");
+    }
+  } catch (error) {
+    showSettingsManagementStatus("Lỗi restore: " + error.message, "error");
+  }
+});
+
+// Load backup list
+async function loadBackupList() {
+  try {
+    const data = await chrome.storage.local.get("settingsBackups");
+    const backups = data.settingsBackups || [];
+
+    if (backups.length === 0) {
+      backupList.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Chưa có backup nào</div>';
+      return;
+    }
+
+    // Show backups in reverse order (most recent first)
+    backupList.innerHTML = backups.reverse().map((backup, index) => {
+      const date = new Date(backup.timestamp);
+      const dateStr = date.toLocaleString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      return `
+        <div class="backup-item">
+          <div class="backup-info">
+            <div class="backup-date">${dateStr}</div>
+            <div class="backup-version">Version ${backup.version}</div>
+          </div>
+          <div class="backup-actions">
+            <button class="btn btn-secondary backup-restore-btn" data-index="${index}">Restore</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Add event listeners
+    document.querySelectorAll('.backup-restore-btn').forEach(btn => {
+      btn.addEventListener('click', () => restoreFromBackup(parseInt(btn.dataset.index)));
+    });
+  } catch (error) {
+    console.error("Failed to load backup list:", error);
+  }
+}
+
+// Restore from specific backup
+async function restoreFromBackup(index) {
+  if (!confirm("Restore cài đặt từ backup này?")) return;
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: "restoreSettings", backupIndex: index });
+    if (response && response.success) {
+      showSettingsManagementStatus("Đã restore cài đặt. Reload trang để áp dụng.", "success");
+      setTimeout(() => {
+        location.reload();
+      }, 1500);
+    } else {
+      showSettingsManagementStatus("Lỗi restore: " + (response?.error || "Unknown error"), "error");
+    }
+  } catch (error) {
+    showSettingsManagementStatus("Lỗi restore: " + error.message, "error");
+  }
+}
+
+// Show settings management status
+function showSettingsManagementStatus(message, type) {
+  settingsManagementStatus.textContent = message;
+  settingsManagementStatus.className = `status ${type}`;
+  settingsManagementStatus.style.display = "block";
+  setTimeout(() => {
+    settingsManagementStatus.style.display = "none";
+  }, 3000);
+}
