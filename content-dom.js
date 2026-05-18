@@ -87,13 +87,26 @@ const CACHE_TTL = 60000; // 1 minute
 
 
 
-function findPostArticle(el) {
-  let p = el;
+function _findPostContainer(element) {
+  // Check cache first
+  if (_containerCache.has(element)) {
+    return _containerCache.get(element);
+  }
+
+  let p = element;
   for (let i = 0; i < 25; i++) {
     p = p.parentElement;
-    if (!p || p === document.body) return null;
-    if (p.getAttribute("role") === "article") return p;
+    if (!p || p === document.body) {
+      _containerCache.set(element, null);
+      return null;
+    }
+    if (p.getAttribute("role") === "article") {
+      _containerCache.set(element, p);
+      return p;
+    }
   }
+
+  _containerCache.set(element, null);
   return null;
 }
 
@@ -122,7 +135,7 @@ function isSponsored(el) {
   if (SITE !== "facebook") return false;
   // Get the containing post (wrapper or article)
   const container = findFeedWrapper(el) ||
-    (el.getAttribute && el.getAttribute("role") === "article" ? el : findPostArticle(el));
+    (el.getAttribute && el.getAttribute("role") === "article" ? el : _findPostContainer(el));
   if (!container) return false;
 
   // 1. href to Facebook ads about page (strong signal)
