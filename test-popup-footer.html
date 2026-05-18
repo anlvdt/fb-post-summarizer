@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Pop-up Footer - FeedWriter</title>
+  <link rel="stylesheet" href="content.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #fff;
+    }
+    .test-container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .test-header {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: rgba(168, 85, 247, 0.1);
+      border-radius: 12px;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+    .test-header h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+      color: #a855f7;
+    }
+    .test-header p {
+      margin: 0;
+      font-size: 14px;
+      color: #b0b3b8;
+    }
+    .test-buttons {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .test-btn {
+      padding: 10px 20px;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      border-radius: 8px;
+      background: rgba(168, 85, 247, 0.1);
+      color: #a855f7;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .test-btn:hover {
+      background: rgba(168, 85, 247, 0.2);
+      border-color: #a855f7;
+    }
+    .viewport-info {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: monospace;
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body>
+  <div class="viewport-info" id="viewportInfo">
+    Viewport: <span id="viewportSize"></span>
+  </div>
+
+  <div class="test-container">
+    <div class="test-header">
+      <h1>🧪 Test Pop-up Footer UI/UX</h1>
+      <p>Kiểm tra responsive và hiển thị footer trên các kích thước màn hình khác nhau</p>
+    </div>
+
+    <div class="test-buttons">
+      <button class="test-btn" onclick="openTestPopup()">Mở Pop-up</button>
+      <button class="test-btn" onclick="closeTestPopup()">Đóng Pop-up</button>
+      <button class="test-btn" onclick="toggleTheme()">Đổi Theme</button>
+      <button class="test-btn" onclick="simulateMobile()">Simulate Mobile (375px)</button>
+      <button class="test-btn" onclick="simulateTablet()">Simulate Tablet (768px)</button>
+      <button class="test-btn" onclick="simulateDesktop()">Simulate Desktop (1440px)</button>
+    </div>
+  </div>
+
+  <!-- Backdrop -->
+  <div class="fbs-backdrop"></div>
+
+  <!-- Panel -->
+  <div class="fbs-panel">
+    <div class="fbs-panel-head">
+      <span class="fbs-title-text">Tóm tắt nội dung</span>
+      <button class="fbs-close">×</button>
+    </div>
+
+    <div class="fbs-panel-body">
+      <div class="fbs-result">
+        <div class="fbs-title-line">ĐÂY LÀ TIÊU ĐỀ TÓM TẮT</div>
+        <div class="fbs-para">
+          Đây là đoạn văn mô phỏng nội dung tóm tắt. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+        </div>
+        <div class="fbs-para">
+          Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+        </div>
+        <div class="fbs-bullet">Điểm chính thứ nhất về nội dung</div>
+        <div class="fbs-bullet">Điểm chính thứ hai với thông tin quan trọng</div>
+        <div class="fbs-bullet">Điểm chính thứ ba kết luận</div>
+      </div>
+    </div>
+
+    <div class="fbs-panel-footer" style="display: flex;">
+      <div class="fbs-shortcuts-hint">
+        <div class="fbs-shortcut-item">
+          <span class="fbs-shortcut-key">Ctrl</span>
+          <span class="fbs-shortcut-key">C</span>
+          <span class="fbs-shortcut-label">Copy</span>
+        </div>
+        <div class="fbs-shortcut-item">
+          <span class="fbs-shortcut-key">Ctrl</span>
+          <span class="fbs-shortcut-key">E</span>
+          <span class="fbs-shortcut-label">Sửa</span>
+        </div>
+        <div class="fbs-shortcut-item">
+          <span class="fbs-shortcut-key">Esc</span>
+          <span class="fbs-shortcut-label">Đóng</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;width:100%;">
+        <div class="fbs-footer-left" style="display:flex;gap:8px;">
+          <button class="fbs-edit-btn" style="display:inline-flex;" title="Chỉnh sửa (Ctrl+E)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/>
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+            </svg>
+          </button>
+          <select class="fbs-model-select" title="Chọn provider" style="display:inline-block;">
+            <option value="">Auto</option>
+            <option value="groq">Groq</option>
+            <option value="gemini">Gemini</option>
+            <option value="cerebras">Cerebras</option>
+            <option value="sambanova">Samba</option>
+            <option value="openrouter">OR</option>
+          </select>
+          <button class="fbs-regen-btn" style="display:inline-flex;" title="Viết lại">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 2v6h-6"/>
+              <path d="M21 13a9 9 0 1 1-3-7.7L21 8"/>
+            </svg>
+          </button>
+        </div>
+        <div class="fbs-footer-right" style="display:flex;gap:10px;">
+          <button class="fbs-copy-btn" style="display:inline-flex;" title="Copy (Ctrl+C)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg> Copy
+          </button>
+          <button class="fbs-btn fbs-aff-btn" title="Chế thành bài Affiliate" style="padding:8px 16px; font-size:13px; border-radius:8px; background:linear-gradient(135deg, #fdcb6e, #e17055); box-shadow:none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v8"/>
+              <path d="M8 12h8"/>
+            </svg> Affiliate
+          </button>
+          <button class="fbs-post-status-btn" style="display:inline-flex; padding:8px 18px; font-size:13px; font-weight:600; border-radius:8px; border:none; background:linear-gradient(135deg, #00b894, #00cec9); color:#fff; cursor:pointer;" title="Mở FB Composer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg> Đăng Status
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Update viewport size
+    function updateViewportInfo() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      document.getElementById('viewportSize').textContent = `${width}×${height}px`;
+    }
+
+    window.addEventListener('resize', updateViewportInfo);
+    updateViewportInfo();
+
+    // Open popup
+    function openTestPopup() {
+      document.querySelector('.fbs-backdrop').classList.add('fbs-visible');
+      document.querySelector('.fbs-panel').classList.add('fbs-visible');
+    }
+
+    // Close popup
+    function closeTestPopup() {
+      document.querySelector('.fbs-backdrop').classList.remove('fbs-visible');
+      document.querySelector('.fbs-panel').classList.remove('fbs-visible');
+    }
+
+    // Toggle theme
+    function toggleTheme() {
+      const panel = document.querySelector('.fbs-panel');
+      const currentTheme = panel.getAttribute('data-fbs-theme');
+      if (currentTheme === 'light') {
+        panel.removeAttribute('data-fbs-theme');
+      } else {
+        panel.setAttribute('data-fbs-theme', 'light');
+      }
+    }
+
+    // Simulate viewport sizes
+    function simulateMobile() {
+      alert('Resize browser window to 375px width to test mobile view');
+    }
+
+    function simulateTablet() {
+      alert('Resize browser window to 768px width to test tablet view');
+    }
+
+    function simulateDesktop() {
+      alert('Resize browser window to 1440px width to test desktop view');
+    }
+
+    // Close button
+    document.querySelector('.fbs-close').addEventListener('click', closeTestPopup);
+
+    // Close on backdrop click
+    document.querySelector('.fbs-backdrop').addEventListener('click', closeTestPopup);
+
+    // Auto open on load
+    setTimeout(openTestPopup, 500);
+  </script>
+</body>
+</html>

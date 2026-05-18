@@ -87,11 +87,11 @@
           </div>
           <div class="field">
             <label for="sourceTemplate">
-              Template nguồn (Đăng Status)
-              <span class="fbs-hint-icon" data-tooltip="Dùng {author}, {platform}, {source}, {link} để tùy chỉnh format.">?</span>
+              Thông tin nguồn & tham khảo
+              <span class="fbs-hint-icon" data-tooltip="Thêm link Github, download, website gốc... Dùng {author}, {platform}, {source}, {link} để tùy chỉnh format.">?</span>
             </label>
-            <input type="text" id="sourceTemplate" placeholder="• Nguồn bài viết: {platform} {author} {source}\n  {link}">
-            <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page</div>
+            <textarea id="sourceTemplate" rows="3" placeholder="• Nguồn bài viết: {platform} {author} {source}&#10;• Link tham khảo: {link}&#10;• Github: [paste link]&#10;• Download: [paste link]" style="background: #fff; color: #1a1a2e; border: 1px solid var(--border);"></textarea>
+            <div class="field-hint">{author} = tên tác giả, {platform} = FB/X/..., {source} = nhóm/page, {link} = URL gốc</div>
           </div>
           <div class="field">
             <label class="checkbox-label">
