@@ -313,7 +313,9 @@
 .fbs-result {
   white-space: normal;
   word-wrap: break-word;
-  max-width: 65ch;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 /* Title line — ALL CAPS heading from AI output */

@@ -15,6 +15,9 @@ const SITE = location.hostname.includes("facebook")
           ? "reddit"
           : "other";
 
+const IS_MOBILE_WEB = location.hostname === "m.facebook.com" ||
+                      location.hostname === "mobile.facebook.com";
+
 const SEE_MORE_KEYWORDS = {
   facebook: [
     "xem thêm",
@@ -75,6 +78,12 @@ let hiddenClutterCount = 0;
 const SEE_MORE = SEE_MORE_KEYWORDS[SITE] || SEE_MORE_KEYWORDS.other;
 
 const fbAllPostInjected = new WeakSet();
+
+// Cache for performance optimization
+const _permalinkCache = new Map(); // key: container element, value: { url, timestamp }
+const _containerCache = new WeakMap(); // element → container
+const _sharedPostCache = new WeakMap(); // container → sharedArticle
+const CACHE_TTL = 60000; // 1 minute
 
 
 
@@ -192,29 +201,60 @@ function isInNonPostArea(el) {
 
 function _findSharedPostArticle(postContainer) {
   if (!postContainer) return null;
+
+  // Method 1: Look for nested article with own header
   const nestedArticles = postContainer.querySelectorAll('[role="article"]');
   for (const nested of nestedArticles) {
     if (nested === postContainer) continue;
-    // Phải là nested article trực tiếp (không phải comment hay reply sâu hơn)
-    const parentArticle = nested.parentElement?.closest('[role="article"]');
+
+    // Must have parent article
+    const parentArticle = nested.closest('[role="article"]');
     if (parentArticle && parentArticle !== postContainer) continue;
-    // Bỏ qua comment (dùng _fbIsCommentArticle nếu có, nếu không có thì check form)
+
+    // Skip comments
     if (nested.closest("form")) continue;
+
+    // Skip list items (reactions, comments list)
     let el = nested.parentElement;
     let isInList = false;
     for (let i = 0; i < 10 && el && el !== postContainer; i++) {
       const role = (el.getAttribute("role") || "").toLowerCase();
-      if (role === "list" || role === "listitem" || el.tagName === "UL") { isInList = true; break; }
+      if (role === "list" || role === "listitem" || el.tagName === "UL") {
+        isInList = true;
+        break;
+      }
       el = el.parentElement;
     }
     if (isInList) continue;
-    // Nested article phải có header riêng (h2/h3/h4 with a link) — mới coi là shared post
+
+    // Must have own header with link
     const headers = nested.querySelectorAll("h2, h3, h4");
     for (const h of headers) {
       if (h.closest('[role="article"]') !== nested) continue;
       if (h.querySelector("a[href]")) return nested;
     }
   }
+
+  // Method 2: Look for "shared a post" text
+  const allText = postContainer.innerText || postContainer.textContent || "";
+  const sharedPatterns = [
+    "shared a post", "chia sẻ bài viết", "đã chia sẻ",
+    "shared a memory", "chia sẻ kỷ niệm",
+    "shared a video", "chia sẻ video",
+    "shared a reel", "chia sẻ reel"
+  ];
+  const hasSharedText = sharedPatterns.some(p =>
+    allText.toLowerCase().includes(p.toLowerCase())
+  );
+
+  if (hasSharedText) {
+    // Find the nested article after "shared" text
+    const nestedArticles = postContainer.querySelectorAll('[role="article"]');
+    if (nestedArticles.length > 1) {
+      return nestedArticles[1]; // Second article is usually the shared content
+    }
+  }
+
   return null;
 }
 
@@ -251,8 +291,83 @@ function _resolveFbRedirect(rawUrl) {
   return rawUrl;
 }
 
+// Helper function: Extract post ID from container using 5 methods
+function _extractPostIdFromContainer(container) {
+  if (!container) return null;
+
+  // Method 1: data-ft (legacy)
+  const dataFtEl = container.querySelector("[data-ft]");
+  if (dataFtEl) {
+    try {
+      const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
+      if (ft.top_level_post_id) return ft.top_level_post_id;
+      if (ft.mf_story_key) return ft.mf_story_key;
+    } catch (_) {}
+  }
+
+  // Method 2: aria-posinset (post position in feed)
+  const ariaPosinset = container.getAttribute("aria-posinset");
+  if (ariaPosinset) {
+    const links = container.querySelectorAll("a[href]");
+    for (const link of links) {
+      const href = link.href || "";
+      if (href.includes(ariaPosinset)) {
+        const match = href.match(/(\d{10,})/);
+        if (match) return match[1];
+      }
+    }
+  }
+
+  // Method 3: data-testid attributes
+  const testIdEl = container.querySelector("[data-testid*='post']");
+  if (testIdEl) {
+    const testId = testIdEl.getAttribute("data-testid") || "";
+    const match = testId.match(/(\d{10,})/);
+    if (match) return match[1];
+  }
+
+  // Method 4: Scan all data-* attributes
+  const allDataAttrs = [];
+  for (const attr of container.attributes) {
+    if (attr.name.startsWith("data-")) {
+      allDataAttrs.push(attr.value);
+    }
+  }
+  const dataStr = allDataAttrs.join(" ");
+  const dataMatch = dataStr.match(/(\d{15,})/); // Facebook post IDs are 15+ digits
+  if (dataMatch) return dataMatch[1];
+
+  // Method 5: Look for hidden inputs with post ID
+  const hiddenInputs = container.querySelectorAll("input[type='hidden']");
+  for (const input of hiddenInputs) {
+    const val = input.value || "";
+    const match = val.match(/(\d{15,})/);
+    if (match) return match[1];
+  }
+
+  // Method 6: aria attributes and id
+  const idSources = [
+    container.getAttribute("aria-describedby"),
+    container.getAttribute("aria-labelledby"),
+    container.id,
+    container.getAttribute("data-story-id"),
+    container.getAttribute("data-post-id"),
+  ].filter(Boolean).join(" ");
+  const idMatch = idSources.match(/(\d{10,})/);
+  if (idMatch) return idMatch[1];
+
+  return null;
+}
+
 function _findPermalinkInContainer(container) {
   if (!container) return "";
+
+  // Check cache first
+  const cached = _permalinkCache.get(container);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.url;
+  }
+
   const allLinks = container.querySelectorAll("a[href]");
   const candidates = [];
 
@@ -263,8 +378,28 @@ function _findPermalinkInContainer(container) {
     // Resolve l.facebook.com redirects
     href = _resolveFbRedirect(href);
 
+    // Add reel/video/story permalink detection
+    if (href.includes("/reel/") || href.includes("/videos/")) {
+      const reelMatch = href.match(/\/reel\/(\d+|[a-zA-Z0-9_-]+)/);
+      const videoMatch = href.match(/\/videos\/(\d+)/);
+      if (reelMatch || videoMatch) {
+        const result = _cleanFbUrl(href);
+        _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+        return result;
+      }
+    }
+
+    if (href.includes("/stories/")) {
+      const storyMatch = href.match(/\/stories\/(\d+|[a-zA-Z0-9_-]+)/);
+      if (storyMatch) {
+        const result = _cleanFbUrl(href);
+        _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+        return result;
+      }
+    }
+
     // Bỏ qua link rõ ràng không phải permalink
-    if (href.includes("/photo") || href.includes("/reel/") || href.includes("/hashtag/") ||
+    if (href.includes("/photo") || href.includes("/hashtag/") ||
         href.includes("/events/") || href.includes("/marketplace/") ||
         href.includes("facebook.com/policies") || href.includes("facebook.com/help") ||
         href.includes("/groups/") && !href.includes("/posts/") && !href.includes("pfbid") && !href.includes("/permalink") ||
@@ -281,6 +416,14 @@ function _findPermalinkInContainer(container) {
     if (isPermalink) {
       candidates.push({ href, priority: 1, reason: "permalink_pattern" });
       continue;
+    }
+
+    // Mobile web specific patterns
+    if (IS_MOBILE_WEB) {
+      if (href.includes("story.php") && (href.includes("story_fbid") || href.includes("id="))) {
+        candidates.push({ href, priority: 1, reason: "mobile_story" });
+        continue;
+      }
     }
 
     // Link có text ngắn giống timestamp
@@ -311,7 +454,9 @@ function _findPermalinkInContainer(container) {
 
   if (candidates.length > 0) {
     candidates.sort((a, b) => a.priority - b.priority);
-    return _cleanFbUrl(candidates[0].href);
+    const result = _cleanFbUrl(candidates[0].href);
+    _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+    return result;
   }
 
   // === FALLBACK: Bài trong Group — tìm group permalink ===
@@ -328,49 +473,16 @@ function _findPermalinkInContainer(container) {
   }
 
   if (groupUrl) {
-    // Tìm post ID từ data-ft (Facebook legacy data attribute)
-    const dataFtEl = container.querySelector("[data-ft]");
-    if (dataFtEl) {
-      try {
-        const ft = JSON.parse(dataFtEl.getAttribute("data-ft"));
-        if (ft.top_level_post_id) {
-          return groupUrl + "/posts/" + ft.top_level_post_id;
-        }
-        if (ft.mf_story_key) {
-          return groupUrl + "/posts/" + ft.mf_story_key;
-        }
-      } catch (_) {}
-    }
-
-    // Tìm post ID từ aria attributes, id, hoặc data-*
-    const idSources = [
-      container.getAttribute("aria-describedby"),
-      container.getAttribute("aria-labelledby"),
-      container.id,
-      container.getAttribute("data-story-id"),
-      container.getAttribute("data-post-id"),
-    ].filter(Boolean).join(" ");
-    const idMatch = idSources.match(/(\d{10,})/);
-    if (idMatch) {
-      return groupUrl + "/posts/" + idMatch[1];
-    }
-
-    // Tìm hidden inputs có post ID
-    const hiddenInputs = container.querySelectorAll(
-      "input[type='hidden'], [data-story-id], [data-post-id], [data-testid*='post']"
-    );
-    for (const el of hiddenInputs) {
-      const val = el.value ||
-        el.getAttribute("data-story-id") ||
-        el.getAttribute("data-post-id") ||
-        el.getAttribute("data-testid") || "";
-      const vMatch = val.match(/(\d{10,})/);
-      if (vMatch) {
-        return groupUrl + "/posts/" + vMatch[1];
-      }
+    // Enhanced post ID extraction with 5 methods
+    const postId = _extractPostIdFromContainer(container);
+    if (postId) {
+      const result = groupUrl + "/posts/" + postId;
+      _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+      return result;
     }
 
     // Fallback: chỉ trả về group URL
+    _permalinkCache.set(container, { url: groupUrl, timestamp: Date.now() });
     return groupUrl;
   }
 
@@ -382,16 +494,15 @@ function _findPermalinkInContainer(container) {
     const pageMatch = href.match(/facebook\.com\/pages\/[^\/]+\/(\d+)/);
     if (pageMatch) {
       // Thử tìm post ID trong container
-      const idSources = [
-        container.getAttribute("aria-describedby") || "",
-        container.getAttribute("aria-labelledby") || "",
-        container.id || "",
-      ].join(" ");
-      const postIdMatch = idSources.match(/(\d{10,})/);
-      if (postIdMatch) {
-        return "https://www.facebook.com/" + pageMatch[1] + "/posts/" + postIdMatch[1];
+      const postId = _extractPostIdFromContainer(container);
+      if (postId) {
+        const result = "https://www.facebook.com/" + pageMatch[1] + "/posts/" + postId;
+        _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+        return result;
       }
-      return "https://www.facebook.com/pages/" + pageMatch[0].split("/pages/")[1];
+      const result = "https://www.facebook.com/pages/" + pageMatch[0].split("/pages/")[1];
+      _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+      return result;
     }
   }
 
@@ -399,7 +510,9 @@ function _findPermalinkInContainer(container) {
   for (const link of allLinks) {
     const href = link.href || "";
     if (href.includes("facebook.com") && (href.includes("/user/") || href.includes("/profile.php"))) {
-      return _cleanFbUrl(href);
+      const result = _cleanFbUrl(href);
+      _permalinkCache.set(container, { url: result, timestamp: Date.now() });
+      return result;
     }
   }
 
@@ -499,7 +612,7 @@ function extractPostSource(element) {
             const link = links[i];
             const href = link.href || "";
             const name = (link.innerText || link.textContent || "").trim();
-            if (name.length < 3 || name.length > 100) continue;
+            if (!_validateSourceName(name)) continue;
             // Chỉ lấy nếu link trỏ đến group hoặc page
             if (href.includes("/groups/") || href.match(/facebook\.com\/[^/?]+\/?$/)) {
               return name;
@@ -513,7 +626,7 @@ function extractPostSource(element) {
       for (const link of groupLinks) {
         // Bỏ qua link rỗng / chỉ có ảnh
         const name = (link.innerText || link.textContent || "").trim();
-        if (name.length >= 3 && name.length < 100 && !/^\d+$/.test(name)) {
+        if (_validateSourceName(name)) {
           return name;
         }
       }
@@ -527,6 +640,31 @@ function extractPostSource(element) {
   }
 
   return "";
+}
+
+// Helper function: Validate source/group name
+function _validateSourceName(name) {
+  if (!name || name.length < 3 || name.length > 100) return false;
+
+  // Reject hex strings (anti-scraping)
+  if (/[a-f0-9]{10,}/i.test(name)) return false;
+
+  // Reject long number sequences
+  if (/\d{8,}/.test(name)) return false;
+
+  // Reject pure numbers
+  if (/^\d+$/.test(name)) return false;
+
+  // Reject common noise patterns
+  const noise = [
+    "sponsored", "được tài trợ", "quảng cáo",
+    "suggested for you", "gợi ý cho bạn",
+    "recommended", "đề xuất"
+  ];
+  const lower = name.toLowerCase();
+  if (noise.some(n => lower.includes(n))) return false;
+
+  return true;
 }
 
 function extractPostAuthor(element) {
@@ -545,15 +683,25 @@ function extractPostAuthor(element) {
   }
 
   if (SITE === "facebook") {
+    // Mobile web specific extraction
+    if (IS_MOBILE_WEB) {
+      const authorH3 = postContainer.querySelector("h3 a");
+      if (authorH3) {
+        const name = (authorH3.innerText || authorH3.textContent || "").trim();
+        if (_validateAuthorName(name)) return name;
+      }
+    }
+
     // 1. Try to find original author from a shared/embedded post inside this article.
     //    This handles: personal share, group share, page share — all cases where
     //    someone shares another person's post. The outer header = sharer, inner = author.
     const originalAuthor = _fbFindOriginalAuthor(postContainer);
-    if (originalAuthor) return originalAuthor;
+    if (originalAuthor && _validateAuthorName(originalAuthor)) return originalAuthor;
 
     // 2. Not a shared post → author is in this article's own header.
     //    This handles: personal post, page post, group post (original, not shared).
-    return _fbExtractAuthorFromContainer(postContainer);
+    const author = _fbExtractAuthorFromContainer(postContainer);
+    if (_validateAuthorName(author)) return author;
   }
 
   // X/Threads
@@ -575,6 +723,31 @@ function extractPostAuthor(element) {
   if (redditAuthor) return (redditAuthor.textContent || "").trim();
 
   return "";
+}
+
+// Helper function: Validate author name
+function _validateAuthorName(name) {
+  if (!name || name.length < 2 || name.length > 100) return false;
+
+  // Reject hex strings (anti-scraping)
+  if (/[a-f0-9]{10,}/i.test(name)) return false;
+
+  // Reject long number sequences
+  if (/\d{8,}/.test(name)) return false;
+
+  // Reject too many words (likely not a name)
+  if (name.split(/\s+/).length > 10) return false;
+
+  // Reject common noise patterns
+  const noise = [
+    "sponsored", "được tài trợ", "quảng cáo",
+    "suggested for you", "gợi ý cho bạn",
+    "recommended", "đề xuất"
+  ];
+  const lower = name.toLowerCase();
+  if (noise.some(n => lower.includes(n))) return false;
+
+  return true;
 }
 
 function extractPostImages(element) {
